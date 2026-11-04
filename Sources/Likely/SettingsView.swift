@@ -19,9 +19,50 @@ struct SettingsView: View {
             AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }
             PromptSettings().tabItem { Label("Prompt", systemImage: "text.alignleft") }
             PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }
+            if MenuBarGlyph.isDebugEnabled {
+                DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }
+            }
         }
         .padding(20)
         .frame(width: 680, height: 520)
+    }
+}
+
+// MARK: - Debug (dev builds only)
+
+/// Menu bar glyph candidates, switchable live. Only in `./build.sh` builds (LIKELY_DEV).
+private struct DebugSettings: View {
+    @State private var selection = MenuBarGlyph.debugSelection ?? ""
+
+    var body: some View {
+        Form {
+            Section("Menu bar glyph") {
+                List(selection: $selection) {
+                    row(id: "", title: "Default — Resources/MenuBarGlyph.pdf")
+                    ForEach(MenuBarGlyph.available) { option in row(id: option.id, title: option.title) }
+                }
+                .frame(minHeight: 320)
+                Text("Also in the menu bar menu: Debug › Next Glyph / Previous Glyph.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onChange(of: selection) { _, id in
+            if (MenuBarGlyph.debugSelection ?? "") != id { MenuBarGlyph.debugSelection = id.isEmpty ? nil : id }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: MenuBarGlyph.didChange)) { _ in
+            selection = MenuBarGlyph.debugSelection ?? ""
+        }
+    }
+
+    private func row(id: String, title: String) -> some View {
+        HStack(spacing: 10) {
+            if let image = MenuBarGlyph.baseImage(id: id.isEmpty ? nil : id) {
+                Image(nsImage: image).renderingMode(.template).resizable().frame(width: 18, height: 18)
+            }
+            Text(title)
+        }
+        .tag(id)
     }
 }
 

@@ -85,16 +85,8 @@ final class AgentDetector: ObservableObject {
         guard !missing.isEmpty else { return found }
         // One shell for everything; prints "id<TAB>path" per hit.
         let script = missing.map { "p=$(command -v \($0.1) 2>/dev/null) && printf '%s\\t%s\\n' \($0.0) \"$p\"" }.joined(separator: "; ")
-        let shell = Process()
-        shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        shell.arguments = ["-lic", script]
-        let out = Pipe()
-        shell.standardOutput = out
-        shell.standardError = FileHandle.nullDevice
-        shell.standardInput = FileHandle.nullDevice
-        guard (try? shell.run()) != nil else { return found }
-        shell.waitUntilExit()
-        let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        // Runs on a background queue (see `scan`), with a timeout for slow or broken shell setups.
+        guard let output = LoginShell.run(script) else { return found }
         for line in output.split(whereSeparator: \.isNewline) {
             let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
             guard parts.count == 2, parts[1].hasPrefix("/"), fm.isExecutableFile(atPath: parts[1]), found[parts[0]] == nil else { continue }

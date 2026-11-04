@@ -68,6 +68,10 @@ extension String {
 /// Runs OpenAI's Codex CLI: `codex exec --json` in its read-only sandbox (commands run, writes are
 /// blocked), with the screenshot attached via `-i`. Codex can't take messages mid-turn, so feedback
 /// stops the current turn and continues the same conversation with `codex exec resume <thread>`.
+///
+/// Unlike the other runners it isn't wrapped in AgentSandbox: Codex runs every command under its own
+/// Seatbelt policy (deny-by-default, no Apple Events, WindowServer or AX services), and macOS doesn't
+/// allow a sandboxed process to apply another sandbox, so an outer one would break Codex's.
 final class CodexRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?

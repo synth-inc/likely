@@ -122,11 +122,11 @@ final class HermesRunner: AgentRunner {
         turnEnded = false
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: Self.baseArguments + arguments,
+                                                             profile: Self.sandboxProfile)
+        process.executableURL = launcher
+        process.arguments = launchArguments
         process.currentDirectoryURL = workDir
-        let parameters: [String] = Self.sandboxParameters.flatMap { ["-D", "\($0.key)=\($0.value)"] }
-        let hermes: [String] = [executable] + Self.baseArguments + arguments
-        process.arguments = ["-p", Self.sandboxProfile] + parameters + hermes
         process.environment = Self.environment(executable: executable, workDir: workDir)
 
         let stdout = Pipe()
@@ -272,38 +272,23 @@ final class HermesRunner: AgentRunner {
 // MARK: - Sandbox and profile
 
 extension HermesRunner {
-    /// Reads and processes are allowed; writes only to the profile's own state, the per-user temp and
-    /// cache folders, and the lock/lease files Hermes takes in its shared install. Writes to the install
-    /// itself are denied, so nothing can plant code the user's own (unsandboxed) Hermes would run.
-    static let sandboxProfile = """
-    (version 1)
-    (allow default)
-    (deny process-exec (literal "/bin/launchctl") (literal "/usr/bin/osascript") (literal "/usr/bin/open"))
-    (deny file-write*)
-    (allow file-write*
-        (subpath (param "PROFILE_DIR"))
-        (regex (string-append "^" (param "HERMES_ROOT") "/installs/[^/]+/(.*\\\\.lock|.*/\\\\.leases(/.*)?)$"))
-        (subpath (param "USER_FOLDER"))
-        (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper") (literal "/dev/ptmx")
-        (regex #"^/dev/(fd/|ttys)"))
-    """
-
-    private static var sandboxParameters: [String: String] {
+    /// Reads are allowed; writes only to the profile's own state, the per-user temp and cache folders,
+    /// and the lock/lease files Hermes takes in its shared install. Writes to the install itself are
+    /// denied, so nothing can plant code the user's own (unsandboxed) Hermes would run. Nothing can be
+    /// executed from those writable places, network is HTTPS/localhost only, and Apple Events,
+    /// Accessibility and Screen Recording are cut off (see AgentSandbox).
+    ///
+    /// The stub `launchctl` (see `prepare`) only steers Hermes into starting its gateway as a child;
+    /// it isn't the safety boundary. The real /bin/launchctl, open and osascript are denied by path,
+    /// a copy of them can't be run from anywhere writable, and Apple Events are denied outright.
+    static var sandboxProfile: String {
         let home = FileManager.default.homeDirectoryForCurrentUser
         // /private/var/folders/…/T → its parent holds T (temp) and C (caches).
-        let userFolder = (realPath(FileManager.default.temporaryDirectory.path) as NSString).deletingLastPathComponent
-        return [
-            "PROFILE_DIR": realPath(profileDir.path),
-            "HERMES_ROOT": realPath(home.appendingPathComponent(".hermes").path),
-            "USER_FOLDER": userFolder,
-        ]
-    }
-
-    /// Seatbelt matches real paths (/private/var, not /var); Foundation's symlink resolution strips /private.
-    private static func realPath(_ path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return path }
-        defer { free(resolved) }
-        return String(cString: resolved)
+        let userFolder = (AgentSandbox.realPath(FileManager.default.temporaryDirectory.path) as NSString).deletingLastPathComponent
+        let root = NSRegularExpression.escapedPattern(for: AgentSandbox.realPath(home.appendingPathComponent(".hermes").path))
+        return AgentSandbox.confinedProfile(
+            writable: [AgentSandbox.realPath(profileDir.path), userFolder],
+            writableRegexes: ["^" + root + #"/installs/[^/]+/(.*\.lock|.*/\.leases(/.*)?)$"#])
     }
 
     /// The gateway daemon keeps the environment of the client that started it.
@@ -355,6 +340,14 @@ extension HermesRunner {
             return "Your Hermes gateway is serving the \(profileName) profile; restart it with: hermes gateway restart"
         }
         return nil
+    }
+
+    /// At quit: stop the sandboxed gateway Likely started for the `likely` profile (an unsandboxed one
+    /// belongs to the user and is left alone). SIGTERM, so it shuts down like `hermes gateway stop`.
+    static func stopGateway() {
+        guard let pid = gatewayPID(profileDir), pid > 1, kill(pid, 0) == 0, isSandboxed(pid) else { return }
+        kill(pid, SIGTERM)
+        Log.write("hermes", "stopped gateway pid=\(pid)")
     }
 
     private static func gatewayPID(_ home: URL) -> pid_t? {

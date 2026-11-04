@@ -24,7 +24,7 @@ enum License {
         let buttonTitle: String
     }
 
-    static let sourceURL = URL(string: "https://github.com/timlenardo/likely")!           // TODO: publish repo
+    static let sourceURL = URL(string: "https://github.com/synth-inc/likely")!
 
     static let plans: [Plan] = [
         Plan(kind: .subscription,
@@ -35,8 +35,8 @@ enum License {
              buttonTitle: "Subscribe"),
         Plan(kind: .oneTime,
              headline: "No updates please",
-             price: "$10", priceUnit: "once",
-             detail: "Pay once and keep this version forever.",
+             price: "$29", priceUnit: "once",
+             detail: "One payment, and you can use the app, forever.",
              serverPlan: .lifetime,
              buttonTitle: "Buy Once"),
         Plan(kind: .free,
@@ -55,8 +55,24 @@ enum License {
         #endif
     }
 
+    /// Dev builds only (`./build.sh` compiles with LIKELY_DEV; release builds never do): pretend to hold
+    /// a license without the server, for testing the paid state.
+    /// `defaults write com.timl.likely devLicenseOverride -string subscription` (or `one_time`);
+    /// `defaults delete com.timl.likely devLicenseOverride` to turn it off.
+    static var devOverride: Kind? {
+        #if LIKELY_DEV
+        switch UserDefaults.standard.string(forKey: "devLicenseOverride") {
+        case "subscription": return .subscription
+        case "one_time": return .oneTime
+        default: return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
     /// Readable from any thread (AppDelegate at launch, onboarding). `LicenseStore` keeps the cache fresh.
-    static var isActive: Bool { isFreeBuild || Cached.load()?.trusted() == true }
+    static var isActive: Bool { isFreeBuild || devOverride != nil || Cached.load()?.trusted() == true }
 
     /// How long a cached active subscription keeps working without reaching the server, and how long
     /// past `currentPeriodEnd` we wait for a renewal to show up before turning it off.
@@ -119,14 +135,17 @@ final class LicenseStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "licenseKind")
     }
 
-    var isActive: Bool { License.isFreeBuild || cached?.trusted() == true }
+    var isActive: Bool { License.isFreeBuild || License.devOverride != nil || cached?.trusted() == true }
 
     /// Plan the user owns, for "Active" badges.
-    var activeKind: License.Kind? { isActive ? cached?.kind : nil }
+    var activeKind: License.Kind? { License.devOverride ?? (isActive ? cached?.kind : nil) }
 
     /// One line for Settings.
     var statusText: String {
         if License.isFreeBuild { return "Free build" }
+        if let kind = License.devOverride {
+            return "Developer license override (\(kind == .oneTime ? "one-time" : "subscription"))"
+        }
         guard isActive, let entitlement = cached?.entitlement else { return "Not active" }
         let end = entitlement.periodEnd.map { $0.formatted(date: .abbreviated, time: .omitted) }
         switch entitlement.kind {
@@ -140,7 +159,10 @@ final class LicenseStore: ObservableObject {
         }
     }
 
-    var isSubscriber: Bool { isActive && cached?.entitlement.kind == "subscription" }
+    var isSubscriber: Bool {
+        if let kind = License.devOverride { return kind == .subscription }
+        return isActive && cached?.entitlement.kind == "subscription"
+    }
 
     /// Asks the server for the current entitlement. On failure the cache is kept (offline grace) and
     /// `lastError` explains why. Returns whether Likely is licensed afterwards.

@@ -67,16 +67,63 @@ final class LikelyFolder {
     private var added: [URL] = []
     private var sources = Set<String>()
     private var statusURL: URL?
+    /// When the picker these copies were made for closed. Copies outlive the picker, because the app
+    /// that opened it often reads the file afterwards (browsers upload it, Mail attaches it); they're
+    /// removed when the next picker opens, or once they're `keepAfterClose` old.
+    private(set) var releasedAt: Date?
+
+    /// How long copies stay after their picker closed.
+    static let keepAfterClose: TimeInterval = 10 * 60
 
     var count: Int { added.count }
 
+    private struct Manifest: Codable {
+        var paths: [String]
+        var releasedAt: Date?
+    }
+
     init(supportDirectory: URL) {
         manifestURL = supportDirectory.appendingPathComponent("likely-manifest.json")
-        // Clean up after a previous run that didn't exit cleanly.
-        if let data = try? Data(contentsOf: manifestURL), let paths = try? JSONDecoder().decode([String].self, from: data) {
-            added = paths.map { URL(fileURLWithPath: $0) }
+        if let data = try? Data(contentsOf: manifestURL) {
+            if let manifest = try? JSONDecoder().decode(Manifest.self, from: data) {
+                added = manifest.paths.map { URL(fileURLWithPath: $0) }
+                releasedAt = manifest.releasedAt
+            } else if let paths = try? JSONDecoder().decode([String].self, from: data) {
+                added = paths.map { URL(fileURLWithPath: $0) }   // older format
+            }
         }
+        // Copies from a picker that closed recently stay for the rest of their time (see
+        // `remainingKeepTime`); anything else (a crash with a picker open, old copies) goes now.
+        if remainingKeepTime == nil {
+            clear()
+        } else {
+            removeStatusFiles()
+            saveManifest()
+        }
+    }
+
+    /// The picker closed: drop the status file, keep the copies for `keepAfterClose`.
+    func release() {
+        removeStatusFiles()
+        statusURL = nil
+        if !added.isEmpty { releasedAt = Date() }
+        saveManifest()
+    }
+
+    /// Seconds until released copies should go, or nil if there's nothing to keep (none, not
+    /// released, or already old enough).
+    var remainingKeepTime: TimeInterval? {
+        guard !added.isEmpty, let releasedAt else { return nil }
+        let remaining = Self.keepAfterClose - Date().timeIntervalSince(releasedAt)
+        return remaining > 0 ? remaining : nil
+    }
+
+    /// Clears released copies that are old enough. Returns true if it cleared.
+    @discardableResult
+    func clearIfExpired() -> Bool {
+        guard releasedAt != nil, remainingKeepTime == nil else { return false }
         clear()
+        return true
     }
 
     static func create() throws {
@@ -114,14 +161,29 @@ final class LikelyFolder {
             Log.write("likely", "skip Likely's own file \(source.path)")
             return false
         }
+        // Credentials, keychains, dotfiles, system files: never staged where any picker can grab them.
+        // Checked on the real path too (Foundation's resolution drops /private, realpath keeps it).
+        let home = fm.homeDirectoryForCurrentUser.path
+        if let reason = SensitivePaths.refusalReason(for: source.path, home: home)
+            ?? SensitivePaths.refusalReason(for: AgentSandbox.realPath(source.path), home: home) {
+            Log.write("likely", "skip sensitive \(source.path) (\(reason))")
+            return false
+        }
 
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: source.path, isDirectory: &isDirectory) else {
+        // Only regular files and packages (no folders, devices, sockets, FIFOs).
+        var info = stat()
+        guard lstat(source.path, &info) == 0 else {
             Log.write("likely", "skip missing \(source.path)")
             return false
         }
+        let isRegular = (info.st_mode & S_IFMT) == S_IFREG
+        let isDirectory = ObjCBool((info.st_mode & S_IFMT) == S_IFDIR)
         if isDirectory.boolValue && !NSWorkspace.shared.isFilePackage(atPath: source.path) {
             Log.write("likely", "skip folder \(source.path)")
+            return false
+        }
+        guard isRegular || isDirectory.boolValue else {
+            Log.write("likely", "skip non-regular file \(source.path)")
             return false
         }
 
@@ -153,17 +215,22 @@ final class LikelyFolder {
 
     func clear() {
         for url in added { try? fm.removeItem(at: url) }
+        removeStatusFiles()
+        added.removeAll()
+        sources.removeAll()
+        statusURL = nil
+        releasedAt = nil
+        saveManifest()
+    }
+
+    /// The current status file, plus strays from a crash ("…" names are only ever Likely's status files).
+    private func removeStatusFiles() {
         if let statusURL { try? fm.removeItem(at: statusURL) }
-        // Stray status files from a crash.
         if let names = try? fm.contentsOfDirectory(atPath: Self.url.path) {
             for name in names where name.hasPrefix("…") {
                 try? fm.removeItem(at: Self.url.appendingPathComponent(name))
             }
         }
-        added.removeAll()
-        sources.removeAll()
-        statusURL = nil
-        saveManifest()
     }
 
     /// Copies keep their modification date, but macOS stamps "Date Added" with now. Put the original
@@ -193,7 +260,7 @@ final class LikelyFolder {
     }
 
     private func saveManifest() {
-        if let data = try? JSONEncoder().encode(added.map(\.path)) {
+        if let data = try? JSONEncoder().encode(Manifest(paths: added.map(\.path), releasedAt: releasedAt)) {
             try? data.write(to: manifestURL)
         }
     }

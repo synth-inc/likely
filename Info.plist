@@ -8,6 +8,8 @@
     <string>Likely</string>
     <key>CFBundleDisplayName</key>
     <string>Likely</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>Likely</string>
     <key>CFBundlePackageType</key>

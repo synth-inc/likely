@@ -4,12 +4,17 @@ import SwiftUI
 
 /// What the HUD shows; the coordinator updates it as Claude works.
 final class HUDModel: ObservableObject {
+    enum Mode { case normal, unpaid }
+
+    @Published var mode = Mode.normal
     @Published var status = "Looking at the context"
     @Published var working = true
     @Published var fileCount = 0
     @Published var draft = ""
     var onSend: ((String) -> Void)?
     var onRejectAll: (() -> Void)?
+    /// "Get Likely" in the unpaid state.
+    var onGetLikely: (() -> Void)?
 }
 
 /// A slim floating bar glued above (or below) the open picker: live status from Claude plus a text
@@ -23,7 +28,7 @@ final class PickerHUD {
     private var fallbackFrame: CGRect?
     private var sidebar: AXUIElement?
     private var sidebarLookups = 0
-    private static let height: CGFloat = 86
+    private static let height: CGFloat = 44
     private static let gap: CGFloat = 8
 
     init() {
@@ -45,6 +50,7 @@ final class PickerHUD {
         self.fallbackFrame = fallbackFrame
         sidebar = nil
         sidebarLookups = 0
+        model.mode = .normal
         model.status = "Looking at the context"
         model.working = true
         model.fileCount = 0
@@ -121,57 +127,121 @@ final class HUDPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// One line, like the landing page's mockup: Likely's mark on the left, an empty field, a round send
+/// button on the right. Progress stays out of the field: the mark pulses and a short, quiet status
+/// sits before the send button ("3 found · Not these" once there are suggestions).
 private struct HUDView: View {
     @ObservedObject var model: HUDModel
     var returnFocus: () -> Void
 
+    private var trimmedDraft: String { model.draft.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                if model.working {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: model.fileCount > 0 ? "checkmark.circle.fill" : "questionmark.circle")
-                        .foregroundStyle(model.fileCount > 0 ? Color.green : Color.secondary)
-                }
-                Text(model.status)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.primary)
+        HStack(spacing: 10) {
+            LikelyMark(working: model.working && model.mode == .normal)
+            switch model.mode {
+            case .unpaid:
+                Text("Likely isn't active")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
-                if model.fileCount > 0 {
-                    Button("Not these") {
-                        model.onRejectAll?()
-                        returnFocus()
-                    }
-                    .controlSize(.small)
+                Button("Get Likely") {
+                    returnFocus()
+                    model.onGetLikely?()
                 }
-            }
-            HStack(spacing: 6) {
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            case .normal:
                 TextField("Tell Likely what you're looking for…", text: $model.draft)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
                     .onSubmit(send)
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill").font(.title2)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(model.draft.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary : Color.accentColor)
-                .disabled(model.draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                trailingStatus
+                SendButton(enabled: !trimmedDraft.isEmpty, action: send)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 12)))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.12)))
+        .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 10)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.12)))
+    }
+
+    @ViewBuilder private var trailingStatus: some View {
+        if model.fileCount > 0 && !model.working {
+            HStack(spacing: 4) {
+                Text("\(model.fileCount) found")
+                Text("·")
+                Button("Not these") {
+                    model.onRejectAll?()
+                    returnFocus()
+                }
+                .buttonStyle(.plain)
+                .underline()
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize()
+        } else if !model.status.isEmpty {
+            Text(model.status)
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 220, alignment: .trailing)
+                .help(model.status)
+        }
     }
 
     private func send() {
-        let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = trimmedDraft
         guard !text.isEmpty else { return }
         model.draft = ""
         model.onSend?(text)
         returnFocus()
+    }
+}
+
+/// Likely's mark (Resources/SearchMark.png, @2x), pulsing while the agent works.
+private struct LikelyMark: View {
+    let working: Bool
+    @State private var dim = false
+
+    static let image: NSImage? = Bundle.main.image(forResource: "SearchMark")   // SearchMark.png + @2x
+
+    var body: some View {
+        Group {
+            if let image = Self.image {
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "doc.text.magnifyingglass").resizable().aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 20, height: 20)
+        .opacity(working && dim ? 0.35 : 1)
+        .animation(working ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default, value: dim)
+        .onAppear { dim = working }
+        .onChange(of: working) { _, now in dim = now }
+    }
+}
+
+/// Round send button: gray while the field is empty, accent once there's text.
+private struct SendButton: View {
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(enabled ? Color.accentColor : Color.secondary.opacity(0.35)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .animation(.easeOut(duration: 0.15), value: enabled)
     }
 }
 
