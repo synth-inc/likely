@@ -22,6 +22,11 @@ final class Coordinator {
 
     var onStateChange: ((State, String) -> Void)?
     var paused = false
+    /// Whether Likely may search. Without a license, pickers still get the bar, but in its unpaid state:
+    /// no agent, no copies, no jumping to the Likely folder.
+    var isLicensed: () -> Bool = { true }
+    /// "Get Likely" in the unpaid bar.
+    var onGetLikely: (() -> Void)?
     var verbose = false {
         didSet {
             axWatcher.verbose = verbose
@@ -38,6 +43,8 @@ final class Coordinator {
     private let folder: LikelyFolder
     private var active: Picker?
     private var closeTimer: Timer?
+    /// Removes the last picker's copies once they've been kept long enough (see LikelyFolder.release).
+    private var cleanupTimer: Timer?
     private var seenOnScreen = false
     private var missedPolls = 0
     private var foundCount = 0
@@ -65,9 +72,12 @@ final class Coordinator {
         bindRunner()
         hud.model.onSend = { [weak self] text in self?.sendFeedback(text) }
         hud.model.onRejectAll = { [weak self] in self?.sendFeedback(nil) }
+        hud.model.onGetLikely = { [weak self] in self?.onGetLikely?() }
+        if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         // No click-time snapshots at all unless the user opted into screenshots.
         snapshotter.isSuspended = { [weak self] in
             self?.paused == true || self?.active != nil || !Settings.autoSuggest || !CGPreflightScreenCaptureAccess()
+                || self?.isLicensed() != true
         }
     }
 
@@ -106,6 +116,23 @@ final class Coordinator {
         axWatcher.stop()
         windowWatcher.stop()
         snapshotter.stop()
+    }
+
+    /// At quit: copies from a picker that closed within `keepAfterClose` stay (the app may still be
+    /// reading them) and are removed at the next launch or picker; older ones go now.
+    func quit() {
+        stop()
+        cleanupTimer?.invalidate()
+        folder.clearIfExpired()
+        HermesRunner.stopGateway()
+    }
+
+    private func scheduleCleanup(after delay: TimeInterval) {
+        cleanupTimer?.invalidate()
+        cleanupTimer = Timer.scheduledTimer(withTimeInterval: delay + 1, repeats: false) { [weak self] _ in
+            guard let self, self.active == nil else { return }
+            if self.folder.clearIfExpired() { Log.write("likely", "removed the last picker's copies") }
+        }
     }
 
     // MARK: Detection
@@ -187,7 +214,22 @@ final class Coordinator {
         autoMode = Settings.autoSuggest && CGPreflightScreenCaptureAccess()
         Log.write("picker", "OPENED in \(picker.appName) via \(picker.source) frame=\(picker.frame.map { "\($0)" } ?? "?")")
 
+        // The previous picker's copies were kept for its app; a new picker replaces them.
+        cleanupTimer?.invalidate()
+        cleanupTimer = nil
         folder.clear()
+        closeTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.pollForClose() }
+
+        guard isLicensed() else {
+            // Unpaid: the bar explains and offers the license page; nothing is searched or copied.
+            Log.write("picker", "license inactive, showing the unpaid bar")
+            debugRun = nil
+            hud.show(attachedTo: picker.element, fallbackFrame: picker.frame)
+            hud.model.mode = .unpaid
+            onStateChange?(.idle, "Inactive · Get Likely")
+            return
+        }
+
         folder.setStatus(autoMode ? "Looking at the context" : "Type what you're looking for above the picker")
         let debugRun = DebugStore.shared.begin(appName: picker.appName, detectedVia: picker.source)
         self.debugRun = debugRun
@@ -197,11 +239,10 @@ final class Coordinator {
             PickerNavigator.selectLikelyInSidebar(of: window) { [weak self] in self?.generation == generation && self?.active != nil }
         }
         hud.show(attachedTo: picker.element, fallbackFrame: picker.frame)
-        closeTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.pollForClose() }
 
         guard autoMode else {
             // Input-first: nothing runs until the user describes the file in the bar.
-            hud.model.status = "What are you looking for?"
+            hud.model.status = ""   // the empty field and its placeholder say it
             hud.model.working = false
             onStateChange?(.idle, "Waiting for a description")
             debugRun.log("Waiting for a description (screenshots off), window title: \(picker.windowTitle ?? "-")")
@@ -241,10 +282,13 @@ final class Coordinator {
         hud.hide()
         if runner.isBusy { debugRun?.log("Picker closed, \(agentName) cancelled") }
         runner.cancel()
-        folder.clear()
+        // Keep the copies: the app that opened the picker often reads the file after it closes
+        // (browsers upload it, Mail attaches it). They go when the next picker opens or after a while.
+        folder.release()
+        if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         debugRun?.closedReason = reason
         Log.write("picker", "CLOSED in \(picker.appName) (\(reason))")
-        onStateChange?(.idle, "Watching for file pickers")
+        onStateChange?(.idle, isLicensed() ? "Watching for file pickers" : "Inactive · Get Likely")
     }
 
     /// AX destruction notifications aren't reliable (apps often reuse NSOpenPanel instead of destroying it),
@@ -359,7 +403,7 @@ final class Coordinator {
         debugRun?.log(message)
         hud.model.working = false
         hud.model.status = !outcome.success ? message
-            : foundCount == 0 ? "Nothing found yet. Tell Likely more."
+            : foundCount == 0 ? "Nothing found. Tell Likely more."
             : "\(foundCount) suggestion\(foundCount == 1 ? "" : "s") in \(LikelyFolder.url.lastPathComponent)"
         onStateChange?(.done, message)
     }
@@ -367,7 +411,7 @@ final class Coordinator {
     /// User feedback from the HUD. `nil` means "Not these" with no further detail.
     /// The current suggestions are removed and Claude is told not to repeat them.
     private func sendFeedback(_ text: String?) {
-        guard let picker = active else { return }
+        guard let picker = active, isLicensed() else { return }
         if !autoMode, lastPrompt == nil, let text {
             // First description in input-first mode: this starts the search.
             pendingFeedback = [text]
@@ -562,37 +606,81 @@ enum Settings {
 }
 
 /// Finds the `claude` binary. GUI apps don't inherit the shell's PATH, so check common install
-/// locations, then ask an interactive login shell (which loads nvm etc.).
+/// locations, then ask an interactive login shell (which loads nvm etc.) in the background.
 enum ClaudeLocator {
     private(set) static var path: String?
 
-    static func resolve() {
+    /// Cheap checks run right away; the login-shell lookup (slow, and a broken ~/.zshrc can hang it)
+    /// runs off the main thread with a timeout and calls `completion` on the main thread.
+    static func resolve(completion: (() -> Void)? = nil) {
         if let saved = UserDefaults.standard.string(forKey: "claudePath"), FileManager.default.isExecutableFile(atPath: saved) {
             path = saved
+            completion?()
             return
         }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates = ["\(home)/.local/bin/claude", "\(home)/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
         if let found = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) {
             path = found
+            completion?()
             return
         }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let output = LoginShell.run("command -v claude") ?? ""
+            let found = output.split(whereSeparator: \.isNewline).map(String.init)
+                .last(where: { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) })
+            DispatchQueue.main.async {
+                if let found {
+                    path = found
+                    UserDefaults.standard.set(found, forKey: "claudePath")
+                }
+                Log.write("claude", "shell lookup: \(found ?? "not found")")
+                completion?()
+            }
+        }
+    }
+}
+
+/// Runs a script in an interactive login zsh (to get the user's PATH: nvm, Homebrew, …). Blocking:
+/// call off the main thread. Gives up after `timeout` seconds (a slow or interactive ~/.zshrc).
+enum LoginShell {
+    static func run(_ script: String, timeout: TimeInterval = 5) -> String? {
         let shell = Process()
         shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        shell.arguments = ["-lic", "command -v claude"]
+        shell.arguments = ["-lic", script]
         let out = Pipe()
         shell.standardOutput = out
         shell.standardError = FileHandle.nullDevice
         shell.standardInput = FileHandle.nullDevice
+        // Collect output as it comes: a background job the rc files start can keep the pipe open
+        // after zsh exits, so reading to EOF could block forever.
+        let lock = NSLock()
+        var data = Data()
+        out.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            lock.lock(); data.append(chunk); lock.unlock()
+        }
+        let done = DispatchSemaphore(value: 0)
+        shell.terminationHandler = { _ in done.signal() }
         do {
             try shell.run()
-            shell.waitUntilExit()
-            let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            path = output.split(whereSeparator: \.isNewline).map(String.init)
-                .last(where: { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) })
         } catch {
-            Log.write("claude", "shell lookup failed: \(error)")
+            out.fileHandleForReading.readabilityHandler = nil
+            Log.write("shell", "login shell failed: \(error)")
+            return nil
         }
-        if let path { UserDefaults.standard.set(path, forKey: "claudePath") }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            Log.write("shell", "login shell timed out after \(Int(timeout))s")
+            shell.terminate()
+            kill(-shell.processIdentifier, SIGKILL)
+            kill(shell.processIdentifier, SIGKILL)
+            out.fileHandleForReading.readabilityHandler = nil
+            return nil
+        }
+        // Let the last buffered output arrive.
+        Thread.sleep(forTimeInterval: 0.05)
+        out.fileHandleForReading.readabilityHandler = nil
+        lock.lock(); defer { lock.unlock() }
+        return String(data: data, encoding: .utf8)
     }
 }

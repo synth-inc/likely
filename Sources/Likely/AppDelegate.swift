@@ -16,25 +16,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.write("app", "launched, log at \(Log.fileURL.path)")
-        ClaudeLocator.resolve()
-        Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")")
+        // The login-shell part of the lookup runs in the background (it can take seconds).
+        ClaudeLocator.resolve { Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")") }
         buildStatusItem()
         MainActor.assumeIsolated { Updater.shared.start() }
 
         coordinator.verbose = Settings.verbose
         coordinator.onStateChange = { [weak self] state, message in
             self?.stateItem.title = message
-            self?.statusItem.button?.image = Self.icon(for: state)
+            self?.setIcon(state)
         }
+        // Licensing gates the search, not the watching: an unlicensed Likely still shows its bar above
+        // pickers, in an unpaid state that leads to the license page.
+        coordinator.isLicensed = { License.isActive }
+        coordinator.onGetLikely = { [weak self] in self?.showLicense() }
 
         AgentDetector.shared.scan()
-        // Option B: setup (ending with the license page) has to be finished before Likely starts working.
+        // Setup (ending with the license page) has to be finished before Likely starts watching.
         // The cached entitlement decides at launch (works offline); the server check right after can
-        // still turn it on or off through `licenseChanged`.
-        if Settings.onboarded && License.isActive {
+        // still flip it through `licenseChanged`.
+        if Settings.onboarded {
             startWhenTrusted()
-        } else if Settings.onboarded {
-            licenseChanged(active: false)
         } else {
             stateItem.title = "Finish setup to start Likely"
             showOnboarding()
@@ -60,26 +62,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Start when a purchase lands (once setup is done); when a subscription lapses or the offline
-    /// grace runs out, stop and say so instead of going quiet.
+    /// Watching continues either way; the next picker searches (license active) or shows the unpaid
+    /// bar. Only the menu's status line changes here.
     private func licenseChanged(active: Bool) {
-        if active {
-            if Settings.onboarded { startWhenTrusted() }
-            return
+        guard Settings.onboarded else { return }
+        if !started {
+            startWhenTrusted()
+        } else if !coordinator.paused {
+            stateItem.title = Self.watchingTitle
         }
-        trustTimer?.invalidate()
-        trustTimer = nil
-        if started {
-            coordinator.stop()
-            started = false
-        }
-        stateItem.title = "License inactive. Open Settings to renew"
-        statusItem.button?.image = Self.icon(for: .idle)
-        if Settings.onboarded { showLicense() }
+        setIcon(.idle)
     }
 
+    private static var watchingTitle: String { License.isActive ? "Watching for file pickers" : "Inactive · Get Likely" }
+
     func applicationWillTerminate(_ notification: Notification) {
-        coordinator.stop()
+        coordinator.quit()
     }
 
     /// AX observers created before the Accessibility grant silently do nothing, so wait for it.
@@ -88,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if AXIsProcessTrusted() {
             started = true
             coordinator.start()
-            stateItem.title = "Watching for file pickers"
+            stateItem.title = Self.watchingTitle
             return
         }
         stateItem.title = "Waiting for Accessibility permission"
@@ -98,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.started = true
             Log.write("app", "accessibility granted")
             self?.coordinator.start()
-            self?.stateItem.title = "Watching for file pickers"
+            self?.stateItem.title = Self.watchingTitle
         }
     }
 
@@ -106,7 +104,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = Self.icon(for: .idle)
+        setIcon(.idle)
+        NotificationCenter.default.addObserver(forName: MenuBarGlyph.didChange, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.setIcon(self.iconState)
+        }
 
         let menu = NSMenu()
         stateItem.isEnabled = false
@@ -119,22 +121,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Debug View…", action: #selector(showDebugView), keyEquivalent: "d").target = self
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
         menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
+        if MenuBarGlyph.isDebugEnabled {
+            // Dev builds only: flip through the candidate menu bar glyphs in place.
+            let debug = NSMenu()
+            debug.addItem(withTitle: "Next Glyph", action: #selector(nextGlyph), keyEquivalent: "").target = self
+            debug.addItem(withTitle: "Previous Glyph", action: #selector(previousGlyph), keyEquivalent: "").target = self
+            let item = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+            item.submenu = debug
+            menu.addItem(item)
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Likely", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
     }
 
-    private static func icon(for state: Coordinator.State) -> NSImage? {
-        let name: String
+    private var iconState = Coordinator.State.idle
+
+    /// The glyph, with a dot while searching; dimmed while the license is inactive.
+    private func setIcon(_ state: Coordinator.State) {
+        iconState = state
+        let symbol: String
         switch state {
-        case .idle: name = "doc.viewfinder"
-        case .searching: name = "sparkle.magnifyingglass"
-        case .done: name = "checkmark.circle"
+        case .idle: symbol = "doc.viewfinder"
+        case .searching: symbol = "sparkle.magnifyingglass"
+        case .done: symbol = "checkmark.circle"
         }
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "Likely")
-        image?.isTemplate = true
-        return image
+        statusItem.button?.image = MenuBarGlyph.image(badge: state == .searching ? .dot : .none,
+                                                      dimmed: Settings.onboarded && !License.isActive, fallbackSymbol: symbol)
     }
+
+    @objc private func nextGlyph() { MenuBarGlyph.cycle(by: 1) }
+    @objc private func previousGlyph() { MenuBarGlyph.cycle(by: -1) }
 
     @objc private func openFolder() {
         try? LikelyFolder.create()
@@ -148,7 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePause() {
         coordinator.paused.toggle()
         pauseItem.state = coordinator.paused ? .on : .off
-        stateItem.title = coordinator.paused ? "Paused" : "Watching for file pickers"
+        stateItem.title = coordinator.paused ? "Paused" : Self.watchingTitle
     }
 
     @objc private func showDebugView() {

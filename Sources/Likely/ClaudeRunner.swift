@@ -16,9 +16,11 @@ final class ClaudeRunner: AgentRunner {
     /// The process ended without being cancelled (crash, auth failure, …).
     var onExit: ((Outcome) -> Void)?
 
+    /// Search commands that can't write: `sort` (-o) and `file` (-C) can, so they're left out, like
+    /// `find` (-delete/-exec/-fprint) and `tee`.
     static let allowedTools = [
         "Read", "Glob", "Grep",
-        "Bash(ls:*)", "Bash(mdfind:*)", "Bash(mdls:*)", "Bash(head:*)", "Bash(stat:*)", "Bash(file:*)", "Bash(sort:*)", "Bash(grep:*)",
+        "Bash(ls:*)", "Bash(mdfind:*)", "Bash(mdls:*)", "Bash(head:*)", "Bash(stat:*)", "Bash(grep:*)",
     ]
 
     private var process: Process?
@@ -40,9 +42,8 @@ final class ClaudeRunner: AgentRunner {
         buffer = Data()
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: claudePath)
         process.currentDirectoryURL = workDir
-        process.arguments = [
+        let arguments = [
             "-p",
             "--input-format", "stream-json",
             "--model", model,
@@ -56,6 +57,11 @@ final class ClaudeRunner: AgentRunner {
         ] + SearchFolder.outsideHome.flatMap { ["--add-dir", $0] } + [
             "--allowedTools",
         ] + Self.allowedTools
+        // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
+                                                             profile: AgentSandbox.privacyOnlyProfile)
+        process.executableURL = launcher
+        process.arguments = launchArguments
 
         var env = ProcessInfo.processInfo.environment
         // Use the claude.ai login rather than whatever API key a parent shell exported.

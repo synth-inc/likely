@@ -2,8 +2,8 @@ import Foundation
 
 /// Runs OpenCode: `opencode run --format json`, with the screenshot attached via `-f`. OpenCode has
 /// no sandbox of its own and its bash allowlist only sees command names (`ls > file` passes as `ls`),
-/// so it runs under `sandbox-exec` with a profile that denies file writes outside its own data
-/// directories, plus a permission config that hides edit tools and allowlists search commands.
+/// so it runs under `sandbox-exec` (see AgentSandbox: no writes outside its own data directories, no
+/// exec from writable places, HTTPS/localhost only, no Accessibility/Screen Recording/Automation), plus a permission config that hides edit tools and allowlists search commands.
 /// Like Codex it can't take messages mid-turn: feedback stops the current turn and continues the same
 /// session with `opencode run -s <session>`.
 final class OpenCodeRunner: AgentRunner {
@@ -32,8 +32,8 @@ final class OpenCodeRunner: AgentRunner {
     private static let permission = """
     {"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","external_directory":"allow",\
     "bash":{"*":"deny","ls":"allow","ls *":"allow","mdfind *":"allow","mdls *":"allow","find *":"allow",\
-    "grep *":"allow","head *":"allow","tail *":"allow","stat *":"allow","file *":"allow","sort *":"allow",\
-    "wc *":"allow","echo *":"allow","find *-exec*":"deny","find *-ok*":"deny","find *-delete*":"deny"}}
+    "grep *":"allow","head *":"allow","tail *":"allow","stat *":"allow","wc *":"allow","echo *":"allow",\
+    "find *-exec*":"deny","find *-ok*":"deny","find *-delete*":"deny","find *-fprint*":"deny","find *-fls*":"deny"}}
     """
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
@@ -99,8 +99,9 @@ final class OpenCodeRunner: AgentRunner {
         env["PATH"] = [dir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
             .joined(separator: ":")
 
+        let dataDir = env["XDG_DATA_HOME"].map { $0 + "/opencode" } ?? home + "/.local/share/opencode"
         let writable = [
-            env["XDG_DATA_HOME"].map { $0 + "/opencode" } ?? home + "/.local/share/opencode",
+            dataDir,
             env["XDG_STATE_HOME"].map { $0 + "/opencode" } ?? home + "/.local/state/opencode",
             env["XDG_CACHE_HOME"].map { $0 + "/opencode" } ?? home + "/.cache/opencode",
             configHome,
@@ -108,9 +109,12 @@ final class OpenCodeRunner: AgentRunner {
         ]
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+        // OpenCode keeps tools it downloads (ripgrep) in <data>/bin: runnable, but not writable inside the sandbox.
+        let profile = AgentSandbox.confinedProfile(writable: writable, execAllowed: [dataDir + "/bin"])
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments, profile: profile)
+        process.executableURL = launcher
+        process.arguments = launchArguments
         process.currentDirectoryURL = workDir
-        process.arguments = ["-p", Self.sandboxProfile(writable: writable), executable] + arguments
         process.environment = env
 
         let stdout = Pipe()
@@ -155,16 +159,6 @@ final class OpenCodeRunner: AgentRunner {
             Log.write("opencode", "failed to launch \(executable): \(error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch opencode", costUSD: nil))
         }
-    }
-
-    /// Everything allowed except writing files, other than to OpenCode's own state and temp dirs.
-    private static func sandboxProfile(writable: [String]) -> String {
-        let quoted = { (path: String) in "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
-        let subpaths = writable.map { "(subpath \(quoted($0)))" }.joined(separator: " ")
-        return """
-        (version 1)(allow default)(deny file-write*)
-        (allow file-write* (literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/(fd|ttys)") \(subpaths))
-        """
     }
 
     private func consume(_ data: Data, from source: Process) {

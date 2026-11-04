@@ -1,0 +1,83 @@
+import Darwin
+import Foundation
+
+/// Seatbelt (`sandbox-exec`) rules shared by the agent runners.
+///
+/// Agents are children of Likely, so macOS attributes them to Likely and they inherit its privacy
+/// grants. That's intended for Files & Folders (searching Desktop/Documents/Downloads is the whole
+/// point, and those grants are what onboarding asks for), but not for Accessibility, Screen Recording
+/// or Automation. Disclaiming responsibility (`responsibility_spawnattrs_setdisclaim`) would drop all
+/// of Likely's grants at once, folders included, and make macOS prompt for "node"/"opencode" instead,
+/// so the agents stay attributed to Likely and these rules cut off the other three instead:
+/// - Automation: no Apple Events, and no osascript/open/shortcuts/automator/screencapture/launchctl.
+/// - Accessibility: no `com.apple.axserver` (the AX client port; without it every AX call fails).
+/// - Screen Recording and synthetic input: no WindowServer, replayd or ScreenCaptureKit services.
+/// - No asking TCC directly either.
+/// Verified with a probe: under these rules AX reads of Finder fail (-25204), `screencapture` can't
+/// create an image, and AXIsProcessTrusted/CGPreflightScreenCaptureAccess report false.
+enum AgentSandbox {
+    static let blockedExecutables = [
+        "/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/shortcuts", "/usr/bin/automator",
+        "/usr/sbin/screencapture", "/usr/bin/screencapture", "/usr/bin/osacompile", "/usr/bin/tccutil",
+    ]
+
+    static let privacyRules = """
+    (deny appleevent-send)
+    (deny mach-lookup
+        (global-name "com.apple.windowserver.active") (global-name "com.apple.windowserver")
+        (global-name-prefix "com.apple.replayd") (global-name-prefix "com.apple.screencapture")
+        (global-name-prefix "com.apple.ScreenCaptureKit")
+        (global-name "com.apple.tccd") (global-name "com.apple.tccd.system")
+        (local-name "com.apple.axserver") (global-name "com.apple.axserver"))
+    (deny process-exec \(blockedExecutables.map { "(literal \(quoted($0)))" }.joined(separator: " ")))
+    """
+
+    /// For agents with their own write controls (Claude Code, Gemini CLI): everything allowed except
+    /// the privacy-sensitive services above.
+    static let privacyOnlyProfile = "(version 1)\n(allow default)\n" + privacyRules
+
+    /// For agents Likely has to confine itself (OpenCode, Hermes):
+    /// - writes only to `writable` (plus the usual /dev nodes);
+    /// - nothing can be executed from a writable location (no planting a binary or copying a system
+    ///   tool to /tmp and running it), except `execAllowed` folders, which are also made read-only;
+    /// - outbound network only to HTTPS (port 443) and localhost (local model servers, Hermes' own
+    ///   gateway), plus Unix sockets (DNS goes through mDNSResponder's). Seatbelt can't filter by host
+    ///   name, so limiting traffic to the model API's domain isn't possible here; port 443 is the
+    ///   tightest rule that still works with every hosted provider.
+    static func confinedProfile(writable: [String], writableRegexes: [String] = [], execAllowed: [String] = []) -> String {
+        let writableRules = writable.map { "(subpath \(quoted($0)))" } + writableRegexes.map { "(regex \(quoted($0)))" }
+        let noExec = writable + ["/private/tmp", "/private/var/tmp", "/private/var/folders"]
+        var profile = """
+        (version 1)
+        (allow default)
+        (deny file-write*)
+        (allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper") (literal "/dev/ptmx")
+            (regex #"^/dev/(fd/|ttys)") \(writableRules.joined(separator: " ")))
+        (deny process-exec \(noExec.map { "(subpath \(quoted($0)))" }.joined(separator: " ")))
+        (deny network-outbound)
+        (allow network-outbound (remote tcp "*:443") (remote ip "localhost:*") (remote unix-socket))
+
+        """
+        if !execAllowed.isEmpty {
+            let paths = execAllowed.map { "(subpath \(quoted($0)))" }.joined(separator: " ")
+            profile += "(deny file-write* \(paths))\n(allow process-exec \(paths))\n"
+        }
+        return profile + privacyRules
+    }
+
+    static func quoted(_ path: String) -> String {
+        "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+
+    /// Seatbelt matches real paths (/private/var, not /var); Foundation's symlink resolution strips /private.
+    static func realPath(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
+    static func wrap(executable: String, arguments: [String], profile: String) -> (URL, [String]) {
+        (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile, executable] + arguments)
+    }
+}

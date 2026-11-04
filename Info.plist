@@ -6,6 +6,8 @@
 	<string>Likely</string>
 	<key>CFBundleExecutable</key>
 	<string>Likely</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.timl.likely</string>
 	<key>CFBundleName</key>

@@ -24,7 +24,7 @@ final class GeminiRunner: AgentRunner {
     /// codebase_investigator subagent crawl the whole home workspace and can stall for minutes;
     /// memory, web, skills and hooks aren't wanted. Write tools aren't available headless anyway.
     private static let settings = Data("""
-        {"tools": {"core": ["read_file", "list_directory", "run_shell_command"], "enableHooks": false},
+        {"tools": {"core": ["read_file", "list_directory", "run_shell_command"], "enableHooks": false, "sandbox": false},
          "hooksConfig": {"enabled": false}, "skills": {"enabled": false},
          "agents": {"overrides": {"codebase_investigator": {"enabled": false}, "cli_help": {"enabled": false},
                                   "generalist": {"enabled": false}}}}
@@ -108,9 +108,12 @@ final class GeminiRunner: AgentRunner {
         turnEnded = false
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
+        // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
+                                                             profile: AgentSandbox.privacyOnlyProfile)
+        process.executableURL = launcher
+        process.arguments = launchArguments
         process.currentDirectoryURL = workDir
-        process.arguments = arguments
         process.standardInput = FileHandle.nullDevice   // -p appends stdin; don't let it wait on ours
         var env = ProcessInfo.processInfo.environment
         let dir = (executable as NSString).deletingLastPathComponent   // npm installs need `node` beside them
@@ -120,6 +123,8 @@ final class GeminiRunner: AgentRunner {
         env.removeValue(forKey: "GEMINI_API_KEY")
         env.removeValue(forKey: "GOOGLE_API_KEY")
         env["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+        // Gemini's own sandbox would try sandbox-exec inside ours, which macOS doesn't allow.
+        env["GEMINI_SANDBOX"] = "false"
         if let project = Self.vertexProject { env["GOOGLE_CLOUD_PROJECT"] = project }
         env["GOOGLE_CLOUD_LOCATION"] = Self.vertexLocation
         // Our own settings layer (overrides ~/.gemini/settings.json without touching it).

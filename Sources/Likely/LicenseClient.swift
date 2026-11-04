@@ -78,14 +78,16 @@ actor LicenseClient {
     func checkoutURL(plan: Plan) async throws -> URL {
         struct Body: Encodable { let plan: String }
         let response: SessionResponse = try await send("POST", "/v1/subscription/stripe/checkout", body: Body(plan: plan.rawValue))
-        guard let url = URL(string: response.sessionUrl) else { throw ClientError.badResponse }
+        // Only ever hand the browser an https page (never file:, javascript:, custom schemes…).
+        guard let url = URL(string: response.sessionUrl), url.scheme?.lowercased() == "https" else { throw ClientError.badResponse }
         return url
     }
 
     /// Stripe's customer portal (cancel, change card, invoices).
     func billingPortalURL() async throws -> URL {
         let response: SessionResponse = try await send("POST", "/v1/subscription/stripe/billing-portal?product=likely")
-        guard let url = URL(string: response.sessionUrl) else { throw ClientError.badResponse }
+        // Only ever hand the browser an https page (never file:, javascript:, custom schemes…).
+        guard let url = URL(string: response.sessionUrl), url.scheme?.lowercased() == "https" else { throw ClientError.badResponse }
         return url
     }
 
