@@ -84,7 +84,7 @@ actor LicenseClient {
 
     /// Stripe's customer portal (cancel, change card, invoices).
     func billingPortalURL() async throws -> URL {
-        let response: SessionResponse = try await send("POST", "/v1/subscription/stripe/billing-portal")
+        let response: SessionResponse = try await send("POST", "/v1/subscription/stripe/billing-portal?product=likely")
         guard let url = URL(string: response.sessionUrl) else { throw ClientError.badResponse }
         return url
     }
