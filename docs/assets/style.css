@@ -208,3 +208,6 @@ h1 em { font-style: normal; color: var(--text-2); }
 .copy-bar button.primary:hover { background: var(--accent-hover); }
 .copy-bar .count { color: rgba(235,240,255,.7); margin-right: 4px; white-space: nowrap; }
 @media (max-width: 560px) { .copy-bar { left: 8px; right: 8px; bottom: 8px; flex-wrap: wrap; } }
+
+/* "already" in the hero title */
+.title-accent { color: var(--link); }
