@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Likely: the file you were about to look for</title>
+  <meta name="description" content="Likely is a Mac menu bar app. Open a file picker and the file you were about to hunt for is already in the Likely folder, pinned to the sidebar.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#16171A" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F5F5F5" media="(prefers-color-scheme: light)">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://synth-inc.github.io/likely/">
+  <meta property="og:site_name" content="Likely">
+  <meta property="og:title" content="Likely: Why doesn't macOS already do this?">
+  <meta property="og:description" content="Anytime you open a file picker, Likely finds the files you're looking for and copies them into a pinned folder.">
+  <meta property="og:image" content="https://synth-inc.github.io/likely/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Likely app icon with the line: Why doesn't macOS already do this?">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Likely: Why doesn't macOS already do this?">
+  <meta name="twitter:description" content="Anytime you open a file picker, Likely finds the files you're looking for and copies them into a pinned folder.">
+  <meta name="twitter:image" content="https://synth-inc.github.io/likely/assets/og-image.png">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="assets/wa.css">
+  <script>document.documentElement.classList.remove('no-js')</script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- NAV (DockLock pattern: wordmark left, two links right) -->
+  <header class="nav wrap">
+    <a class="brand" href="./" aria-label="Likely home">
+      <img src="assets/logo.svg" alt="" width="22" height="22">
+      <span data-copy-id="nav.brand">Likely</span>
+    </a>
+    <nav aria-label="Primary">
+      <a href="#pricing" data-copy-id="nav.pricing">Pricing</a>
+      <a href="https://github.com/synth-inc/likely" class="nav-gh">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span data-copy-id="nav.github">GitHub</span>
+      </a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- 1. HERO (DockLock: big logo, badge, headline, subtitle, CTA row) -->
+    <section class="hero wrap">
+      <img class="hero-logo" src="assets/logo-512.png" width="88" height="88" alt="">
+      <p class="badge"><span class="badge-dot" aria-hidden="true"></span><span data-copy-id="hero.badge">Open source, for macOS</span></p>
+      <h1 data-copy-id="hero.title">Why doesn’t macOS <i class="title-accent">already</i> do this?</h1>
+      <p class="subtitle" data-copy-id="hero.subtitle">Anytime you open a file picker, <b>Likely</b> finds the files you're looking for and copies them into a pinned folder.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg">
+          <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span data-copy-id="hero.download">Download for Mac</span>
+        </a>
+        <a class="btn btn-quiet" href="https://github.com/synth-inc/likely"><span data-copy-id="hero.github">View on GitHub</span></a>
+      </div>
+    </section>
+
+    <!-- 2. DEMO (DockLock: "See the difference" eyebrow + demo panel). Here: the autoplay video. -->
+    <section class="demo wrap">
+      <!-- DEMO VIDEO: record and add docs/assets/demo.mp4 (poster: docs/assets/demo-poster.png, placeholder) -->
+      <div class="video-panel">
+        <video id="demo" src="assets/demo.mp4" poster="assets/demo-poster.png"
+               autoplay muted loop playsinline preload="metadata"
+               aria-label="Demo: a file picker opens and Likely has already found the file"></video>
+      </div>
+      <script>
+        (function () {
+          var v = document.getElementById('demo');
+          if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            v.removeAttribute('autoplay'); v.autoplay = false; v.pause(); v.controls = true;
+          }
+        })();
+      </script>
+    </section>
+
+    <!-- 3. THIS IS THE WHOLE APP (DockLock: centered h2 + one line + screenshot) -->
+    <section class="whole wrap" aria-labelledby="whole-h">
+      <h2 id="whole-h" data-copy-id="whole.title">This is the whole app.</h2>
+      <p class="section-sub" data-copy-id="whole.subtitle">A folder in your sidebar, a bar above the picker, and an icon in your menu bar. That’s it.</p>
+
+      <!-- Interactive whole-app screenshot (assets/wa.css, regions.js, wa.js; wa-edit.js loads only with ?edit-regions).
+           To move regions: open ?edit-regions, adjust, "Copy config", paste into assets/regions.js. -->
+      <figure class="wa" data-img="assets/whole-app-base.png">
+        <img class="wa-base" src="assets/whole-app-base.png" width="2880" height="1800"
+             alt="A file picker in dark mode with Likely selected in its sidebar, Likely's ask bar above it, and Likely's icon in the menu bar.">
+        <noscript><img class="wa-fallback" src="assets/whole-app-combo.png" width="2880" height="1800"
+             alt="A file picker with Likely's three parts called out: the menu bar icon, the ask bar above the picker, and the Likely folder in the sidebar."></noscript>
+        <div class="wa-dim"></div>
+      </figure>
+      <script src="assets/regions.js"></script>
+      <script src="assets/wa.js"></script>
+    </section>
+
+    <!-- 4. HOW IT WORKS -->
+    <section id="how" class="wrap section" aria-labelledby="how-h">
+      <h2 id="how-h" data-copy-id="how.headline">Anytime you open a file picker...</h2>
+      <ul class="panel bullets">
+        <li data-copy-id="how.b1">Open any file picker: Mail, Chrome, Pages, anything.</li>
+        <li data-copy-id="how.b2">Likely guesses the files you need and copies them into a Likely folder, pinned in the sidebar.</li>
+        <li data-copy-id="how.b3">Not quite right? Type what you need in the search bar above the picker.</li>
+        <li data-copy-id="how.b4">Keep asking, in plain English, until you find it.</li>
+      </ul>
+      <div class="agents">
+        <span class="agents-label" data-copy-id="how.agents.label">Runs on the agent you already have:</span>
+        <span class="chip" data-copy-id="agent.claude">Claude Code</span>
+        <span class="chip" data-copy-id="agent.codex">Codex</span>
+        <span class="chip" data-copy-id="agent.gemini">Gemini CLI</span>
+        <span class="chip" data-copy-id="agent.opencode">OpenCode</span>
+        <span class="chip" data-copy-id="agent.hermes">Hermes</span>
+      </div>
+    </section>
+
+    <!-- 5. PRICING -->
+    <section id="pricing" class="wrap section" aria-labelledby="price-h">
+      <h2 id="price-h" data-copy-id="pricing.title">We couldn’t pick a business model…</h2>
+      <div class="plans">
+        <article class="panel plan plan-featured">
+          <p class="vote" data-copy-id="pricing.sub.vote">Recurring</p>
+          <p class="price"><span data-copy-id="pricing.sub.price">$3</span><small data-copy-id="pricing.sub.unit">/month</small></p>
+          <p class="plan-body" data-copy-id="pricing.sub.body">A subscription gives us an excuse to keep working on this silly little app.</p>
+          <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg"><span data-copy-id="pricing.sub.cta">Download</span></a>
+        </article>
+        <article class="panel plan">
+          <p class="vote" data-copy-id="pricing.once.vote">One-time</p>
+          <p class="price"><span data-copy-id="pricing.once.price">$29</span><small data-copy-id="pricing.once.unit">once</small></p>
+          <p class="plan-body" data-copy-id="pricing.once.body">One payment, and you can use the app, forever.</p>
+          <a class="btn btn-quiet" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg"><span data-copy-id="pricing.once.cta">Download</span></a>
+        </article>
+        <article class="panel plan">
+          <p class="vote" data-copy-id="pricing.free.vote">Allergic to paying?</p>
+          <p class="price"><span data-copy-id="pricing.free.price">Free</span></p>
+          <p class="plan-body" data-copy-id="pricing.free.body">Build it from GitHub. It’s open source under GPL-3.0.</p>
+          <a class="btn btn-quiet" href="https://github.com/synth-inc/likely#readme"><span data-copy-id="pricing.free.cta">Build it yourself</span></a>
+        </article>
+      </div>
+    </section>
+
+    <!-- 6. FAQ -->
+    <section id="faq" class="wrap section" aria-labelledby="faq-h">
+      <h2 id="faq-h" data-copy-id="faq.title">Q&amp;A</h2>
+      <div class="panel faq">
+        <details>
+          <summary><span data-copy-id="faq.how.q">How does it work?</span></summary>
+          <p data-copy-id="faq.how.a">When a file picker opens, Likely launches your coding agent in the background with an instruction to find the files you most likely need, based on what you type in the bar and, if you turn screenshots on, what you were just doing. The agent can only search and read. Likely then copies the best matches into the Likely folder and points the picker there, and the folder is cleared shortly after you’re done. Likely also adds a search bar above the file picker that lets you add instructions to guide the search.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.need.q">What do I need?</span></summary>
+          <p data-copy-id="faq.need.a">macOS 14 or later, and a coding agent: Claude Code, Codex, Gemini CLI, OpenCode or Hermes.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.files.q">Does Likely change my files?</span></summary>
+          <p data-copy-id="faq.files.a">No. Your agent can search and read. It can’t edit, move or delete anything. Likely never modifies your files.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.screenshots.q">Are screenshots required? Where do they go?</span></summary>
+          <p data-copy-id="faq.screenshots.a">No. They’re off unless you turn them on. When on, they go only to the agent you chose, nowhere else.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.folder.q">What’s in the Likely folder?</span></summary>
+          <p data-copy-id="faq.folder.a">The Likely folder holds copies. Originals stay put, and the folder is cleared shortly after you’re done.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.account.q">Do I need an account?</span></summary>
+          <p data-copy-id="faq.account.a">No. There’s no sign-up, and purchases work without an account.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.accessibility.q">Why does it want Accessibility permission?</span></summary>
+          <p data-copy-id="faq.accessibility.a">That’s how it notices a file picker opening, pins the Likely folder, and presents the search bar above the file picker. Screen Recording is only needed if you turn on screenshots.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.switch.q">What if I switch Macs?</span></summary>
+          <p data-copy-id="faq.switch.a">Restoring a purchase by email is coming, but isn’t here yet. Until then, open an issue on GitHub and we’ll sort it out.</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <!-- FOOTER (DockLock: one centered row) -->
+  <footer class="foot">
+    <span data-copy-id="footer.made">Made by Synth</span>
+    <span data-copy-id="footer.license">Free software, GPL-3.0</span>
+    <a href="https://github.com/synth-inc/likely" data-copy-id="footer.github">GitHub</a>
+  </footer>
+
+  <!-- Copy-editing mode: add ?edit to the URL. ?preview-edits shows saved edits read-only. -->
+  <script src="assets/edit.js" defer></script>
+</body>
+</html>
