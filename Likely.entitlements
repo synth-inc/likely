@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened-runtime exceptions for Developer ID builds (scripts/release.sh): none needed today.
+         No App Sandbox: Likely reads other apps' accessibility trees, captures windows and launches
+         agent CLIs. Accessibility and Screen Recording are TCC grants and need no entitlement. Likely
+         sends no Apple Events, so there's no automation entitlement (and agents are denied them). -->
+</dict>
+</plist>
