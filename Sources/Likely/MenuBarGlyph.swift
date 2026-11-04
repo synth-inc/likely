@@ -15,6 +15,7 @@ enum MenuBarGlyph {
 
     /// Candidates bundled in dev builds, with the icon editor's descriptions.
     static let candidates: [Option] = [
+        Option(id: "glyph-12e-filled", title: "12e filled — default (wider-set eyes, solid folded corner)"),
         Option(id: "glyph-03-solo", title: "03 — solo (one raised brow in the page)"),
         Option(id: "glyph-04-knockout", title: "04 — knockout (solid page, brows knocked out)"),
         Option(id: "glyph-08-faceOnly", title: "08 — face only, no page"),
