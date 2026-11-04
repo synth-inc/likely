@@ -56,6 +56,11 @@ final class Coordinator {
     private var lastImage: URL?
     /// Feedback typed before Claude was launched (the screenshot step takes a moment).
     private var pendingFeedback: [String] = []
+    /// Everything the user typed in the bar for this picker, and the screenshot taken for it: the
+    /// makings of an eval case if the user then picks a file (see EvalCapture).
+    private var typedQueries: [String] = []
+    private var capturedScreenshot: URL?
+    private let pickTracker = PickTracker()
 
     init() {
         supportDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -215,6 +220,8 @@ final class Coordinator {
         missedPolls = 0
         lastPrompt = nil
         pendingFeedback = []
+        typedQueries = []
+        capturedScreenshot = nil
         autoMode = Settings.autoSuggest && CGPreflightScreenCaptureAccess()
         Log.write("picker", "OPENED in \(picker.appName) via \(picker.source) frame=\(picker.frame.map { "\($0)" } ?? "?")")
 
@@ -237,7 +244,10 @@ final class Coordinator {
         folder.setStatus(autoMode ? "Looking at the context" : "Type what you're looking for above the picker")
         let debugRun = DebugStore.shared.begin(appName: picker.appName, detectedVia: picker.source)
         self.debugRun = debugRun
+        debugRun.windowTitle = picker.windowTitle
+        debugRun.buttonTitle = picker.buttonTitle
         debugRun.log("Picker opened")
+        if EvalCapture.isEnabled { pickTracker.begin(window: picker.element, pid: picker.pid) }
         if Settings.openToLikely, let window = picker.element {
             let generation = generation
             PickerNavigator.selectLikelyInSidebar(of: window) { [weak self] in self?.generation == generation && self?.active != nil }
@@ -266,6 +276,8 @@ final class Coordinator {
                     capture = try await WindowCapture.captureNow(pid: picker.pid, pickerFrame: picker.frame, to: screenshotURL)
                 }
                 Log.write("capture", "\(capture!.mode) title=\(capture!.windowTitle ?? "-")")
+                self.capturedScreenshot = screenshotURL
+                if let title = capture?.windowTitle { debugRun.windowTitle = title }
                 DebugStore.shared.attachScreenshot(screenshotURL, mode: capture!.mode, to: debugRun)
                 debugRun.log("Screenshot: \(capture!.mode)")
             } catch {
@@ -286,6 +298,7 @@ final class Coordinator {
         hud.hide()
         if runner.isBusy { debugRun?.log("Picker closed, \(agentName) cancelled") }
         runner.cancel()
+        recordDraftIfPicked(picker, reason: reason)
         // Keep the copies: the app that opened the picker often reads the file after it closes
         // (browsers upload it, Mail attaches it). They go when the next picker opens or after a while.
         folder.release()
@@ -299,6 +312,7 @@ final class Coordinator {
     /// so also poll: the picker is closed once its frame no longer matches any on-screen window.
     private func pollForClose() {
         guard let picker = active else { return }
+        pickTracker.poll()
         if let element = picker.element, !AX.isAlive(element) {
             pickerClosed(reason: "element gone")
             return
@@ -320,6 +334,26 @@ final class Coordinator {
             missedPolls += 1
             if missedPolls >= 2 { pickerClosed(reason: "no longer on screen") }
         }
+    }
+
+    /// Evals: if the picker was confirmed (not cancelled), save what the user typed and what they
+    /// actually picked as a draft test case. Off unless EvalCapture is enabled.
+    private func recordDraftIfPicked(_ picker: Picker, reason: String) {
+        guard pickTracker.isTracking else { return }
+        let pick = pickTracker.end()
+        guard EvalCapture.isEnabled, isLicensed(), reason != "app quitting" else { return }
+        guard pick.confirmed else {
+            Log.write("evals", "picker closed without a confirmed pick (\(pick.how)), no draft")
+            return
+        }
+        // Copies in the Likely folder stand for their originals.
+        let picked = pick.urls.map { folder.sourcePath(forPicked: $0) ?? $0.path }
+        debugRun?.pickedPaths = picked
+        debugRun?.log("Picked: \(picked.isEmpty ? "unknown" : picked.joined(separator: ", ")) (\(pick.how))")
+        EvalCapture.saveDraft(app: picker.appName, windowTitle: debugRun?.windowTitle ?? picker.windowTitle,
+                              button: picker.buttonTitle, queries: typedQueries,
+                              screenshot: autoMode ? capturedScreenshot : nil, picked: picked, how: pick.how,
+                              suggested: debugRun?.files.filter(\.added).map(\.path) ?? [])
     }
 
     /// For a sheet, its parent window; otherwise the app's first normal window that isn't the picker.
@@ -376,14 +410,11 @@ final class Coordinator {
             return
         }
         prepareRunner(for: agent)
-        var prompt = Self.prompt(picker: picker, capture: capture, imageAttached: agent.takesImages)
-        lastPrompt = prompt
+        let base = Self.prompt(picker: picker, capture: capture, imageAttached: agent.takesImages)
+        lastPrompt = base
         lastImage = agent.takesImages ? capture?.url : nil
-        if !pendingFeedback.isEmpty {
-            let lead = autoMode ? "The user already added:" : "The user described what they're looking for:"
-            prompt += "\n\n\(lead) " + pendingFeedback.map { "\"\($0)\"" }.joined(separator: " ")
-            pendingFeedback = []
-        }
+        let prompt = PromptBuilder.withTyped(base, typed: pendingFeedback, autoMode: autoMode)
+        pendingFeedback = []
         debugRun?.prompt = prompt
         debugRun?.model = "\(agent.kind.name) · \(agent.model)"
         debugRun?.log("\(agent.kind.name) started")
@@ -420,6 +451,8 @@ final class Coordinator {
         if !autoMode, lastPrompt == nil, let text {
             // First description in input-first mode: this starts the search.
             pendingFeedback = [text]
+            typedQueries.append(text)
+            debugRun?.queries.append(text)
             debugRun?.log("You: \(text)")
             Log.write("feedback", "request: \(text)")
             folder.setStatus("Looking for \(text)")
@@ -433,12 +466,12 @@ final class Coordinator {
         folder.clearSuggestions()
         foundCount = 0
         hud.model.fileCount = 0
-
-        var message = text.map { "The user typed: \"\($0)\"." } ?? "The user says none of your suggestions are what they want."
-        if !rejected.isEmpty {
-            message += " They rejected these, so don't suggest them again: " + rejected.joined(separator: ", ") + "."
+        if let text {
+            typedQueries.append(text)
+            debugRun?.queries.append(text)
         }
-        message += " Search again with this in mind. Same protocol: STATUS lines as you work, FILE lines as soon as you find candidates."
+
+        let message = PromptBuilder.followUp(text, rejected: rejected)
 
         debugRun?.log("You: \(text ?? "Not these")")
         Log.write("feedback", text ?? "Not these")
@@ -461,23 +494,60 @@ final class Coordinator {
     }
 
     static func prompt(picker: Picker, capture: WindowCapture.Result?, imageAttached: Bool = false) -> String {
-        var context = "The user just opened a file picker (Open dialog) in \(picker.appName)."
-        if let title = capture?.windowTitle ?? picker.windowTitle, !title.isEmpty { context += " The window behind it is titled \"\(title)\"." }
-        if let button = picker.buttonTitle { context += " The picker's confirm button says \"\(button)\"." }
-        let screenshot = capture.map { capture in
+        PromptBuilder.initial(PromptBuilder.Context(appName: picker.appName, windowTitle: capture?.windowTitle ?? picker.windowTitle,
+                                                    buttonTitle: picker.buttonTitle, screenshot: capture?.url),
+                              imageAttached: imageAttached)
+    }
+}
+
+/// Builds the messages sent to the agent. Shared by the picker flow (Coordinator) and the headless
+/// eval runner (EvalCLI), so evals measure exactly the prompt users get.
+enum PromptBuilder {
+    struct Context {
+        var appName: String
+        var windowTitle: String?
+        var buttonTitle: String?
+        /// The screenshot of the window behind the picker, if there is one.
+        var screenshot: URL?
+    }
+
+    /// The first message: the prompt template filled in for this picker.
+    static func initial(_ c: Context, imageAttached: Bool, template: String = Settings.promptTemplate) -> String {
+        var context = "The user just opened a file picker (Open dialog) in \(c.appName)."
+        if let title = c.windowTitle, !title.isEmpty { context += " The window behind it is titled \"\(title)\"." }
+        if let button = c.buttonTitle { context += " The picker's confirm button says \"\(button)\"." }
+        let screenshot = c.screenshot.map { url in
             imageAttached
                 ? "A screenshot of what they were looking at (picker excluded) is attached. Look at it first."
-                : "A screenshot of what they were looking at (picker excluded) is at \(capture.url.path). Read it first."
+                : "A screenshot of what they were looking at (picker excluded) is at \(url.path). Read it first."
         }
             ?? "No screenshot is available; work from the app name, window title and what the user says."
-        return PromptTemplate.render(Settings.promptTemplate, values: [
+        return PromptTemplate.render(template, values: [
             "context": context,
             "screenshot": screenshot,
-            "app": picker.appName,
-            "windowTitle": capture?.windowTitle ?? picker.windowTitle ?? "",
+            "app": c.appName,
+            "windowTitle": c.windowTitle ?? "",
             "likelyFolder": LikelyFolder.url.path,
             "searchFolders": SearchFolder.promptDescription,
         ])
+    }
+
+    /// What the user typed before the agent started: their description (input-first mode), or
+    /// additions typed while the screenshot was being taken (automatic mode).
+    static func withTyped(_ prompt: String, typed: [String], autoMode: Bool) -> String {
+        guard !typed.isEmpty else { return prompt }
+        let lead = autoMode ? "The user already added:" : "The user described what they're looking for:"
+        return prompt + "\n\n\(lead) " + typed.map { "\"\($0)\"" }.joined(separator: " ")
+    }
+
+    /// Feedback typed after suggestions came in (`nil`: "Not these"). The current suggestions count as rejected.
+    static func followUp(_ text: String?, rejected: [String]) -> String {
+        var message = text.map { "The user typed: \"\($0)\"." } ?? "The user says none of your suggestions are what they want."
+        if !rejected.isEmpty {
+            message += " They rejected these, so don't suggest them again: " + rejected.joined(separator: ", ") + "."
+        }
+        message += " Search again with this in mind. Same protocol: STATUS lines as you work, FILE lines as soon as you find candidates."
+        return message
     }
 }
 

@@ -18,11 +18,14 @@ enum Log {
         return f
     }()
 
+    /// The eval runner turns this off so its own output stays readable (`--verbose` turns it back on).
+    static var echoToStderr = true
+
     static func write(_ category: String, _ message: String) {
         let line = "\(formatter.string(from: Date())) [\(category)] \(message)\n"
         logger.info("[\(category, privacy: .public)] \(message, privacy: .public)")
         let data = Data(line.utf8)
-        FileHandle.standardError.write(data)
+        if echoToStderr { FileHandle.standardError.write(data) }
         queue.async {
             if let handle = try? FileHandle(forWritingTo: fileURL) {
                 handle.seekToEndOfFile()

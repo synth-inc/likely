@@ -1,0 +1,54 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+6 0 obj
+<< /Length 645 >>
+stream
+BT
+/F2 16 Tf
+72 740 Td
+(Residential Lease Agreement) Tj
+/F1 11 Tf
+0 -28 Td
+14 TL
+(This Lease Agreement is made on August 1, 2026 between Maple Leasing LLC \(Landlord\)) '
+(and Jordan Rivera \(Tenant\) for the premises at 418 Alder Street, Apt 3B, Portland, OR 97205.) '
+(Term: twelve \(12\) months, beginning September 1, 2026 and ending August 31, 2027.) '
+(Monthly rent: $2,150.00, due on the first day of each month. Security deposit: $2,150.00.) '
+(Utilities: Tenant pays electricity and internet; Landlord pays water, sewer and trash.) '
+(Pets: one cat permitted with a $300 pet deposit.) '
+(Signed: Maple Leasing LLC    Jordan Rivera) '
+ET
+endstream
+endobj
+7 0 obj
+<< /Title (Residential Lease Agreement) /Producer (Likely eval fixtures) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000251 00000 n 
+0000000321 00000 n 
+0000000396 00000 n 
+0000001092 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+1183
+%%EOF
