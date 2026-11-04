@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,6 +26,8 @@
   <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
   <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="assets/wa.css">
+  <script>document.documentElement.classList.remove('no-js')</script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -79,62 +81,22 @@
       </script>
     </section>
 
-    <!-- 3. THIS IS THE WHOLE APP (DockLock: centered h2 + one line + static macOS mockup) -->
+    <!-- 3. THIS IS THE WHOLE APP (DockLock: centered h2 + one line + screenshot) -->
     <section class="whole wrap" aria-labelledby="whole-h">
       <h2 id="whole-h" data-copy-id="whole.title">This is the whole app.</h2>
       <p class="section-sub" data-copy-id="whole.subtitle">A folder in your sidebar, a bar above the picker, and an icon in your menu bar. That’s it.</p>
 
-      <div class="whole-grid" role="img" aria-label="The three parts of Likely: the Likely folder in a file picker's sidebar, a text bar above the picker, and a menu bar icon.">
-        <!-- a) sidebar -->
-        <figure class="piece">
-          <div class="mock mock-side" aria-hidden="true">
-            <p class="ms-head">Favorites</p>
-            <p class="ms-row ms-sel"><img src="assets/logo.svg" alt="" width="14" height="14"> Likely</p>
-            <p class="ms-row"><i class="ms-ico"></i> Desktop</p>
-            <p class="ms-row"><i class="ms-ico"></i> Documents</p>
-            <p class="ms-row"><i class="ms-ico"></i> Downloads</p>
-          </div>
-          <figcaption>
-            <strong data-copy-id="whole.1.title">A folder in the sidebar</strong>
-            <span data-copy-id="whole.1.body">Best guesses land here. The picker opens on it.</span>
-          </figcaption>
-        </figure>
-        <!-- b) bar above the picker -->
-        <figure class="piece">
-          <div class="mock mock-bar" aria-hidden="true">
-            <div class="mb-bar"><img src="assets/logo.svg" alt="" width="16" height="16"><span>the signed lease</span><i class="mb-caret"></i></div>
-            <div class="mb-win">
-              <div class="mb-tb"><i></i><i></i><i></i></div>
-              <div class="mb-lines"><b></b><b></b><b></b></div>
-            </div>
-          </div>
-          <figcaption>
-            <strong data-copy-id="whole.2.title">A bar above the picker</strong>
-            <span data-copy-id="whole.2.body">Type what you’re after, or don’t.</span>
-          </figcaption>
-        </figure>
-        <!-- c) menu bar icon -->
-        <figure class="piece">
-          <div class="mock mock-menu" aria-hidden="true">
-            <div class="mm-bar">
-              <span class="mm-icon"><img src="assets/logo.svg" alt="" width="13" height="13"></span>
-              <i class="mm-sys"></i><i class="mm-sys"></i><span class="mm-time">9:41</span>
-            </div>
-            <div class="mm-drop">
-              <p><i class="dot"></i>Watching file pickers</p>
-              <p class="mm-dim">Agent: Claude Code</p>
-              <hr>
-              <p>Settings…</p>
-              <hr>
-              <p class="mm-dim">Quit Likely</p>
-            </div>
-          </div>
-          <figcaption>
-            <strong data-copy-id="whole.3.title">An icon in the menu bar</strong>
-            <span data-copy-id="whole.3.body">Pick your agent. Otherwise, forget it’s there.</span>
-          </figcaption>
-        </figure>
-      </div>
+      <!-- Interactive whole-app screenshot (assets/wa.css, regions.js, wa.js; wa-edit.js loads only with ?edit-regions).
+           To move regions: open ?edit-regions, adjust, "Copy config", paste into assets/regions.js. -->
+      <figure class="wa" data-img="assets/whole-app-base.png">
+        <img class="wa-base" src="assets/whole-app-base.png" width="2880" height="1800"
+             alt="A file picker in dark mode with Likely selected in its sidebar, Likely's ask bar above it, and Likely's icon in the menu bar.">
+        <noscript><img class="wa-fallback" src="assets/whole-app-combo.png" width="2880" height="1800"
+             alt="A file picker with Likely's three parts called out: the menu bar icon, the ask bar above the picker, and the Likely folder in the sidebar."></noscript>
+        <div class="wa-dim"></div>
+      </figure>
+      <script src="assets/regions.js"></script>
+      <script src="assets/wa.js"></script>
     </section>
 
     <!-- 4. HOW IT WORKS -->

@@ -1,0 +1,25 @@
+/* Likely "This is the whole app." interactive screenshot */
+.wa{position:relative;margin:40px auto 0;max-width:860px;container-type:inline-size;border-radius:clamp(10px,1.6cqw,16px);
+  --wa-blue:#387DF5;--wa-ink:#16171A;font-family:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",sans-serif}
+.wa-base{display:block;width:100%;height:auto;aspect-ratio:16/10;border-radius:inherit;box-shadow:0 0 0 1px rgba(224,229,255,.10),0 24px 60px rgba(0,0,0,.35)}
+.wa-dim{position:absolute;inset:0;border-radius:inherit;background:rgba(6,8,14,.28);opacity:0;transition:opacity .2s ease;pointer-events:none}
+.wa.active .wa-dim{opacity:1}
+.wa-zoom{position:absolute;pointer-events:none;opacity:0;background-repeat:no-repeat;transform:translate(0,0) scale(1);
+  transition:opacity .18s ease,transform .22s cubic-bezier(.2,.8,.2,1);
+  box-shadow:0 0 0 2px var(--wa-blue),0 0 0 6px rgba(56,125,245,.2),0 22px 60px rgba(0,0,0,.6)}
+.wa-zoom.on{opacity:1;transform:var(--t);pointer-events:auto;z-index:3}
+.wa-mark{position:absolute;transform:translate(-50%,-50%);z-index:4;
+  width:clamp(22px,3.3cqw,30px);height:clamp(22px,3.3cqw,30px);border-radius:50%;border:0;padding:0;cursor:pointer;
+  background:var(--wa-blue);color:#fff;font-family:inherit;font-weight:700;font-size:clamp(12px,1.75cqw,15px);line-height:1;
+  box-shadow:0 0 0 2px rgba(255,255,255,.9),0 4px 14px rgba(0,0,0,.45);animation:wa-pulse 2.4s ease-out infinite}
+.wa-mark:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.wa-mark.on{animation:none}
+.wa-label{position:absolute;white-space:nowrap;z-index:4;background:var(--wa-ink);color:#fff;font-family:inherit;font-weight:600;
+  font-size:clamp(12px,1.75cqw,15px);line-height:1;padding:.55em .9em;border-radius:999px;
+  box-shadow:0 0 0 1px rgba(255,255,255,.14),0 8px 24px rgba(0,0,0,.45);opacity:0;transition:opacity .18s ease;pointer-events:none}
+.wa-label[data-anchor="right"]{transform:translate(-100%,-50%)}
+.wa-label[data-anchor="left"]{transform:translate(0,-50%)}
+.wa-label[data-anchor="center"]{transform:translate(-50%,-50%)}
+.wa-label.on{opacity:1}
+@keyframes wa-pulse{0%{box-shadow:0 0 0 2px rgba(255,255,255,.9),0 0 0 0 rgba(56,125,245,.55)}70%,100%{box-shadow:0 0 0 2px rgba(255,255,255,.9),0 0 0 12px rgba(56,125,245,0)}}
+@media (prefers-reduced-motion:reduce){.wa-mark{animation:none}.wa-zoom,.wa-dim,.wa-label{transition:none}}
