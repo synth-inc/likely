@@ -275,7 +275,8 @@ extension HermesRunner {
     /// Reads are allowed; writes only to the profile's own state, the per-user temp and cache folders,
     /// and the lock/lease files Hermes takes in its shared install. Writes to the install itself are
     /// denied, so nothing can plant code the user's own (unsandboxed) Hermes would run. Nothing can be
-    /// executed from those writable places, network is HTTPS/localhost only, and Apple Events,
+    /// executed from those writable places, network is HTTPS plus localhost (its gateway) only, Unix
+    /// sockets only the gateway's own, and Apple Events, LaunchServices, the pasteboard,
     /// Accessibility and Screen Recording are cut off (see AgentSandbox).
     ///
     /// The stub `launchctl` (see `prepare`) only steers Hermes into starting its gateway as a child;
@@ -286,9 +287,17 @@ extension HermesRunner {
         // /private/var/folders/…/T → its parent holds T (temp) and C (caches).
         let userFolder = (AgentSandbox.realPath(FileManager.default.temporaryDirectory.path) as NSString).deletingLastPathComponent
         let root = NSRegularExpression.escapedPattern(for: AgentSandbox.realPath(home.appendingPathComponent(".hermes").path))
+        // The gateway's control socket: <profile>/gateway.sock, or hermes-gw-<hash>/control.sock in a
+        // temp folder when that path is too long for a Unix socket.
+        let gatewaySocketDirs = [userFolder + "/T", "/private/tmp"].map {
+            "^" + NSRegularExpression.escapedPattern(for: $0) + "/hermes-gw-[0-9a-f]+/"
+        }
         return AgentSandbox.confinedProfile(
             writable: [AgentSandbox.realPath(profileDir.path), userFolder],
-            writableRegexes: ["^" + root + #"/installs/[^/]+/(.*\.lock|.*/\.leases(/.*)?)$"#])
+            writableRegexes: ["^" + root + #"/installs/[^/]+/(.*\.lock|.*/\.leases(/.*)?)$"#],
+            unixSockets: [AgentSandbox.realPath(profileDir.path)],
+            unixSocketRegexes: gatewaySocketDirs,
+            allowLocalhost: true)
     }
 
     /// The gateway daemon keeps the environment of the client that started it.

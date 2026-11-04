@@ -3,7 +3,7 @@ import Foundation
 /// Runs OpenCode: `opencode run --format json`, with the screenshot attached via `-f`. OpenCode has
 /// no sandbox of its own and its bash allowlist only sees command names (`ls > file` passes as `ls`),
 /// so it runs under `sandbox-exec` (see AgentSandbox: no writes outside its own data directories, no
-/// exec from writable places, HTTPS/localhost only, no Accessibility/Screen Recording/Automation), plus a permission config that hides edit tools and allowlists search commands.
+/// exec from writable places, HTTPS only, no local sockets, LaunchServices, pasteboard, Accessibility, Screen Recording or Automation), plus a permission config that hides edit tools and allowlists search commands.
 /// Like Codex it can't take messages mid-turn: feedback stops the current turn and continues the same
 /// session with `opencode run -s <session>`.
 final class OpenCodeRunner: AgentRunner {
