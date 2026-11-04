@@ -27,8 +27,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN_DIR/Likely" "$APP/Contents/MacOS/Likely"
 cp Info.plist "$APP/Contents/Info.plist"
-# Free builds never use the paid update feed: no feed, no key, no scheduled checks (Updater stays off).
-if [ "${LIKELY_FREE:-}" = "1" ]; then
+# Free and dev builds never use the update feed: no feed, no key, no scheduled checks (Updater stays
+# off). Otherwise Sparkle would offer to replace a dev build with the latest release.
+if [ "${LIKELY_FREE:-}" = "1" ] || [ "$DEV_BUILD" = true ]; then
     for key in SUFeedURL SUPublicEDKey SUEnableAutomaticChecks; do
         /usr/libexec/PlistBuddy -c "Delete :$key" "$APP/Contents/Info.plist" 2>/dev/null || true
     done

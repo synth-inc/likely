@@ -35,15 +35,21 @@ final class Updater: ObservableObject {
     /// Updates are for paid builds: every paid license (subscription or one-time) gets them, and
     /// nothing here looks at the plan. Free builds (LIKELY_FREE) never touch the paid feed (build.sh
     /// also strips SUFeedURL from their Info.plist), and builds without a feed (the bare
-    /// `.build/release/Likely` binary) would only show Sparkle errors.
+    /// `.build/release/Likely` binary) would only show Sparkle errors. Dev builds (LIKELY_DEV) are off
+    /// too (build.sh strips their feed as well), so Sparkle never offers to replace one with a release.
     nonisolated static var isEnabled: Bool {
-        !License.isFreeBuild && Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil
+        #if LIKELY_DEV
+        return false
+        #else
+        return !License.isFreeBuild && Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil
+        #endif
     }
 
     /// Starts the updater (scheduled background checks). Call once at launch.
     func start() {
         guard Self.isEnabled else {
-            Log.write("update", License.isFreeBuild ? "free build; updates disabled" : "no SUFeedURL in Info.plist; updates disabled")
+            Log.write("update", License.isFreeBuild ? "free build; updates disabled"
+                      : "dev build or no SUFeedURL in Info.plist; updates disabled")
             return
         }
         controller.startUpdater()
