@@ -86,6 +86,7 @@ private struct GeneralSettings: View {
                      : "Needs the optional Screenshots permission (Permissions tab). Without it, describe the file in the bar above the picker.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            UpdatesSection()
             Section("Troubleshooting") {
                 Toggle("Log every accessibility event (verbose)", isOn: $verbose)
                     .onChange(of: verbose) { _, value in actions.verboseChanged(value) }
@@ -98,6 +99,37 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Updates
+
+private struct UpdatesSection: View {
+    @ObservedObject private var updater = Updater.shared
+
+    private var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
+    }
+
+    var body: some View {
+        Section("Updates") {
+            HStack {
+                Text("Version \(version)")
+                Spacer()
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+            }
+            Toggle("Automatically check for updates", isOn: Binding(
+                get: { updater.automaticallyChecksForUpdates },
+                set: { updater.automaticallyChecksForUpdates = $0 }))
+            if let lastCheck = updater.lastCheck {
+                Text("Last checked \(lastCheck.formatted(.relative(presentation: .named)))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

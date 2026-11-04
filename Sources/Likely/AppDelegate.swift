@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClaudeLocator.resolve()
         Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")")
         buildStatusItem()
+        MainActor.assumeIsolated { Updater.shared.start() }
 
         coordinator.verbose = Settings.verbose
         coordinator.onStateChange = { [weak self] state, message in
@@ -117,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Debug View…", action: #selector(showDebugView), keyEquivalent: "d").target = self
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
+        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Likely", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -137,6 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openFolder() {
         try? LikelyFolder.create()
         NSWorkspace.shared.open(LikelyFolder.url)
+    }
+
+    @objc private func checkForUpdates() {
+        MainActor.assumeIsolated { Updater.shared.checkForUpdates() }
     }
 
     @objc private func togglePause() {

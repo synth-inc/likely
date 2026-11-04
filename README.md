@@ -18,6 +18,20 @@ the Finder sidebar), and finding the `claude` CLI.
 For debugging, run the bare binary from a terminal (`.build/release/Likely`): it inherits the
 terminal's Accessibility / Screen Recording grants and logs to stderr.
 
+## Releases & updates
+
+Likely updates itself with [Sparkle](https://sparkle-project.org). The feed is
+`public/likely/appcast.xml` on onit-server (`SUFeedURL` in Info.plist); updates are signed with an
+EdDSA key kept in the release machine's login Keychain (account `likely`).
+
+```sh
+scripts/bump-version.sh patch && git commit -am "Bump version"
+scripts/release.sh --dry-run   # build, Developer ID sign, Likely.dmg, notarize, appcast → build/release
+scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Likely.dmg, write the appcast
+```
+
+Then commit and deploy the appcast in onit-server (the script prints the commands).
+
 ## How it works
 
 - **Detection** (`AXWatcher`, `PickerHeuristics`): AX observers on every app. NSOpenPanel windows have
