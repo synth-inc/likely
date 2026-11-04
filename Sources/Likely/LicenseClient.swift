@@ -78,16 +78,23 @@ actor LicenseClient {
     func checkoutURL(plan: Plan) async throws -> URL {
         struct Body: Encodable { let plan: String }
         let response: SessionResponse = try await send("POST", "/v1/subscription/stripe/checkout", body: Body(plan: plan.rawValue))
-        // Only ever hand the browser an https page (never file:, javascript:, custom schemes…).
-        guard let url = URL(string: response.sessionUrl), url.scheme?.lowercased() == "https" else { throw ClientError.badResponse }
-        return url
+        return try Self.stripePage(response.sessionUrl, host: "checkout.stripe.com")
     }
 
     /// Stripe's customer portal (cancel, change card, invoices).
     func billingPortalURL() async throws -> URL {
         let response: SessionResponse = try await send("POST", "/v1/subscription/stripe/billing-portal?product=likely")
-        // Only ever hand the browser an https page (never file:, javascript:, custom schemes…).
-        guard let url = URL(string: response.sessionUrl), url.scheme?.lowercased() == "https" else { throw ClientError.badResponse }
+        return try Self.stripePage(response.sessionUrl, host: "billing.stripe.com")
+    }
+
+    /// Only ever hand the browser Stripe's own https page: never file:, javascript:, custom schemes,
+    /// or another site (a compromised or misconfigured server can't send the user elsewhere).
+    private static func stripePage(_ string: String, host: String) throws -> URL {
+        guard let url = URL(string: string), url.scheme?.lowercased() == "https", url.host?.lowercased() == host,
+              url.user == nil, url.password == nil, url.port == nil || url.port == 443 else {
+            Log.write("license", "refused session URL host=\(URL(string: string)?.host ?? "?")")
+            throw ClientError.badResponse
+        }
         return url
     }
 
