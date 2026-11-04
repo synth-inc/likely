@@ -39,8 +39,8 @@
     <section class="hero wrap">
       <img class="hero-logo" src="assets/logo.svg" width="88" height="88" alt="">
       <p class="badge"><span class="badge-dot" aria-hidden="true"></span><span data-copy-id="hero.badge">Open source, for macOS</span></p>
-      <h1><span data-copy-id="hero.title">Why doesn’t macOS</span> <em data-copy-id="hero.title.em">do this?</em></h1>
-      <p class="subtitle" data-copy-id="hero.subtitle">Open a file picker. The file you were about to hunt for is already in the Likely folder, pinned to the sidebar.</p>
+      <h1 data-copy-id="hero.title">Why doesn’t macOS <i>already</i> do this?</h1>
+      <p class="subtitle" data-copy-id="hero.subtitle">Anytime you open a file picker, <b>Likely</b> finds the files you're looking for and copies them into a pinned folder.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg">
           <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -48,7 +48,6 @@
         </a>
         <a class="btn btn-quiet" href="https://github.com/synth-inc/likely"><span data-copy-id="hero.github">View on GitHub</span></a>
       </div>
-      <p class="reqs"><span data-copy-id="hero.reqs">macOS 14 or later · Needs a coding agent (Claude Code, Codex, Gemini CLI, OpenCode or Hermes)</span></p>
     </section>
 
     <!-- 2. DEMO (DockLock: "See the difference" eyebrow + demo panel). Here: the autoplay video. -->
@@ -131,24 +130,13 @@
     <!-- 4. HOW IT WORKS -->
     <section id="how" class="wrap section" aria-labelledby="how-h">
       <p class="eyebrow" data-copy-id="how.eyebrow">How it works</p>
-      <h2 id="how-h" data-copy-id="how.title">Three steps, two of which you were doing anyway.</h2>
-      <ol class="panel steps">
-        <li>
-          <span class="num">1</span>
-          <h3 data-copy-id="how.1.title">Open a file picker</h3>
-          <p data-copy-id="how.1.body">Attach in Mail, upload in Chrome, Open in Pages. Likely notices the dialog the moment it appears.</p>
-        </li>
-        <li>
-          <span class="num">2</span>
-          <h3 data-copy-id="how.2.title">Your agent takes a look</h3>
-          <p data-copy-id="how.2.body">It reads what you typed (“my latest pay stub”) or, with screenshots on, what you were doing, and searches your files. Read-only.</p>
-        </li>
-        <li>
-          <span class="num">3</span>
-          <h3 data-copy-id="how.3.title">The picker jumps to it</h3>
-          <p data-copy-id="how.3.body">Copies of the best guesses appear in the Likely folder and the picker opens there. Hit Open.</p>
-        </li>
-      </ol>
+      <h2 id="how-h" data-copy-id="how.headline">You open a picker. Likely does the rest.</h2>
+      <ul class="panel bullets">
+        <li data-copy-id="how.b1">Open any file picker: Mail, Chrome, Pages, anything.</li>
+        <li data-copy-id="how.b2">Likely guesses the files you need and copies them into the Likely folder, pinned in the sidebar.</li>
+        <li data-copy-id="how.b3">Not quite right? Type what you need in the bar above the picker.</li>
+        <li data-copy-id="how.b4">It runs on the coding agent you already have, read-only.</li>
+      </ul>
       <div class="agents">
         <span class="agents-label" data-copy-id="how.agents.label">Runs on the agent you already have:</span>
         <span class="chip" data-copy-id="agent.claude">Claude Code</span>
@@ -159,29 +147,9 @@
       </div>
     </section>
 
-    <!-- 5. PRIVACY -->
-    <section class="wrap section" aria-labelledby="priv-h">
-      <p class="eyebrow" data-copy-id="privacy.eyebrow">Privacy</p>
-      <h2 id="priv-h" data-copy-id="privacy.title">Nosy, but polite.</h2>
-      <div class="panel cols3">
-        <div>
-          <h3 data-copy-id="privacy.1.title">Read-only</h3>
-          <p data-copy-id="privacy.1.body">Your agent can search and read. It can’t edit, move or delete anything. Likely never modifies your files.</p>
-        </div>
-        <div>
-          <h3 data-copy-id="privacy.2.title">Screenshots are opt-in</h3>
-          <p data-copy-id="privacy.2.body">Off unless you turn them on. When on, they go only to the agent you chose, nowhere else.</p>
-        </div>
-        <div>
-          <h3 data-copy-id="privacy.3.title">Copies, not originals</h3>
-          <p data-copy-id="privacy.3.body">The Likely folder holds lightweight copies. Originals stay put, and the folder empties when the picker closes.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- 6. PRICING -->
+    <!-- 5. PRICING -->
     <section id="pricing" class="wrap section" aria-labelledby="price-h">
-      <p class="eyebrow" data-copy-id="pricing.eyebrow">Pricing, but make it a vote</p>
+      <p class="eyebrow eyebrow-as-typed" data-copy-id="pricing.eyebrow">PiCk Your Pricing</p>
       <h2 id="price-h" data-copy-id="pricing.title">Should Likely keep getting better?</h2>
       <div class="plans">
         <article class="panel plan plan-featured">
@@ -205,30 +173,42 @@
       </div>
     </section>
 
-    <!-- 7. FAQ -->
+    <!-- 6. FAQ -->
     <section id="faq" class="wrap section" aria-labelledby="faq-h">
       <p class="eyebrow" data-copy-id="faq.eyebrow">FAQ</p>
       <h2 id="faq-h" data-copy-id="faq.title">Questions, reasonably asked.</h2>
       <div class="panel faq">
         <details>
-          <summary><span data-copy-id="faq.1.q">Does it change my files?</span></summary>
-          <p data-copy-id="faq.1.a">No. Your agent runs read-only, and Likely only puts copies into the Likely folder. The originals are never touched.</p>
+          <summary><span data-copy-id="faq.how.q">How does it work?</span></summary>
+          <p data-copy-id="faq.how.a">When a file picker opens, Likely asks your coding agent to find the files you most likely need, based on what you type in the bar and, if you turn screenshots on, what you were just doing. The agent can only search and read. Likely then copies the best matches into the Likely folder and points the picker there; when the picker closes, the folder is cleared.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.2.q">Do I need an account?</span></summary>
-          <p data-copy-id="faq.2.a">No. There’s no sign-up, and purchases work without an account.</p>
+          <summary><span data-copy-id="faq.need.q">What do I need?</span></summary>
+          <p data-copy-id="faq.need.a">macOS 14 or later, and a coding agent: Claude Code, Codex, Gemini CLI, OpenCode or Hermes.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.3.q">Which agents does it work with?</span></summary>
-          <p data-copy-id="faq.3.a">Claude Code, Codex, Gemini CLI, OpenCode and Hermes. Likely uses the CLI you already have installed, under your existing plan.</p>
+          <summary><span data-copy-id="faq.files.q">Does Likely change my files?</span></summary>
+          <p data-copy-id="faq.files.a">No. Your agent can search and read. It can’t edit, move or delete anything. Likely never modifies your files.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.4.q">Why does it want Accessibility permission?</span></summary>
-          <p data-copy-id="faq.4.a">That’s how it notices a file picker opening and pins the Likely folder. Screen Recording is only needed if you turn on screenshots.</p>
+          <summary><span data-copy-id="faq.screenshots.q">Are screenshots required? Where do they go?</span></summary>
+          <p data-copy-id="faq.screenshots.a">No. They’re off unless you turn them on. When on, they go only to the agent you chose, nowhere else.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.5.q">What if I switch Macs?</span></summary>
-          <p data-copy-id="faq.5.a">Honest answer: restoring a purchase by email is coming, but isn’t here yet. Until then, open an issue on GitHub and we’ll sort it out.</p>
+          <summary><span data-copy-id="faq.folder.q">What’s in the Likely folder?</span></summary>
+          <p data-copy-id="faq.folder.a">The Likely folder holds copies. Originals stay put, and the folder is cleared when the picker closes.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.account.q">Do I need an account?</span></summary>
+          <p data-copy-id="faq.account.a">No. There’s no sign-up, and purchases work without an account.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.accessibility.q">Why does it want Accessibility permission?</span></summary>
+          <p data-copy-id="faq.accessibility.a">That’s how it notices a file picker opening and pins the Likely folder. Screen Recording is only needed if you turn on screenshots.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.switch.q">What if I switch Macs?</span></summary>
+          <p data-copy-id="faq.switch.a">Honest answer: restoring a purchase by email is coming, but isn’t here yet. Until then, open an issue on GitHub and we’ll sort it out.</p>
         </details>
       </div>
     </section>

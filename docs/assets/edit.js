@@ -17,7 +17,14 @@
   function save(map) { try { localStorage.setItem(KEY, JSON.stringify(map)); } catch (e) {} }
   function norm(s) { return String(s).replace(/\s+/g, ' ').trim(); }
 
-  var edits = load();
+  // Drop stale keys (ids that no longer exist) and edits that now match the source.
+  var edits = load(), pruned = false;
+  Object.keys(edits).forEach(function (id) {
+    if (!Object.prototype.hasOwnProperty.call(originals, id) || norm(edits[id]) === norm(originals[id])) {
+      delete edits[id]; pruned = true;
+    }
+  });
+  if (pruned && editing) save(edits);
   els.forEach(function (el) {
     var id = el.dataset.copyId;
     if (Object.prototype.hasOwnProperty.call(edits, id)) el.innerHTML = edits[id];
