@@ -496,7 +496,7 @@ enum PromptTemplate {
 
     Output protocol (an app parses your text; nothing else you write is shown):
     - Before each step, write a line `STATUS: <what you're doing, under 8 words>`, e.g. `STATUS: Looking at the context`, `STATUS: Searching Documents for app icons`, `STATUS: Checking recent downloads`.
-    - The moment you find a strong candidate, write a line `FILE: /absolute/path/to/file`. Don't wait until the end. Best first, at most 8 files total. Only regular files that exist.
+    - The moment you find a strong candidate, write a line `FILE: /absolute/path/to/file`. Don't wait until the end. Best first, at most 8 total. Files that exist, or a whole folder (its path) when the user asks for a folder.
     - Aim for 3–6 tool calls, then stop.
 
     Search tips:
