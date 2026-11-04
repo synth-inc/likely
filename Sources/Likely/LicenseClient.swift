@@ -9,7 +9,7 @@ import Security
 actor LicenseClient {
     static let shared = LicenseClient()
 
-    /// Production server. Override with `defaults write com.timl.likely serverBaseURL http://localhost:3000`.
+    /// Production server. Override with `defaults write inc.synth.likely serverBaseURL http://localhost:3000`.
     static var baseURL: URL {
         if let override = UserDefaults.standard.string(forKey: "serverBaseURL"), let url = URL(string: override) {
             return url
@@ -196,7 +196,7 @@ actor LicenseClient {
 /// Minimal generic-password Keychain wrapper for the device token. Failures (e.g. a locked keychain)
 /// just mean we log in again next launch, which is harmless: device login is idempotent per installId.
 enum Keychain {
-    private static let service = "com.timl.likely.server"
+    private static let service = "inc.synth.likely.server"
 
     private static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,

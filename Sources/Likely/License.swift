@@ -57,8 +57,8 @@ enum License {
 
     /// Dev builds only (`./build.sh` compiles with LIKELY_DEV; release builds never do): pretend to hold
     /// a license without the server, for testing the paid state.
-    /// `defaults write com.timl.likely devLicenseOverride -string subscription` (or `one_time`);
-    /// `defaults delete com.timl.likely devLicenseOverride` to turn it off.
+    /// `defaults write inc.synth.likely devLicenseOverride -string subscription` (or `one_time`);
+    /// `defaults delete inc.synth.likely devLicenseOverride` to turn it off.
     static var devOverride: Kind? {
         #if LIKELY_DEV
         switch UserDefaults.standard.string(forKey: "devLicenseOverride") {

@@ -53,7 +53,7 @@ final class AgentDetector: ObservableObject {
     func scan(completion: (() -> Void)? = nil) {
         guard !isScanning else { return }
         isScanning = true
-        // Debug: `defaults write com.timl.likely simulateNoAgents -bool true` to preview the
+        // Debug: `defaults write inc.synth.likely simulateNoAgents -bool true` to preview the
         // experience for someone without a coding agent.
         let simulateNone = UserDefaults.standard.bool(forKey: "simulateNoAgents")
         DispatchQueue.global(qos: .userInitiated).async {
