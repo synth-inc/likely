@@ -25,6 +25,14 @@
 #     It serves public/likely/appcast.xml at $FEED_URL; the release goes live once that commit is deployed.
 set -euo pipefail
 
+# Releases are the paid edition, built without dev-only switches, whatever the calling shell has set.
+if [ -n "${LIKELY_FREE:-}" ]; then
+    echo "LIKELY_FREE is set; releases are the paid build. Run without it (unset LIKELY_FREE)."; exit 1
+fi
+if [ -n "${LIKELY_DEV:-}" ]; then
+    echo "LIKELY_DEV is set; releases never include dev-only features. Run without it (unset LIKELY_DEV)."; exit 1
+fi
+
 APP_NAME="Likely"
 GH_REPO="synth-inc/likely"
 SPARKLE_ACCOUNT="likely"
@@ -82,6 +90,9 @@ if [ "$SKIP_NOTARIZE" = false ]; then
 fi
 
 if [ "$DRY_RUN" = false ]; then
+    # Publishing only from main, exactly as committed (--dry-run works on any branch).
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    [ "$BRANCH" = "main" ] || { echo "Releases are published from main (on $BRANCH). Use --dry-run to test elsewhere."; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "Working tree not clean; commit the version bump first"; exit 1; }
     git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "Tag $TAG already exists locally"; exit 1; }
     gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1 && { echo "Release $TAG already exists"; exit 1; }
@@ -98,6 +109,10 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 BUILD_DIR="$OUT" CODESIGN_IDENTITY="$SIGN_ID" LIKELY_DISTRIBUTION=1 ./build.sh
 codesign --verify --deep --strict --verbose=2 "$APP"
+# build.sh only compiles dev features (LIKELY_DEV) when LIKELY_DISTRIBUTION isn't set; make sure.
+if grep -q "devLicenseOverride" "$APP/Contents/MacOS/$APP_NAME" || [ -d "$APP/Contents/Resources/MenuBarGlyphs" ]; then
+    echo "The release build contains dev-only features"; exit 1
+fi
 codesign -d --entitlements - --xml "$APP" >/dev/null
 
 # ---------------------------------------------------------------- DMG

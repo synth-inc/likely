@@ -32,11 +32,18 @@ final class Updater: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// Starts the updater (scheduled background checks). Call once at launch. Skipped without a feed in
-    /// Info.plist, e.g. the bare `.build/release/Likely` debug binary, where Sparkle would show an error.
+    /// Updates are for paid builds: every paid license (subscription or one-time) gets them, and
+    /// nothing here looks at the plan. Free builds (LIKELY_FREE) never touch the paid feed (build.sh
+    /// also strips SUFeedURL from their Info.plist), and builds without a feed (the bare
+    /// `.build/release/Likely` binary) would only show Sparkle errors.
+    nonisolated static var isEnabled: Bool {
+        !License.isFreeBuild && Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil
+    }
+
+    /// Starts the updater (scheduled background checks). Call once at launch.
     func start() {
-        guard Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil else {
-            Log.write("update", "no SUFeedURL in Info.plist; updates disabled")
+        guard Self.isEnabled else {
+            Log.write("update", License.isFreeBuild ? "free build; updates disabled" : "no SUFeedURL in Info.plist; updates disabled")
             return
         }
         controller.startUpdater()
@@ -44,6 +51,7 @@ final class Updater: ObservableObject {
     }
 
     func checkForUpdates() {
+        guard Self.isEnabled else { return }
         // Likely is a menu bar (accessory) app: bring Sparkle's window to the front.
         NSApp.activate(ignoringOtherApps: true)
         controller.checkForUpdates(nil)

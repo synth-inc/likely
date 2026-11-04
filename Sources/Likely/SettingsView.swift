@@ -127,7 +127,7 @@ private struct GeneralSettings: View {
                      : "Needs the optional Screenshots permission (Permissions tab). Without it, describe the file in the bar above the picker.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            UpdatesSection()
+            if Updater.isEnabled { UpdatesSection() }
             Section("Troubleshooting") {
                 Toggle("Log every accessibility event (verbose)", isOn: $verbose)
                     .onChange(of: verbose) { _, value in actions.verboseChanged(value) }

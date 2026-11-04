@@ -27,6 +27,12 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN_DIR/Likely" "$APP/Contents/MacOS/Likely"
 cp Info.plist "$APP/Contents/Info.plist"
+# Free builds never use the paid update feed: no feed, no key, no scheduled checks (Updater stays off).
+if [ "${LIKELY_FREE:-}" = "1" ]; then
+    for key in SUFeedURL SUPublicEDKey SUEnableAutomaticChecks; do
+        /usr/libexec/PlistBuddy -c "Delete :$key" "$APP/Contents/Info.plist" 2>/dev/null || true
+    done
+fi
 # Bundled resources, e.g. Resources/likely-demo.mp4 for the onboarding demo video.
 if compgen -G "Resources/*" > /dev/null; then cp -R Resources/. "$APP/Contents/Resources/"; fi
 # Sparkle (auto-updates). The executable finds it through its @executable_path/../Frameworks rpath.
