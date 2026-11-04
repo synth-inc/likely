@@ -1,0 +1,247 @@
+import Foundation
+
+/// Runs OpenCode: `opencode run --format json`, with the screenshot attached via `-f`. OpenCode has
+/// no sandbox of its own and its bash allowlist only sees command names (`ls > file` passes as `ls`),
+/// so it runs under `sandbox-exec` with a profile that denies file writes outside its own data
+/// directories, plus a permission config that hides edit tools and allowlists search commands.
+/// Like Codex it can't take messages mid-turn: feedback stops the current turn and continues the same
+/// session with `opencode run -s <session>`.
+final class OpenCodeRunner: AgentRunner {
+    var onStatus: ((String) -> Void)?
+    var onFile: ((String) -> Void)?
+    var onTurnFinished: ((AgentOutcome) -> Void)?
+    var onExit: ((AgentOutcome) -> Void)?
+
+    private(set) var isBusy = false
+    private var process: Process?
+    private var buffer = Data()
+    private var sessionID: String?
+    private var executable: String?
+    private var model = ""
+    private var workDir: URL?
+    private var turnEnded = false
+    private var transcript: FileHandle?
+
+    /// Zen's free models need no sign-in; this one is fast, follows the protocol and sees images.
+    static let defaultModel = "opencode/deepseek-v4.1-flash-free"
+
+    /// Last matching rule wins, so order matters (hence a literal rather than a dictionary). `*` denies
+    /// everything not listed (edit/write/patch, webfetch, task, question, …), which also removes those
+    /// tools from the model's view. Shell writes are stopped by the sandbox; the bash list keeps the agent
+    /// on search commands, and find's -exec/-ok could otherwise run anything.
+    private static let permission = """
+    {"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","external_directory":"allow",\
+    "bash":{"*":"deny","ls":"allow","ls *":"allow","mdfind *":"allow","mdls *":"allow","find *":"allow",\
+    "grep *":"allow","head *":"allow","tail *":"allow","stat *":"allow","file *":"allow","sort *":"allow",\
+    "wc *":"allow","echo *":"allow","find *-exec*":"deny","find *-ok*":"deny","find *-delete*":"deny"}}
+    """
+
+    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+        cancel()
+        sessionID = nil
+        self.executable = executable
+        self.model = model
+        self.workDir = workDir
+        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
+        transcript = try? FileHandle(forWritingTo: transcriptURL)
+
+        var arguments = ["run", "--format", "json", "-m", model]
+        if let image { arguments += ["-f", image.path] }
+        launch(arguments + ["--", prompt])   // `--`: -f takes several values, and text may start with "-"
+    }
+
+    @discardableResult
+    func send(_ text: String) -> Bool {
+        guard let sessionID, executable != nil else { return false }
+        // No mid-turn input: stop the current turn (the session so far is kept) and continue it.
+        stopProcess()
+        launch(["run", "--format", "json", "-m", model, "-s", sessionID, "--", text])
+        return true
+    }
+
+    func cancel() {
+        stopProcess()
+        sessionID = nil
+        try? transcript?.close()
+        transcript = nil
+    }
+
+    private func stopProcess() {
+        guard let process else { return }
+        self.process = nil
+        isBusy = false
+        (process.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        (process.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        if process.isRunning {
+            process.terminate()
+            Log.write("opencode", "stopped pid=\(process.processIdentifier)")
+        }
+    }
+
+    private func launch(_ arguments: [String]) {
+        guard let executable, let workDir else { return }
+        buffer = Data()
+        turnEnded = false
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var env = ProcessInfo.processInfo.environment
+        // Our own (empty) config dir instead of ~/.config/opencode: no MCP servers or plugins from the
+        // user's config. Credentials live in the data dir (~/.local/share/opencode) and still apply.
+        let configHome = workDir.appendingPathComponent("opencode-config").path
+        env["XDG_CONFIG_HOME"] = configHome
+        env["OPENCODE_PERMISSION"] = Self.permission
+        for flag in ["OPENCODE_PURE", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE",
+                     "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_LSP_DOWNLOAD"] {
+            env[flag] = "1"
+        }
+        let dir = (executable as NSString).deletingLastPathComponent   // npm installs need `node` beside them
+        env["PATH"] = [dir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
+            .joined(separator: ":")
+
+        let writable = [
+            env["XDG_DATA_HOME"].map { $0 + "/opencode" } ?? home + "/.local/share/opencode",
+            env["XDG_STATE_HOME"].map { $0 + "/opencode" } ?? home + "/.local/state/opencode",
+            env["XDG_CACHE_HOME"].map { $0 + "/opencode" } ?? home + "/.cache/opencode",
+            configHome,
+            "/private/var/folders",   // $TMPDIR
+        ]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+        process.currentDirectoryURL = workDir
+        process.arguments = ["-p", Self.sandboxProfile(writable: writable), executable] + arguments
+        process.environment = env
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = stdout
+        process.standardError = stderr
+        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            DispatchQueue.main.async { self?.consume(data, from: process) }
+        }
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            Log.write("opencode-stderr", text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        process.terminationHandler = { [weak self] p in
+            DispatchQueue.main.async {
+                guard let self, self.process === p else { return }
+                stdout.fileHandleForReading.readabilityHandler = nil
+                stderr.fileHandleForReading.readabilityHandler = nil
+                self.process = nil
+                self.isBusy = false
+                Log.write("opencode", "exited with status \(p.terminationStatus)")
+                guard !self.turnEnded else { return }
+                // There's no turn-completed event: a clean exit after the last step is the end of the turn.
+                if p.terminationStatus == 0 {
+                    self.turnEnded = true
+                    self.onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
+                } else {
+                    self.onExit?(AgentOutcome(success: false, summary: "opencode exited with status \(p.terminationStatus)", costUSD: nil))
+                }
+            }
+        }
+
+        do {
+            try process.run()
+            self.process = process
+            isBusy = true
+            Log.write("opencode", "started \(arguments.contains("-s") ? "resume" : "run") model=\(model) pid=\(process.processIdentifier)")
+        } catch {
+            Log.write("opencode", "failed to launch \(executable): \(error)")
+            onExit?(AgentOutcome(success: false, summary: "Couldn't launch opencode", costUSD: nil))
+        }
+    }
+
+    /// Everything allowed except writing files, other than to OpenCode's own state and temp dirs.
+    private static func sandboxProfile(writable: [String]) -> String {
+        let quoted = { (path: String) in "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
+        let subpaths = writable.map { "(subpath \(quoted($0)))" }.joined(separator: " ")
+        return """
+        (version 1)(allow default)(deny file-write*)
+        (allow file-write* (literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/(fd|ttys)") \(subpaths))
+        """
+    }
+
+    private func consume(_ data: Data, from source: Process) {
+        guard source === process, !data.isEmpty else { return }
+        transcript?.write(data)
+        buffer.append(data)
+        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+            let line = buffer[buffer.startIndex..<newline]
+            buffer.removeSubrange(buffer.startIndex...newline)
+            if let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
+                handle(event: event)
+            }
+        }
+    }
+
+    /// Events (all carry `sessionID`; data is in `part`): step_start, text, tool_use (emitted once the
+    /// call has completed or errored), step_finish (reason "tool-calls" or "stop"), error.
+    private func handle(event: [String: Any]) {
+        if let id = event["sessionID"] as? String { sessionID = id }
+        let part = event["part"] as? [String: Any] ?? [:]
+        switch event["type"] as? String {
+        case "text":
+            AgentProtocol.parse(text: part["text"] as? String ?? "", onStatus: onStatus, onFile: onFile)
+        case "tool_use":
+            let input = (part["state"] as? [String: Any])?["input"] as? [String: Any] ?? [:]
+            if let status = Self.status(forTool: part["tool"] as? String ?? "", input: input) {
+                onStatus?(status)
+            }
+        case "error":
+            turnEnded = true
+            isBusy = false
+            let error = event["error"] as? [String: Any] ?? [:]
+            let message = ((error["data"] as? [String: Any])?["message"] as? String) ?? error["name"] as? String ?? "opencode failed"
+            Log.write("opencode", "error: \(message.prefix(300))")
+            onTurnFinished?(AgentOutcome(success: false, summary: message, costUSD: nil))
+        default:
+            break
+        }
+    }
+
+    /// Fallback progress text derived from the tool OpenCode called, for when it doesn't narrate.
+    static func status(forTool name: String, input: [String: Any]) -> String? {
+        switch name {
+        case "bash":
+            if let description = input["description"] as? String, !description.isEmpty { return description }
+            return AgentProtocol.status(forCommand: input["command"] as? String ?? "")
+        case "read":
+            return (input["filePath"] as? String).map { "Reading \(($0 as NSString).lastPathComponent)" }
+        case "grep":
+            return (input["pattern"] as? String).map { "Searching file contents for \($0.prefix(40))" }
+        case "glob":
+            return (input["pattern"] as? String).map { "Looking for \($0.prefix(40))" }
+        case "list":
+            return "Looking through recent files"
+        default:
+            return nil
+        }
+    }
+}
+
+extension OpenCodeRunner {
+    /// OpenCode Zen's free models that take images, from OpenCode's models.dev cache
+    /// (~/.cache/opencode/models.json). Other providers work too if the user has signed in to them.
+    static var availableModels: [String] {
+        let fallback = [defaultModel, "opencode/glm-5.3-flash-free", "opencode/mimo-v2.6-flash-free", "opencode/nemotron-3.5-super-vl-free"]
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/opencode/models.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = (json["opencode"] as? [String: Any])?["models"] as? [String: [String: Any]] else { return fallback }
+        let free = models.filter { id, model in
+            let cost = (model["cost"] as? [String: Any])?["input"] as? Double
+            let input = (model["modalities"] as? [String: Any])?["input"] as? [String] ?? []
+            // Deprecated/preview models have a status; "alpha" stealth models come and go within days.
+            return cost == 0 && model["status"] == nil && input.contains("image") && model["tool_call"] as? Bool == true
+                && !id.contains("alpha")
+        }.keys.map { "opencode/\($0)" }.sorted()
+        guard !free.isEmpty else { return fallback }
+        return free.contains(defaultModel) ? [defaultModel] + free.filter { $0 != defaultModel } : free
+    }
+}
