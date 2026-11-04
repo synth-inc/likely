@@ -209,4 +209,4 @@ h1 em { font-style: normal; color: var(--text-2); }
 @media (max-width: 560px) { .copy-bar { left: 8px; right: 8px; bottom: 8px; flex-wrap: wrap; } }
 
 /* "already" in the hero title */
-.title-accent { color: var(--link); }
+.title-accent { color: var(--text-2); font-style: normal; }
