@@ -91,11 +91,14 @@ final class Coordinator {
         }
         runner.onFile = { [weak self] path in
             guard let self else { return }
-            let added = self.folder.add(path: path)
-            self.debugRun?.files.append((path: path, added: added))
-            if added {
-                self.foundCount += 1
-                self.hud.model.fileCount = self.foundCount
+            // Copies run in the background; the count goes up once each copy is in place.
+            self.folder.add(path: path) { [weak self] added in
+                guard let self else { return }
+                self.debugRun?.files.append((path: path, added: added))
+                if added {
+                    self.foundCount += 1
+                    self.hud.model.fileCount = self.foundCount
+                }
             }
         }
         runner.onTurnFinished = { [weak self] outcome in self?.runFinished(outcome) }
@@ -123,6 +126,7 @@ final class Coordinator {
     func quit() {
         stop()
         cleanupTimer?.invalidate()
+        folder.finishCopies()
         folder.clearIfExpired()
         HermesRunner.stopGateway()
     }
