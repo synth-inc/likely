@@ -3,7 +3,7 @@
 Menu bar app that notices when a macOS file picker opens, asks Claude Code what file you probably
 need (based on a screenshot of the window behind the picker), and clones the candidates into `~/Likely`.
 A file named `…<what Claude is doing>…` sits at the top of the folder as a live progress report.
-When the picker closes, the folder is cleared.
+The copies stay until the next picker opens (or 10 minutes after you close one), so apps that read the file later still find it.
 
 ## Build & run
 
