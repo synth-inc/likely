@@ -10,6 +10,9 @@ import Foundation
 /// of Likely's grants at once, folders included, and make macOS prompt for "node"/"opencode" instead,
 /// so the agents stay attributed to Likely and these rules cut off the other three instead:
 /// - Automation: no Apple Events, and no osascript/open/shortcuts/automator/screencapture/launchctl.
+/// - Launching or opening anything outside the sandbox: no LaunchServices (`open`, NSWorkspace and
+///   LSOpen all go through it, so no starting an app or a .command file that would run unconfined).
+/// - Clipboard: no pasteboard server, so nothing can read or replace what the user copied.
 /// - Accessibility: no `com.apple.axserver` (the AX client port; without it every AX call fails).
 /// - Screen Recording and synthetic input: no WindowServer, replayd or ScreenCaptureKit services.
 /// - No asking TCC directly either.
@@ -19,6 +22,7 @@ enum AgentSandbox {
     static let blockedExecutables = [
         "/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/shortcuts", "/usr/bin/automator",
         "/usr/sbin/screencapture", "/usr/bin/screencapture", "/usr/bin/osacompile", "/usr/bin/tccutil",
+        "/usr/bin/pbcopy", "/usr/bin/pbpaste",
     ]
 
     static let privacyRules = """
@@ -28,7 +32,10 @@ enum AgentSandbox {
         (global-name-prefix "com.apple.replayd") (global-name-prefix "com.apple.screencapture")
         (global-name-prefix "com.apple.ScreenCaptureKit")
         (global-name "com.apple.tccd") (global-name "com.apple.tccd.system")
-        (local-name "com.apple.axserver") (global-name "com.apple.axserver"))
+        (local-name "com.apple.axserver") (global-name "com.apple.axserver")
+        (global-name "com.apple.coreservices.launchservicesd") (global-name-prefix "com.apple.lsd.")
+        (global-name "com.apple.coreservices.quarantine-resolver") (global-name "com.apple.dock.server")
+        (global-name-prefix "com.apple.pasteboard."))
     (deny process-exec \(blockedExecutables.map { "(literal \(quoted($0)))" }.joined(separator: " ")))
     """
 
@@ -40,12 +47,18 @@ enum AgentSandbox {
     /// - writes only to `writable` (plus the usual /dev nodes);
     /// - nothing can be executed from a writable location (no planting a binary or copying a system
     ///   tool to /tmp and running it), except `execAllowed` folders, which are also made read-only;
-    /// - outbound network only to HTTPS (port 443) and localhost (local model servers, Hermes' own
-    ///   gateway), plus Unix sockets (DNS goes through mDNSResponder's). Seatbelt can't filter by host
-    ///   name, so limiting traffic to the model API's domain isn't possible here; port 443 is the
-    ///   tightest rule that still works with every hosted provider.
-    static func confinedProfile(writable: [String], writableRegexes: [String] = [], execAllowed: [String] = []) -> String {
+    /// - outbound network only to HTTPS (port 443). Seatbelt can't filter by host name, so limiting
+    ///   traffic to the model API's domain isn't possible here; port 443 is the tightest rule that
+    ///   still works with every hosted provider.
+    /// - Unix sockets only for DNS (mDNSResponder) and under `unixSockets` (so no Docker socket, no
+    ///   ssh-agent, no other local daemons).
+    /// - localhost only with `allowLocalhost` (Hermes: its client talks to its own gateway over a
+    ///   loopback WebSocket on a random port, so the port can't be pinned).
+    static func confinedProfile(writable: [String], writableRegexes: [String] = [], execAllowed: [String] = [],
+                                unixSockets: [String] = [], unixSocketRegexes: [String] = [],
+                                allowLocalhost: Bool = false) -> String {
         let writableRules = writable.map { "(subpath \(quoted($0)))" } + writableRegexes.map { "(regex \(quoted($0)))" }
+        let socketRules = unixSockets.map { "(subpath \(quoted($0)))" } + unixSocketRegexes.map { "(regex \(quoted($0)))" }
         let noExec = writable + ["/private/tmp", "/private/var/tmp", "/private/var/folders"]
         var profile = """
         (version 1)
@@ -55,7 +68,9 @@ enum AgentSandbox {
             (regex #"^/dev/(fd/|ttys)") \(writableRules.joined(separator: " ")))
         (deny process-exec \(noExec.map { "(subpath \(quoted($0)))" }.joined(separator: " ")))
         (deny network-outbound)
-        (allow network-outbound (remote tcp "*:443") (remote ip "localhost:*") (remote unix-socket))
+        (allow network-outbound (remote tcp "*:443") \(allowLocalhost ? "(remote ip \"localhost:*\") " : "")\
+        (literal "/private/var/run/mDNSResponder") \(socketRules.joined(separator: " ")))
+        \(allowLocalhost ? "" : "(deny network-outbound (remote ip \"localhost:*\"))")
 
         """
         if !execAllowed.isEmpty {
