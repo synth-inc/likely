@@ -11,6 +11,8 @@ final class HUDModel: ObservableObject {
     @Published var working = true
     @Published var fileCount = 0
     @Published var draft = ""
+    /// Bumped to move keyboard focus into the text field.
+    @Published var focusRequest = 0
     var onSend: ((String) -> Void)?
     var onRejectAll: (() -> Void)?
     /// "Get Likely" in the unpaid state.
@@ -59,6 +61,21 @@ final class PickerHUD {
         panel.orderFrontRegardless()
         trackTimer?.invalidate()
         trackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.reposition() }
+        focusFieldSoon(for: element)
+    }
+
+    /// Puts the cursor in "Tell Likely what you're looking for…" once the picker has finished
+    /// animating in, so you can just start typing. Esc hands the keyboard back to the picker.
+    private static let focusDelay: TimeInterval = 0.6
+
+    private func focusFieldSoon(for element: AXUIElement?) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusDelay) { [weak self] in
+            guard let self, self.panel.isVisible, self.model.mode == .normal else { return }
+            // Still the same picker (it may have closed and another opened in the meantime).
+            if let element, let current = self.pickerElement, !CFEqual(element, current) { return }
+            self.panel.makeKey()
+            self.model.focusRequest += 1
+        }
     }
 
     func hide() {
@@ -133,6 +150,7 @@ final class HUDPanel: NSPanel {
 private struct HUDView: View {
     @ObservedObject var model: HUDModel
     var returnFocus: () -> Void
+    @FocusState private var fieldFocused: Bool
 
     private var trimmedDraft: String { model.draft.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -155,7 +173,10 @@ private struct HUDView: View {
                 TextField("Tell Likely what you're looking for…", text: $model.draft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
+                    .focused($fieldFocused)
                     .onSubmit(send)
+                    .onExitCommand(perform: returnFocus)
+                    .onChange(of: model.focusRequest) { _, _ in fieldFocused = true }
                 trailingStatus
                 SendButton(enabled: !trimmedDraft.isEmpty, action: send)
             }
