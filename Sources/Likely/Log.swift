@@ -10,8 +10,8 @@ enum Log {
         return dir.appendingPathComponent("likely.log")
     }()
 
-    private static let queue = DispatchQueue(label: "com.timl.likely.log")
-    private static let logger = Logger(subsystem: "com.timl.likely", category: "app")
+    private static let queue = DispatchQueue(label: "inc.synth.likely.log")
+    private static let logger = Logger(subsystem: "inc.synth.likely", category: "app")
     private static let formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
