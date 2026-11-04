@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Likely: the file you were about to look for</title>
-  <meta name="description" content="Likely is a Mac menu bar app that guesses which file you need the moment a file picker opens, and puts it right there. Runs on the coding agent you already have.">
+  <meta name="description" content="Likely is a Mac menu bar app. Open a file picker and the file you were about to hunt for is already in the Likely folder, pinned to the sidebar.">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#16171A" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F5F5F5" media="(prefers-color-scheme: light)">
   <meta property="og:title" content="Likely: why doesn't macOS do this?">
-  <meta property="og:description" content="Open any file picker. The file you need is already there.">
+  <meta property="og:description" content="Open a file picker. The file you were about to hunt for is already there.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://synth-inc.github.io/likely/">
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
@@ -18,26 +18,29 @@
 <body>
   <a class="skip" href="#main">Skip to content</a>
 
+  <!-- NAV (DockLock pattern: wordmark left, two links right) -->
   <header class="nav wrap">
     <a class="brand" href="./" aria-label="Likely home">
       <!-- PLACEHOLDER LOGO: replace assets/logo.svg with the final icon -->
-      <img src="assets/logo.svg" alt="" width="26" height="26">
+      <img src="assets/logo.svg" alt="" width="22" height="22">
       <span data-copy-id="nav.brand">Likely</span>
     </a>
     <nav aria-label="Primary">
-      <a href="#how" data-copy-id="nav.how">How it works</a>
       <a href="#pricing" data-copy-id="nav.pricing">Pricing</a>
-      <a href="#faq" data-copy-id="nav.faq">FAQ</a>
-      <a href="https://github.com/synth-inc/likely" data-copy-id="nav.github">GitHub</a>
+      <a href="https://github.com/synth-inc/likely" class="nav-gh">
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span data-copy-id="nav.github">GitHub</span>
+      </a>
     </nav>
   </header>
 
   <main id="main">
-    <!-- HERO -->
+    <!-- 1. HERO (DockLock: big logo, badge, headline, subtitle, CTA row) -->
     <section class="hero wrap">
-      <p class="kicker" data-copy-id="hero.kicker">A menu bar app for macOS</p>
-      <h1 data-copy-id="hero.title">Why doesn’t macOS do this?</h1>
-      <p class="subtitle" data-copy-id="hero.subtitle">Open any file picker and the file you were about to go hunting for is already there, in a folder called Likely, pinned to the sidebar.</p>
+      <img class="hero-logo" src="assets/logo.svg" width="88" height="88" alt="">
+      <p class="badge"><span class="badge-dot" aria-hidden="true"></span><span data-copy-id="hero.badge">Open source, for macOS</span></p>
+      <h1><span data-copy-id="hero.title">Why doesn’t macOS</span> <em data-copy-id="hero.title.em">do this?</em></h1>
+      <p class="subtitle" data-copy-id="hero.subtitle">Open a file picker. The file you were about to hunt for is already in the Likely folder, pinned to the sidebar.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg">
           <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -45,8 +48,12 @@
         </a>
         <a class="btn btn-quiet" href="https://github.com/synth-inc/likely"><span data-copy-id="hero.github">View on GitHub</span></a>
       </div>
-      <p class="reqs"><span data-copy-id="hero.reqs">macOS 14 or later · Needs a coding agent (Claude Code, Codex, Gemini CLI, OpenCode or Hermes)</span> · <a href="https://github.com/synth-inc/likely#readme" data-copy-id="hero.build">Build it yourself</a></p>
+      <p class="reqs"><span data-copy-id="hero.reqs">macOS 14 or later · Needs a coding agent (Claude Code, Codex, Gemini CLI, OpenCode or Hermes)</span></p>
+    </section>
 
+    <!-- 2. DEMO (DockLock: "See the difference" eyebrow + demo panel). Here: the autoplay video. -->
+    <section class="demo wrap" aria-labelledby="demo-eyebrow">
+      <p class="eyebrow" id="demo-eyebrow" data-copy-id="demo.eyebrow">See it work</p>
       <!-- DEMO VIDEO: record and add docs/assets/demo.mp4 (poster: docs/assets/demo-poster.png, placeholder) -->
       <div class="video-panel">
         <video id="demo" src="assets/demo.mp4" poster="assets/demo-poster.png"
@@ -63,68 +70,119 @@
       </script>
     </section>
 
-    <!-- HOW IT WORKS -->
+    <!-- 3. THIS IS THE WHOLE APP (DockLock: centered h2 + one line + static macOS mockup) -->
+    <section class="whole wrap" aria-labelledby="whole-h">
+      <h2 id="whole-h" data-copy-id="whole.title">This is the whole app.</h2>
+      <p class="section-sub" data-copy-id="whole.subtitle">A folder in your sidebar, a bar above the picker, and an icon in your menu bar. That’s it.</p>
+
+      <div class="whole-grid" role="img" aria-label="The three parts of Likely: the Likely folder in a file picker's sidebar, a text bar above the picker, and a menu bar icon.">
+        <!-- a) sidebar -->
+        <figure class="piece">
+          <div class="mock mock-side" aria-hidden="true">
+            <p class="ms-head">Favorites</p>
+            <p class="ms-row ms-sel"><img src="assets/logo.svg" alt="" width="14" height="14"> Likely</p>
+            <p class="ms-row"><i class="ms-ico"></i> Desktop</p>
+            <p class="ms-row"><i class="ms-ico"></i> Documents</p>
+            <p class="ms-row"><i class="ms-ico"></i> Downloads</p>
+          </div>
+          <figcaption>
+            <strong data-copy-id="whole.1.title">A folder in the sidebar</strong>
+            <span data-copy-id="whole.1.body">Best guesses land here. The picker opens on it.</span>
+          </figcaption>
+        </figure>
+        <!-- b) bar above the picker -->
+        <figure class="piece">
+          <div class="mock mock-bar" aria-hidden="true">
+            <div class="mb-bar"><img src="assets/logo.svg" alt="" width="16" height="16"><span>the signed lease</span><i class="mb-caret"></i></div>
+            <div class="mb-win">
+              <div class="mb-tb"><i></i><i></i><i></i></div>
+              <div class="mb-lines"><b></b><b></b><b></b></div>
+            </div>
+          </div>
+          <figcaption>
+            <strong data-copy-id="whole.2.title">A bar above the picker</strong>
+            <span data-copy-id="whole.2.body">Type what you’re after, or don’t.</span>
+          </figcaption>
+        </figure>
+        <!-- c) menu bar icon -->
+        <figure class="piece">
+          <div class="mock mock-menu" aria-hidden="true">
+            <div class="mm-bar">
+              <span class="mm-icon"><img src="assets/logo.svg" alt="" width="13" height="13"></span>
+              <i class="mm-sys"></i><i class="mm-sys"></i><span class="mm-time">9:41</span>
+            </div>
+            <div class="mm-drop">
+              <p><i class="dot"></i>Watching file pickers</p>
+              <p class="mm-dim">Agent: Claude Code</p>
+              <hr>
+              <p>Settings…</p>
+              <hr>
+              <p class="mm-dim">Quit Likely</p>
+            </div>
+          </div>
+          <figcaption>
+            <strong data-copy-id="whole.3.title">An icon in the menu bar</strong>
+            <span data-copy-id="whole.3.body">Pick your agent. Otherwise, forget it’s there.</span>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- 4. HOW IT WORKS -->
     <section id="how" class="wrap section" aria-labelledby="how-h">
-      <h2 id="how-h" data-copy-id="how.title">How it works</h2>
-      <p class="section-sub" data-copy-id="how.subtitle">Three steps, two of which you were doing anyway.</p>
+      <p class="eyebrow" data-copy-id="how.eyebrow">How it works</p>
+      <h2 id="how-h" data-copy-id="how.title">Three steps, two of which you were doing anyway.</h2>
       <ol class="panel steps">
         <li>
           <span class="num">1</span>
-          <h3 data-copy-id="how.1.title">Open a file picker. Any of them.</h3>
+          <h3 data-copy-id="how.1.title">Open a file picker</h3>
           <p data-copy-id="how.1.body">Attach in Mail, upload in Chrome, Open in Pages. Likely notices the dialog the moment it appears.</p>
         </li>
         <li>
           <span class="num">2</span>
-          <h3 data-copy-id="how.2.title">Say what you’re after, or don’t.</h3>
-          <p data-copy-id="how.2.body">Type into the bar above the picker: “the signed lease”, “my latest pay stub”. With screenshots on, it guesses before you type a word.</p>
+          <h3 data-copy-id="how.2.title">Your agent takes a look</h3>
+          <p data-copy-id="how.2.body">It reads what you typed (“my latest pay stub”) or, with screenshots on, what you were doing, and searches your files. Read-only.</p>
         </li>
         <li>
           <span class="num">3</span>
-          <h3 data-copy-id="how.3.title">The picker jumps to it.</h3>
-          <p data-copy-id="how.3.body">Best guesses land in the Likely folder in the sidebar, and the picker opens there. Hit Open. Act like it was always this easy.</p>
+          <h3 data-copy-id="how.3.title">The picker jumps to it</h3>
+          <p data-copy-id="how.3.body">Copies of the best guesses appear in the Likely folder and the picker opens there. Hit Open.</p>
         </li>
       </ol>
-    </section>
-
-    <!-- BRING YOUR OWN AGENT -->
-    <section class="wrap section split" aria-labelledby="agent-h">
-      <div>
-        <h2 id="agent-h" data-copy-id="agent.title">Bring your own agent</h2>
-        <p class="section-sub" data-copy-id="agent.body">Likely doesn’t ship its own AI or ask for another API key. It runs on the coding agent you already have installed and signed in, and only lets it look: search, list, read. Never write.</p>
+      <div class="agents">
+        <span class="agents-label" data-copy-id="how.agents.label">Runs on the agent you already have:</span>
+        <span class="chip" data-copy-id="agent.claude">Claude Code</span>
+        <span class="chip" data-copy-id="agent.codex">Codex</span>
+        <span class="chip" data-copy-id="agent.gemini">Gemini CLI</span>
+        <span class="chip" data-copy-id="agent.opencode">OpenCode</span>
+        <span class="chip" data-copy-id="agent.hermes">Hermes</span>
       </div>
-      <ul class="panel agents" aria-label="Supported agents">
-        <li><span data-copy-id="agent.claude">Claude Code</span><code>claude</code></li>
-        <li><span data-copy-id="agent.codex">Codex</span><code>codex</code></li>
-        <li><span data-copy-id="agent.gemini">Gemini CLI</span><code>gemini</code></li>
-        <li><span data-copy-id="agent.opencode">OpenCode</span><code>opencode</code></li>
-        <li><span data-copy-id="agent.hermes">Hermes</span><code>hermes</code></li>
-      </ul>
     </section>
 
-    <!-- PRIVACY -->
+    <!-- 5. PRIVACY -->
     <section class="wrap section" aria-labelledby="priv-h">
-      <h2 id="priv-h" data-copy-id="privacy.title">Nosy, but polite</h2>
-      <p class="section-sub" data-copy-id="privacy.subtitle">It looks around. It doesn’t touch anything.</p>
+      <p class="eyebrow" data-copy-id="privacy.eyebrow">Privacy</p>
+      <h2 id="priv-h" data-copy-id="privacy.title">Nosy, but polite.</h2>
       <div class="panel cols3">
         <div>
           <h3 data-copy-id="privacy.1.title">Read-only</h3>
-          <p data-copy-id="privacy.1.body">Your agent can search and read to find candidates. It can’t edit, move or delete anything. Likely never modifies your files.</p>
+          <p data-copy-id="privacy.1.body">Your agent can search and read. It can’t edit, move or delete anything. Likely never modifies your files.</p>
         </div>
         <div>
           <h3 data-copy-id="privacy.2.title">Screenshots are opt-in</h3>
-          <p data-copy-id="privacy.2.body">Off unless you turn them on. When on, the screenshot stays in memory and goes only to the agent you chose, nowhere else.</p>
+          <p data-copy-id="privacy.2.body">Off unless you turn them on. When on, they go only to the agent you chose, nowhere else.</p>
         </div>
         <div>
           <h3 data-copy-id="privacy.3.title">Copies, not originals</h3>
-          <p data-copy-id="privacy.3.body">What you see in the Likely folder are lightweight copies. Your originals stay where they were, and the folder empties when the picker closes.</p>
+          <p data-copy-id="privacy.3.body">The Likely folder holds lightweight copies. Originals stay put, and the folder empties when the picker closes.</p>
         </div>
       </div>
     </section>
 
-    <!-- PRICING -->
+    <!-- 6. PRICING -->
     <section id="pricing" class="wrap section" aria-labelledby="price-h">
+      <p class="eyebrow" data-copy-id="pricing.eyebrow">Pricing, but make it a vote</p>
       <h2 id="price-h" data-copy-id="pricing.title">Should Likely keep getting better?</h2>
-      <p class="section-sub" data-copy-id="pricing.subtitle">Pricing, but make it a vote.</p>
       <div class="plans">
         <article class="panel plan plan-featured">
           <p class="vote" data-copy-id="pricing.sub.vote">Yes</p>
@@ -147,9 +205,10 @@
       </div>
     </section>
 
-    <!-- FAQ -->
+    <!-- 7. FAQ -->
     <section id="faq" class="wrap section" aria-labelledby="faq-h">
-      <h2 id="faq-h" data-copy-id="faq.title">Questions, reasonably asked</h2>
+      <p class="eyebrow" data-copy-id="faq.eyebrow">FAQ</p>
+      <h2 id="faq-h" data-copy-id="faq.title">Questions, reasonably asked.</h2>
       <div class="panel faq">
         <details>
           <summary><span data-copy-id="faq.1.q">Does it change my files?</span></summary>
@@ -173,20 +232,13 @@
         </details>
       </div>
     </section>
-
-    <!-- CLOSER -->
-    <section class="wrap closer">
-      <h2 data-copy-id="closer.title">It was obviously that one.</h2>
-      <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg"><span data-copy-id="closer.cta">Download for Mac</span></a>
-      <p class="reqs" data-copy-id="closer.reqs">macOS 14 or later · Needs a coding agent</p>
-    </section>
   </main>
 
+  <!-- FOOTER (DockLock: one centered row) -->
   <footer class="foot">
-    <div class="wrap foot-inner">
-      <span data-copy-id="footer.license">Likely is free software under the GPL-3.0.</span>
-      <span><a href="https://github.com/synth-inc/likely" data-copy-id="footer.github">GitHub</a> · <a href="https://github.com/synth-inc" data-copy-id="footer.synth">Made by Synth</a></span>
-    </div>
+    <span data-copy-id="footer.made">Made by Synth</span>
+    <span data-copy-id="footer.license">Free software, GPL-3.0</span>
+    <a href="https://github.com/synth-inc/likely" data-copy-id="footer.github">GitHub</a>
   </footer>
 
   <!-- Copy-editing mode: add ?edit to the URL. ?preview-edits shows saved edits read-only. -->
