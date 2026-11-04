@@ -398,7 +398,8 @@ final class Coordinator {
             message = "Done – found \(foundCount) file\(foundCount == 1 ? "" : "s")"
         }
         Log.write("agent", "\(message) cost=\(outcome.costUSD.map { String(format: "$%.4f", $0) } ?? "?")")
-        folder.setStatus(message)
+        // Done: drop the status file so only real suggestions are left in the folder.
+        folder.removeStatus()
         debugRun?.outcome = message + (outcome.costUSD.map { String(format: " · $%.4f", $0) } ?? "")
         debugRun?.log(message)
         hud.model.working = false

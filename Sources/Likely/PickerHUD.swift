@@ -182,7 +182,8 @@ private struct HUDView: View {
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .fixedSize()
-        } else if !model.status.isEmpty {
+        } else if !model.working && !model.status.isEmpty {
+            // Only final outcomes ("Nothing found", errors). Progress lives in the Likely folder's status file.
             Text(model.status)
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)

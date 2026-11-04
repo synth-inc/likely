@@ -223,6 +223,12 @@ final class LikelyFolder {
         saveManifest()
     }
 
+    /// Removes the "…status…" file, e.g. once a search has finished, so it can't be picked by accident.
+    func removeStatus() {
+        removeStatusFiles()
+        statusURL = nil
+    }
+
     /// The current status file, plus strays from a crash ("…" names are only ever Likely's status files).
     private func removeStatusFiles() {
         if let statusURL { try? fm.removeItem(at: statusURL) }
