@@ -94,7 +94,12 @@ if [ "$DRY_RUN" = false ]; then
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     [ "$BRANCH" = "main" ] || { echo "Releases are published from main (on $BRANCH). Use --dry-run to test elsewhere."; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "Working tree not clean; commit the version bump first"; exit 1; }
-    git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "Tag $TAG already exists locally"; exit 1; }
+    # ...and exactly what's on GitHub's main: nothing unpushed, nothing missing.
+    git fetch -q origin main
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] ||
+        { echo "HEAD isn't origin/main; push (or pull) main first"; exit 1; }
+    git fetch -q --tags origin
+    git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "Tag $TAG already exists; run scripts/bump-version.sh patch"; exit 1; }
     gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1 && { echo "Release $TAG already exists"; exit 1; }
     [ -d "$ONIT_SERVER_DIR/public" ] || { echo "onit-server not found at $ONIT_SERVER_DIR (set ONIT_SERVER_DIR)"; exit 1; }
     APPCAST_SRC="$ONIT_SERVER_DIR/$APPCAST_REL"
