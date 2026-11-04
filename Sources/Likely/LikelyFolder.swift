@@ -170,7 +170,7 @@ final class LikelyFolder {
             return false
         }
 
-        // Only regular files and packages (no folders, devices, sockets, FIFOs).
+        // Regular files, packages, and plain folders (no devices, sockets, FIFOs).
         var info = stat()
         guard lstat(source.path, &info) == 0 else {
             Log.write("likely", "skip missing \(source.path)")
@@ -179,8 +179,7 @@ final class LikelyFolder {
         let isRegular = (info.st_mode & S_IFMT) == S_IFREG
         let isDirectory = ObjCBool((info.st_mode & S_IFMT) == S_IFDIR)
         if isDirectory.boolValue && !NSWorkspace.shared.isFilePackage(atPath: source.path) {
-            Log.write("likely", "skip folder \(source.path)")
-            return false
+            return addFolder(source)
         }
         guard isRegular || isDirectory.boolValue else {
             Log.write("likely", "skip non-regular file \(source.path)")
@@ -237,6 +236,70 @@ final class LikelyFolder {
                 try? fm.removeItem(at: Self.url.appendingPathComponent(name))
             }
         }
+    }
+
+    /// Folders the user asks for ("the whole K-1 folder") are rebuilt file by file rather than cloned
+    /// wholesale, so hidden files, symlinks and anything sensitive inside stay out. Capped so a request
+    /// like "all of Documents" can't stall the picker.
+    static let folderFileLimit = 2_000
+    static let folderByteLimit: Int64 = 5_000_000_000
+
+    private func addFolder(_ source: URL) -> Bool {
+        let home = fm.homeDirectoryForCurrentUser.path
+        guard let walker = fm.enumerator(at: source, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .isPackageKey],
+                                         options: [.skipsHiddenFiles]) else {
+            Log.write("likely", "skip unreadable folder \(source.path)")
+            return false
+        }
+        // Plan first: which files go in, and whether the folder is too big.
+        var files: [URL] = []
+        var bytes: Int64 = 0
+        for case let item as URL in walker {
+            let values = try? item.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .isPackageKey])
+            if values?.isSymbolicLink == true { continue }
+            if SensitivePaths.refusalReason(for: item.path, home: home) != nil {
+                if values?.isDirectory == true { walker.skipDescendants() }
+                continue
+            }
+            if values?.isPackage == true { walker.skipDescendants(); files.append(item); continue }
+            guard values?.isRegularFile == true else { continue }
+            files.append(item)
+            bytes += Int64(values?.fileSize ?? 0)
+            if files.count > Self.folderFileLimit || bytes > Self.folderByteLimit {
+                Log.write("likely", "skip folder \(source.path): over \(Self.folderFileLimit) files or 5 GB")
+                return false
+            }
+        }
+        guard !files.isEmpty else {
+            Log.write("likely", "skip empty folder \(source.path)")
+            return false
+        }
+
+        let destination = uniqueDestination(for: source.lastPathComponent)
+        do {
+            try fm.createDirectory(at: destination, withIntermediateDirectories: false)
+            for file in files {
+                let relative = String(file.path.dropFirst(source.path.count + 1))
+                let target = destination.appendingPathComponent(relative)
+                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let isPackage = (try? file.resourceValues(forKeys: [.isPackageKey]))?.isPackage == true
+                let flags = copyfile_flags_t(COPYFILE_CLONE) | (isPackage ? copyfile_flags_t(COPYFILE_RECURSIVE) : 0)
+                guard copyfile(file.path, target.path, nil, flags) == 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+                Self.copyDateAdded(from: file, to: target)
+            }
+        } catch {
+            try? fm.removeItem(at: destination)
+            Log.write("likely", "folder copy failed \(source.path): \(error.localizedDescription)")
+            return false
+        }
+        Self.copyDateAdded(from: source, to: destination)
+        sources.insert(source.path)
+        added.append(destination)
+        saveManifest()
+        Log.write("likely", "added folder \(source.path) (\(files.count) files)")
+        return true
     }
 
     /// Copies keep their modification date, but macOS stamps "Date Added" with now. Put the original
