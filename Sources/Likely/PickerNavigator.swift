@@ -5,20 +5,25 @@ import Foundation
 /// if the user pinned the folder (onboarding step 3).
 enum PickerNavigator {
     /// Retries for a couple of seconds: the sidebar is often populated after the window appears.
-    static func selectLikelyInSidebar(of window: AXUIElement, attempt: Int = 0, isCurrent: @escaping () -> Bool) {
+    /// `onResult` gets a one-line outcome, e.g. for the Debug View.
+    static func selectLikelyInSidebar(of window: AXUIElement, attempt: Int = 0, isCurrent: @escaping () -> Bool,
+                                      onResult: ((String) -> Void)? = nil) {
         guard isCurrent(), AX.isAlive(window) else { return }
         switch trySelect(in: window) {
         case .selected:
             Log.write("navigate", "selected \"\(folderName)\" in sidebar")
+            onResult?("selected \"\(folderName)\"")
         case .alreadySelected:
             Log.write("navigate", "\"\(folderName)\" already selected")
+            onResult?("\"\(folderName)\" already selected")
         case .notFound(let why):
             guard attempt < 8 else {
                 Log.write("navigate", "gave up: \(why). Is ~/Likely pinned in the Finder sidebar?")
+                onResult?("gave up: \(why)")
                 return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                selectLikelyInSidebar(of: window, attempt: attempt + 1, isCurrent: isCurrent)
+                selectLikelyInSidebar(of: window, attempt: attempt + 1, isCurrent: isCurrent, onResult: onResult)
             }
         }
     }

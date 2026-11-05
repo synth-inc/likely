@@ -72,8 +72,8 @@ private struct GeneralSettings: View {
     let actions: SettingsActions
     @AppStorage("openToLikely") private var openToLikely = true
     @AppStorage("verbose") private var verbose = false
-    @AppStorage("autoSuggest") private var autoSuggest = true
-    private var screenshotsAllowed: Bool { CGPreflightScreenCaptureAccess() }
+    @AppStorage("showRecentFiles") private var showRecentFiles = true
+    @AppStorage("recentFileCount") private var recentFileCount = 3
     @State private var folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
     @State private var pinned = SidebarFavorites.contains(LikelyFolder.url)
 
@@ -117,14 +117,16 @@ private struct GeneralSettings: View {
                         }
                     }
                 }
-                Toggle("Jump file pickers to the Likely folder when they open", isOn: $openToLikely)
             }
-            Section("Suggestions") {
-                Toggle("Suggest files as soon as a picker opens", isOn: $autoSuggest)
-                    .disabled(!screenshotsAllowed)
-                Text(screenshotsAllowed
-                     ? "Uses a screenshot of the app you're uploading from. Turn off to only search when you type."
-                     : "Needs the optional Screenshots permission (Permissions tab). Without it, describe the file in the bar above the picker.")
+            Section("When a picker opens") {
+                Toggle("Jump to the Likely folder when a picker opens", isOn: $openToLikely)
+                Text(openToLikely ? "The picker shows your Likely folder right away."
+                     : "The picker opens where it normally would, and jumps to the Likely folder when you search.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Show recent files", isOn: $showRecentFiles)
+                Stepper("Recent files: \(recentFileCount)", value: $recentFileCount, in: Settings.recentFileCountRange)
+                    .disabled(!showRecentFiles)
+                Text("Your newest downloads, screenshots and saved files, ready in the Likely folder under …Recent…. Likely searches with your agent when you type in the bar above the picker.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if Updater.isEnabled { UpdatesSection() }
@@ -356,7 +358,7 @@ private struct PermissionSettings: View {
                     isGranted: state.accessibility, shouldPulse: false, action: Permissions.requestAccessibility)
                 OnboardingPermissionRow(
                     icon: "camera.viewfinder", title: "Screenshots", badge: "Optional",
-                    description: "Lets Likely send your agent a screenshot of the app you're uploading from, so it can suggest files before you type.",
+                    description: "Lets Likely send your agent a screenshot of the app you're uploading from, so it knows what you're uploading to when you search.",
                     isGranted: state.screenRecording, shouldPulse: false,
                     note: "Already allowed it?", secondaryTitle: "Quit & Reopen", secondaryAction: Permissions.relaunch,
                     action: Permissions.requestScreenRecording)

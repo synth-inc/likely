@@ -2,6 +2,8 @@ import AppKit
 
 /// Manages ~/Likely: APFS clones of candidate files, plus a "…status…" file whose name is the
 /// current progress message (the "…" sorts it above everything else in Finder and file pickers).
+/// When a picker opens, before anything is searched, it holds the most recently added files under a
+/// "…Recent…" header file (see `showRecent`).
 /// Only removes files it created itself; anything else the user puts in the folder is left alone.
 final class LikelyFolder {
     static let defaultURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Likely", isDirectory: true)
@@ -66,6 +68,10 @@ final class LikelyFolder {
     private let manifestURL: URL
     private var added: [URL] = []
     private var sources = Set<String>()
+    /// The recent-file clones and their "…Recent…" header (separate from the agent's suggestions,
+    /// which replace them once a search starts).
+    private var recent: [URL] = []
+    private var recentSources = Set<String>()
     private var statusURL: URL?
     /// When the picker these copies were made for closed. Copies outlive the picker, because the app
     /// that opened it often reads the file afterwards (browsers upload it, Mail attaches it); they're
@@ -77,9 +83,14 @@ final class LikelyFolder {
 
     var count: Int { added.count }
 
+    /// Heads the recent files. Like the status file, the leading "…" sorts it above them by name;
+    /// its Date Added is set newer than theirs, so it's on top by Date Added too.
+    static let recentHeaderName = "…Recent…"
+
     private struct Manifest: Codable {
         var paths: [String]
         var releasedAt: Date?
+        var recent: [String]?
     }
 
     init(supportDirectory: URL) {
@@ -87,6 +98,7 @@ final class LikelyFolder {
         if let data = try? Data(contentsOf: manifestURL) {
             if let manifest = try? JSONDecoder().decode(Manifest.self, from: data) {
                 added = manifest.paths.map { URL(fileURLWithPath: $0) }
+                recent = (manifest.recent ?? []).map { URL(fileURLWithPath: $0) }
                 releasedAt = manifest.releasedAt
             } else if let paths = try? JSONDecoder().decode([String].self, from: data) {
                 added = paths.map { URL(fileURLWithPath: $0) }   // older format
@@ -107,14 +119,14 @@ final class LikelyFolder {
         dropInFlightCopies()
         removeStatusFiles()
         statusURL = nil
-        if !added.isEmpty { releasedAt = Date() }
+        if !added.isEmpty || !recent.isEmpty { releasedAt = Date() }
         saveManifest()
     }
 
     /// Seconds until released copies should go, or nil if there's nothing to keep (none, not
     /// released, or already old enough).
     var remainingKeepTime: TimeInterval? {
-        guard !added.isEmpty, let releasedAt else { return nil }
+        guard !added.isEmpty || !recent.isEmpty, let releasedAt else { return nil }
         let remaining = Self.keepAfterClose - Date().timeIntervalSince(releasedAt)
         return remaining > 0 ? remaining : nil
     }
@@ -159,12 +171,22 @@ final class LikelyFolder {
     private let epochLock = NSLock()
     private var _epoch = 0
     private var epoch: Int { epochLock.lock(); defer { epochLock.unlock() }; return _epoch }
+    /// The same for the recent files, which outlive "Not these" but not the start of a search.
+    private var _recentEpoch = 0
+    private var recentEpoch: Int { epochLock.lock(); defer { epochLock.unlock() }; return _recentEpoch }
     /// Sources being copied right now (main thread), so a repeated FILE line isn't copied twice.
     private var pending = Set<String>()
 
-    private func dropInFlightCopies() {
-        epochLock.lock(); _epoch += 1; epochLock.unlock()
+    private func dropInFlightCopies(includingRecent: Bool = true) {
+        epochLock.lock()
+        _epoch += 1
+        if includingRecent { _recentEpoch += 1 }
+        epochLock.unlock()
         pending.removeAll()
+    }
+
+    private func dropInFlightRecent() {
+        epochLock.lock(); _recentEpoch += 1; epochLock.unlock()
     }
 
     /// Waits for the copy in progress (at quit, so a half-written copy isn't left behind; a copy
@@ -226,9 +248,9 @@ final class LikelyFolder {
     /// Source paths of the current suggestions, e.g. to tell Claude what the user rejected.
     var suggestedSources: [String] { Array(sources) }
 
-    /// Removes the suggested copies but keeps the status file.
+    /// Removes the suggested copies but keeps the status file (and the recent files).
     func clearSuggestions() {
-        dropInFlightCopies()
+        dropInFlightCopies(includingRecent: false)
         for url in added { try? fm.removeItem(at: url) }
         added.removeAll()
         sources.removeAll()
@@ -237,10 +259,12 @@ final class LikelyFolder {
 
     func clear() {
         dropInFlightCopies()
-        for url in added { try? fm.removeItem(at: url) }
-        removeStatusFiles()
+        for url in added + recent { try? fm.removeItem(at: url) }
+        removeStatusFiles(includingRecentHeader: true)
         added.removeAll()
         sources.removeAll()
+        recent.removeAll()
+        recentSources.removeAll()
         statusURL = nil
         releasedAt = nil
         saveManifest()
@@ -252,18 +276,75 @@ final class LikelyFolder {
         statusURL = nil
     }
 
-    /// The current status file, plus strays from a crash ("…" names are only ever Likely's status files).
-    private func removeStatusFiles() {
+    /// The current status file, plus strays from a crash ("…" names are only ever Likely's status files
+    /// and the "…Recent…" header, which stays unless `includingRecentHeader`).
+    private func removeStatusFiles(includingRecentHeader: Bool = false) {
         if let statusURL { try? fm.removeItem(at: statusURL) }
         if let names = try? fm.contentsOfDirectory(atPath: Self.url.path) {
-            for name in names where name.hasPrefix("…") {
+            for name in names where name.hasPrefix("…") && (includingRecentHeader || name != Self.recentHeaderName) {
                 try? fm.removeItem(at: Self.url.appendingPathComponent(name))
             }
         }
     }
 
+    // MARK: Recent files
+
+    /// Clones the `limit` files added most recently under `roots` (see `RecentFiles`) into the folder,
+    /// with a "…Recent…" header above them, in the background through the same checked copy path as
+    /// the agent's suggestions. `completion` runs on the main thread with the query result and the
+    /// source paths that were actually cloned.
+    func showRecent(limit: Int, roots: [URL], completion: @escaping (RecentFiles.Result, [String]) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard Self.exists else { return }
+        let likelyURL = Self.url
+        let home = fm.homeDirectoryForCurrentUser.path
+        let ticket = recentEpoch
+        let skip = recentSources   // already shown for this picker
+        let copier = Copier(likelyURL: likelyURL, home: home, supportPath: Self.supportPath,
+                            isCurrent: { [weak self] in self?.recentEpoch == ticket })
+        copyQueue.async { [weak self] in
+            let result = RecentFiles.find(limit: limit, roots: roots, excluding: [likelyURL.path, Self.supportPath], home: home)
+            var copies: [(source: String, copy: URL)] = []
+            for file in result.files where copier.isCurrent() && !skip.contains(file.path) {
+                if let copy = copier.copy(URL(fileURLWithPath: file.path)) { copies.append((file.path, copy)) }
+            }
+            var made = copies.map(\.copy)
+            if !copies.isEmpty, copier.isCurrent(),
+               let header = Copier.makeHeader(named: Self.recentHeaderName, in: likelyURL,
+                                              newerThan: result.files.map(\.added).max() ?? Date()) {
+                made.append(header)
+            }
+            // Dropped meanwhile (picker closed, search started): take it all back out.
+            if !copier.isCurrent() { made.forEach { try? FileManager.default.removeItem(at: $0) } }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard self.recentEpoch == ticket else {
+                    self.copyQueue.async { made.forEach { try? FileManager.default.removeItem(at: $0) } }
+                    return completion(result, [])
+                }
+                self.recent += made
+                self.recentSources.formUnion(copies.map(\.source))
+                self.saveManifest()
+                completion(result, copies.map(\.source))
+            }
+        }
+    }
+
+    /// Removes the recent files and their header, e.g. when a typed search starts, so its results
+    /// aren't mixed with them.
+    func clearRecent() {
+        dropInFlightRecent()
+        for url in recent { try? fm.removeItem(at: url) }
+        let header = Self.url.appendingPathComponent(Self.recentHeaderName)
+        if fm.fileExists(atPath: header.path) { try? fm.removeItem(at: header) }
+        recent.removeAll()
+        recentSources.removeAll()
+        saveManifest()
+    }
+
     private func saveManifest() {
-        if let data = try? JSONEncoder().encode(Manifest(paths: added.map(\.path), releasedAt: releasedAt)) {
+        if let data = try? JSONEncoder().encode(Manifest(paths: added.map(\.path), releasedAt: releasedAt,
+                                                          recent: recent.map(\.path))) {
             try? data.write(to: manifestURL)
         }
     }
@@ -453,6 +534,24 @@ extension LikelyFolder {
         /// back (APFS lets setattrlist write ATTR_CMN_ADDEDTIME) so pickers sorted by Date Added stay useful.
         private static func copyDateAdded(from source: URL, to destination: URL) {
             guard let date = try? source.resourceValues(forKeys: [.addedToDirectoryDateKey]).addedToDirectoryDate else { return }
+            setDateAdded(date, on: destination)
+        }
+
+        /// An empty placeholder file (like the status file) whose Date Added is just after `date`, so it
+        /// lists above files added up to then when a picker sorts by Date Added.
+        static func makeHeader(named name: String, in folder: URL, newerThan date: Date) -> URL? {
+            let url = folder.appendingPathComponent(name)
+            let fd = open(url.path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
+            guard fd >= 0 else {
+                Log.write("likely", "couldn't create \(name): \(String(cString: strerror(errno)))")
+                return nil
+            }
+            close(fd)
+            setDateAdded(max(Date(), date.addingTimeInterval(1)), on: url)
+            return url
+        }
+
+        static func setDateAdded(_ date: Date, on destination: URL) {
             var list = attrlist()
             list.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
             list.commonattr = attrgroup_t(ATTR_CMN_ADDEDTIME)

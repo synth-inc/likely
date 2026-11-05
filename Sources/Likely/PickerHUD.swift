@@ -7,8 +7,8 @@ final class HUDModel: ObservableObject {
     enum Mode { case normal, unpaid }
 
     @Published var mode = Mode.normal
-    @Published var status = "Looking at the context"
-    @Published var working = true
+    @Published var status = ""
+    @Published var working = false
     @Published var fileCount = 0
     @Published var draft = ""
     /// Bumped to move keyboard focus into the text field.
@@ -53,8 +53,8 @@ final class PickerHUD {
         sidebar = nil
         sidebarLookups = 0
         model.mode = .normal
-        model.status = "Looking at the context"
-        model.working = true
+        model.status = ""
+        model.working = false
         model.fileCount = 0
         model.draft = ""
         guard reposition() else { return }

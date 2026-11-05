@@ -1,9 +1,18 @@
 # Likely
 
-Menu bar app that notices when a macOS file picker opens, asks Claude Code what file you probably
-need (based on a screenshot of the window behind the picker), and clones the candidates into `~/Likely`.
-A file named `…<what Claude is doing>…` sits at the top of the folder as a live progress report.
+Menu bar app that notices when a macOS file picker opens and fills `~/Likely` with the files you probably need.
+When the picker opens, the folder instantly gets your most recently added files (see below). When you
+describe what you want in the bar above the picker, Likely asks your coding agent (Claude Code by default; with
+the optional Screenshots permission it also sees the window behind the picker) and clones its candidates into
+`~/Likely` in place of the recent files. A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
 The copies stay until the next picker opens (or 10 minutes after you close one), so apps that read the file later still find it.
+
+**Recent files.** Often the file you want is the one you just downloaded, saved or screenshotted, so the
+moment a picker opens Likely clones the 3 files with the newest Date Added in your search folders into the
+folder, under a `…Recent…` header (on top by name and by Date Added). Folders, packages, hidden/sensitive
+paths, partial downloads and not-downloaded cloud files are skipped; the count (1–10) and an off switch are
+in Settings, and `scripts/recent-files.sh` prints what it would pick. Menu → Jump to Likely Folder When a
+Picker Opens (on by default) selects the folder in the picker's sidebar; when off, only once you search.
 
 ## Build & run
 
@@ -40,6 +49,9 @@ Then commit and deploy the appcast in onit-server (the script prints the command
 - **Close**: `AXUIElementDestroyed` on the panel, plus a poll for the panel's frame disappearing.
 - **Screenshot** (`WindowCapture`): once open, the picker is drawn into the app's window, so the app
   snapshots the front window on every click / ⌘-shortcut (in memory) and uses the one from just before the picker.
+- **Recent files** (`RecentFiles`, `LikelyFolder.showRecent`): a synchronous `MDQuery` sorted by
+  `kMDItemDateAdded` (last hour, then day, then 30 days), falling back to the top level of Desktop /
+  Downloads / Documents; runs on the Likely folder's copy queue.
 - **Claude** (`ClaudeRunner`): `claude -p --output-format stream-json` with read-only tools
   (Read/Glob/Grep, `mdfind`, `ls`, …). Claude prints `STATUS:` / `FILE:` lines; the app does the copying
   (APFS clones), so Claude never writes anything.
