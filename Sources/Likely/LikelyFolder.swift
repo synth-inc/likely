@@ -223,8 +223,32 @@ final class LikelyFolder {
     /// The path a FILE: line stands for (symlinks resolved), and why Likely wouldn't show it, if it
     /// wouldn't. Shared with the eval runner, which records suggestions without copying anything.
     /// (What actually gets copied is checked again when it's opened; see `Copier`.)
+    /// The real path an agent meant when its spelling differs only in look-alike characters.
+    /// macOS puts a narrow no-break space (U+202F) before AM/PM in screenshot names, and agents
+    /// write it back as a plain space; other names carry no-break spaces or decomposed accents.
+    /// Each missing component is matched against its folder's entries with those differences
+    /// evened out. Returns `path` unchanged if it exists or nothing matches.
+    static func existingPath(for path: String) -> String {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) { return path }
+        func key(_ name: String) -> String {
+            let spaced = name.unicodeScalars.map { CharacterSet.whitespaces.contains($0) ? " " : String($0) }.joined()
+            return spaced.precomposedStringWithCanonicalMapping.lowercased()
+        }
+        var resolved = "/"
+        for component in (path as NSString).pathComponents.dropFirst() {
+            let direct = (resolved as NSString).appendingPathComponent(component)
+            if fm.fileExists(atPath: direct) { resolved = direct; continue }
+            let wanted = key(component)
+            guard let match = (try? fm.contentsOfDirectory(atPath: resolved))?.first(where: { key($0) == wanted }) else { return path }
+            resolved = (resolved as NSString).appendingPathComponent(match)
+        }
+        Log.write("likely", "matched \(path) to \(resolved)")
+        return resolved
+    }
+
     static func screen(path: String) -> (source: URL, refusal: String?) {
-        let source = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).resolvingSymlinksInPath()
+        let source = URL(fileURLWithPath: existingPath(for: (path as NSString).expandingTildeInPath)).resolvingSymlinksInPath()
         if source.path.hasPrefix(url.path + "/") { return (source, "in the Likely folder") }
         // Never suggest Likely's own files (e.g. the screenshot an agent was shown).
         if source.path.hasPrefix(supportPath) { return (source, "Likely's own file") }
