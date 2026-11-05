@@ -89,6 +89,7 @@ Expectations:
 - `{"anyOf": [paths]}`: passes if any of these is suggested within the top k. Use for "the right file,
   or this equally good copy".
 - `{"allOf": [paths]}`: passes only if all are suggested within the top k. Recall = fraction found.
+  In `anyOf` and `allOf`, an entry that is a folder counts as found when the folder or anything inside it is suggested, so "the K1s folder plus the K-1 filed under 1099s" is one `allOf` case.
 - `{"folder": path, "mode": "folder-or-contents"}`: passes if the folder itself or anything inside it is
   suggested. Recall is 1 for the folder itself, else the fraction of its files suggested. With
   `"mode": "folder"`, only the folder itself counts.

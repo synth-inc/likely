@@ -7,12 +7,31 @@ public struct ResolvedExpectation: Codable, Hashable {
     public var folderOnly: Bool
     /// For folder expectations: the files inside the folder (for recall when only some are suggested).
     public var folderFiles: [String]
+    /// For anyOf/allOf: the expected paths that are folders. Suggesting the folder or anything
+    /// inside it counts for that entry, e.g. allOf [the K1s folder, a K-1 kept elsewhere].
+    public var folderEntries: [String]
 
-    public init(kind: Expectation.Kind, paths: [String], folderOnly: Bool = false, folderFiles: [String] = []) {
+    public init(kind: Expectation.Kind, paths: [String], folderOnly: Bool = false, folderFiles: [String] = [],
+                folderEntries: [String] = []) {
         self.kind = kind
         self.paths = paths
         self.folderOnly = folderOnly
         self.folderFiles = folderFiles
+        self.folderEntries = folderEntries
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(Expectation.Kind.self, forKey: .kind)
+        paths = try c.decode([String].self, forKey: .paths)
+        folderOnly = try c.decodeIfPresent(Bool.self, forKey: .folderOnly) ?? false
+        folderFiles = try c.decodeIfPresent([String].self, forKey: .folderFiles) ?? []
+        folderEntries = try c.decodeIfPresent([String].self, forKey: .folderEntries) ?? []
+    }
+
+    /// True if suggestion `s` covers expected entry `e`: the same path, or inside it when `e` is a folder.
+    func covers(_ s: String, _ e: String) -> Bool {
+        EvalPath.same(e, s) || (folderEntries.contains { EvalPath.same($0, e) } && EvalPath.isInside(s, e))
     }
 
     /// Resolves `expect` relative to `base` (the cases file's folder). Folder contents are listed
@@ -31,7 +50,15 @@ public struct ResolvedExpectation: Codable, Hashable {
                 }
             }
         }
-        return ResolvedExpectation(kind: expect.kind, paths: paths, folderOnly: expect.folderOnly, folderFiles: files)
+        var folderEntries: [String] = []
+        if expect.kind == .anyOf || expect.kind == .allOf {
+            folderEntries = paths.filter { path in
+                var isDirectory: ObjCBool = false
+                return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            }
+        }
+        return ResolvedExpectation(kind: expect.kind, paths: paths, folderOnly: expect.folderOnly, folderFiles: files,
+                                   folderEntries: folderEntries)
     }
 }
 
@@ -74,7 +101,7 @@ public enum EvalScorer {
         func matches(_ s: String) -> Bool {
             switch expected.kind {
             case .anyOf, .allOf:
-                return expected.paths.contains { EvalPath.same($0, s) }
+                return expected.paths.contains { expected.covers(s, $0) }
             case .folder:
                 let folder = expected.paths[0]
                 return EvalPath.same(folder, s) || (!expected.folderOnly && EvalPath.isInside(s, folder))
@@ -95,7 +122,7 @@ public enum EvalScorer {
             pass = !matchedTop.isEmpty
             if !pass { missing = expected.paths }
         case .allOf:
-            missing = expected.paths.filter { e in !top.contains { EvalPath.same($0, e) } }
+            missing = expected.paths.filter { e in !top.contains { expected.covers($0, e) } }
             recall = Double(expected.paths.count - missing.count) / Double(expected.paths.count)
             pass = missing.isEmpty
         case .folder:

@@ -53,6 +53,20 @@ final class EvalScoringTests: XCTestCase {
         XCTAssertEqual(s.recall, 1)
     }
 
+    func testAllOfWithFolderEntry() {
+        // The K1s folder plus a K-1 filed elsewhere: the folder, or files inside it, cover the first entry.
+        let e = ResolvedExpectation(kind: .allOf, paths: ["/T/K1s", "/T/1099s/Fundrise/K-1.pdf"], folderEntries: ["/T/K1s"])
+        let viaFolder = EvalScorer.score(suggestions: ["/T/K1s", "/T/1099s/Fundrise/K-1.pdf"], expected: e, k: 8)
+        XCTAssertTrue(viaFolder.pass)
+        let viaContents = EvalScorer.score(suggestions: ["/T/K1s/MS/a.pdf", "/T/1099s/Fundrise/K-1.pdf"], expected: e, k: 8)
+        XCTAssertTrue(viaContents.pass)
+        XCTAssertEqual(viaContents.precision, 1)
+        let missingFundrise = EvalScorer.score(suggestions: ["/T/K1s"], expected: e, k: 8)
+        XCTAssertFalse(missingFundrise.pass)
+        XCTAssertEqual(missingFundrise.missing, ["/T/1099s/Fundrise/K-1.pdf"])
+        XCTAssertEqual(missingFundrise.recall, 0.5)
+    }
+
     func testFolderOrContents() {
         let e = ResolvedExpectation(kind: .folder, paths: ["/T/K1s"], folderFiles: ["/T/K1s/a.pdf", "/T/K1s/b.pdf", "/T/K1s/sub/c.pdf", "/T/K1s/sub/d.pdf"])
         let folder = EvalScorer.score(suggestions: ["/T/K1s"], expected: e, k: 8)
