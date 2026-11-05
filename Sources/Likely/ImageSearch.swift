@@ -72,10 +72,12 @@ enum ImageSearch {
 
     // MARK: Freshness
 
-    /// rclip's own default exclusions (passing --exclude-dir replaces them), plus app data and caches.
-    /// Hidden folders are skipped by rclip unless --include-hidden.
+    /// rclip's own default exclusions (passing --exclude-dir replaces them), plus app data, caches and
+    /// build output. rclip matches folder *names* at any depth. `Contents` keeps it out of app bundles
+    /// and `Applications`/`build` out of build folders (a dmg layout's Applications symlink pulled in
+    /// tens of thousands of app icons in testing). Hidden folders are skipped unless --include-hidden.
     static let excludedDirectories = ["@eaDir", "node_modules", ".git", "System Volume Information",
-                                      "Library", "Caches", "DerivedData"]
+                                      "Library", "Caches", "DerivedData", "Applications", "Contents", "build"]
 }
 
 /// Re-indexes in the background so new images show up: `rclip` without `-n` (a throwaway query) from ~,
