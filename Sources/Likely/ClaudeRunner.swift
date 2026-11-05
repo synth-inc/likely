@@ -17,10 +17,12 @@ final class ClaudeRunner: AgentRunner {
     var onExit: ((Outcome) -> Void)?
 
     /// Search commands that can't write: `sort` (-o) and `file` (-C) can, so they're left out, like
-    /// `find` (-delete/-exec/-fprint) and `tee`.
+    /// `find` (-delete/-exec/-fprint) and `tee`. rclip only with -n (search; without it, it re-indexes),
+    /// and `cd` because rclip searches the current folder (`cd ~ && rclip -n …`).
     static let allowedTools = [
         "Read", "Glob", "Grep",
         "Bash(ls:*)", "Bash(mdfind:*)", "Bash(mdls:*)", "Bash(head:*)", "Bash(stat:*)", "Bash(grep:*)",
+        "Bash(cd:*)", "Bash(rclip -n:*)",
     ]
 
     private var process: Process?

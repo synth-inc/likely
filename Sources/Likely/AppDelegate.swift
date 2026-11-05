@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClaudeLocator.resolve { Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")") }
         buildStatusItem()
         if Updater.isEnabled { MainActor.assumeIsolated { Updater.shared.start() } }
+        ImageIndexer.shared.start()
 
         coordinator.verbose = Settings.verbose
         coordinator.onStateChange = { [weak self] state, message in
@@ -80,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         coordinator.quit()
+        ImageIndexer.shared.stop()
     }
 
     /// AX observers created before the Accessibility grant silently do nothing, so wait for it.

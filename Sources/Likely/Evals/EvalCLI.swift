@@ -467,6 +467,8 @@ final class EvalCaseRun {
     /// Search folders and sandbox rules are process-wide; set them for this case before each launch.
     private func applyEnvironment() {
         SearchFolder.evalOverride = searchFolders
+        // rclip's index lists the user's own images, so isolated runs go without it (prompt and sandbox).
+        ImageSearch.evalDisabled = isolated
         guard isolated, let folders = searchFolders else {
             AgentSandbox.extraRules = ""
             return
@@ -474,7 +476,7 @@ final class EvalCaseRun {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let denied = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Library/Mobile Documents",
                       "Library/CloudStorage", "Library/Mail", "Library/Messages", "Library/Containers", "Library/Group Containers"]
-            .map { "\(home)/\($0)" } + Settings.extraSearchFolders
+            .map { "\(home)/\($0)" } + Settings.extraSearchFolders + [ImageSearch.dataDirectory]
         let allowed = folders + [workDir.path]
         AgentSandbox.extraRules = AgentSandbox.isolationRules(denied: denied.map(AgentSandbox.realPath),
                                                               allowed: allowed.map(AgentSandbox.realPath))

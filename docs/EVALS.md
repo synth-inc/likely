@@ -181,6 +181,7 @@ image, a landscape and an app icon, all for a made-up "Jordan Rivera". Its cases
   `~/Music`, iCloud Drive, `~/Library/CloudStorage`, Mail, Messages, app containers and your extra search
   folders (the fixture folder stays readable even if the repo lives under one of them);
 - Spotlight is blocked (its index would list your files by name), so agents use `ls`/`find`/`grep`.
+- rclip image search is off: the prompt leaves out its section and its index (`~/Library/Application Support/rclip`) can't be read.
 
 Codex runs inside its own sandbox, which can't be nested, so for Codex isolation is the prompt only.
 

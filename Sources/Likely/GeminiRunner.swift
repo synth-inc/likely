@@ -18,7 +18,7 @@ final class GeminiRunner: AgentRunner {
     var onTurnFinished: ((AgentOutcome) -> Void)?
     var onExit: ((AgentOutcome) -> Void)?
 
-    static let allowedCommands = ["mdfind", "mdls", "ls", "grep", "head", "stat"]
+    static let allowedCommands = ["mdfind", "mdls", "ls", "grep", "head", "stat", "cd", "rclip -n"]
 
     /// Only read_file, list_directory and the shell are registered: glob/search_file_content and the
     /// codebase_investigator subagent crawl the whole home workspace and can stall for minutes;

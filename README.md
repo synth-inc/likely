@@ -43,6 +43,10 @@ Then commit and deploy the appcast in onit-server (the script prints the command
 - **Claude** (`ClaudeRunner`): `claude -p --output-format stream-json` with read-only tools
   (Read/Glob/Grep, `mdfind`, `ls`, …). Claude prints `STATUS:` / `FILE:` lines; the app does the copying
   (APFS clones), so Claude never writes anything.
+- **Image search** (`ImageSearch`, optional): with [rclip](https://github.com/yurijmikhalevich/rclip)
+  installed (`brew install rclip`) and indexed, the prompt tells the agent to rewrite image requests into
+  visual descriptions for `rclip -n`. Likely re-indexes new images in the background at low priority
+  (at most every 6 hours, while idle). Settings → General → Image search.
 
 ## Evals
 

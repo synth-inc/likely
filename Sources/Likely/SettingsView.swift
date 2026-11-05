@@ -128,6 +128,7 @@ private struct GeneralSettings: View {
                      : "Needs the optional Screenshots permission (Permissions tab). Without it, describe the file in the bar above the picker.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            ImageSearchSection()
             if Updater.isEnabled { UpdatesSection() }
             Section("Troubleshooting") {
                 Toggle("Log every accessibility event (verbose)", isOn: $verbose)
@@ -141,6 +142,43 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Image search
+
+private struct ImageSearchSection: View {
+    @State private var enabled = ImageSearch.isEnabled
+    @State private var status = "Checking…"
+    private let installed = ImageSearch.rclipPath != nil
+
+    var body: some View {
+        Section("Image search") {
+            Toggle("Image search (rclip)", isOn: $enabled)
+                .disabled(!ImageSearch.isAvailable)
+                .onChange(of: enabled) { _, value in ImageSearch.isEnabled = value }
+            if installed {
+                Text(status).font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Finds images by what they show. Install with `brew install rclip`, then run `cd ~ && rclip photo` once to build its index.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .task { if installed { status = await Self.describeIndex() } }
+    }
+
+    private static func describeIndex() async -> String {
+        await Task.detached(priority: .utility) {
+            guard let info = ImageSearch.indexInfo() else {
+                return "rclip is installed but has no index yet. Run `cd ~ && rclip photo` once to build it."
+            }
+            var parts = ["rclip installed"]
+            if let images = info.images { parts.append("\(images.formatted()) images indexed") }
+            parts.append(ByteCountFormatter.string(fromByteCount: info.bytes, countStyle: .file))
+            if let updated = info.updated { parts.append("updated \(updated.formatted(.relative(presentation: .named)))") }
+            if let last = ImageIndexer.lastRun { parts.append("last re-index by Likely \(last.formatted(.relative(presentation: .named)))") }
+            return parts.joined(separator: " · ") + ". Likely re-indexes new images in the background (at most every 6 hours, while you're idle)."
+        }.value
     }
 }
 

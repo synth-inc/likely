@@ -32,7 +32,7 @@ final class OpenCodeRunner: AgentRunner {
     private static let permission = """
     {"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","external_directory":"allow",\
     "bash":{"*":"deny","ls":"allow","ls *":"allow","mdfind *":"allow","mdls *":"allow","find *":"allow",\
-    "grep *":"allow","head *":"allow","tail *":"allow","stat *":"allow","wc *":"allow","echo *":"allow",\
+    "grep *":"allow","head *":"allow","cd *":"allow","rclip -n *":"allow","tail *":"allow","stat *":"allow","wc *":"allow","echo *":"allow",\
     "find *-exec*":"deny","find *-ok*":"deny","find *-delete*":"deny","find *-fprint*":"deny","find *-fls*":"deny"}}
     """
 
