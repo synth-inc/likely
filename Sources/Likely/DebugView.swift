@@ -182,19 +182,9 @@ private struct RunDetail: View {
         .sheet(item: $testEditor) { request in EvalCaseEditor(request: request) { testEditor = nil } }
     }
 
-    /// Prefilled from the run: typed queries, app, window title, screenshot, and the pick if known.
     private func makeTest() -> EditorRequest {
         EvalCaseStore.shared.reload()
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let tilde: (String) -> String = { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 }
-        let picked = run.pickedPaths.map(tilde)
-        let c = EvalCase(id: EvalCase.slug(run.queries.first ?? run.appName, fallback: "case"),
-                         query: run.queries,
-                         context: EvalCase.Context(app: run.appName, windowTitle: run.windowTitle,
-                                                   screenshot: run.screenshotURL?.path, button: run.buttonTitle),
-                         expect: picked.count > 1 ? Expectation(allOf: picked) : Expectation(anyOf: picked.isEmpty ? nil : picked),
-                         tags: run.screenshotURL != nil ? ["screenshot"] : [], source: "manual")
-        return EditorRequest(evalCase: c, mode: .newCase, suggestions: run.files.filter(\.added).map(\.path))
+        return EditorRequest.from(run: run)
     }
 
     private func section<Content: View>(_ title: String, detail: String? = nil, @ViewBuilder content: () -> Content) -> some View {

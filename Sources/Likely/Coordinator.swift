@@ -27,6 +27,8 @@ final class Coordinator {
     var isLicensed: () -> Bool = { true }
     /// "Get Likely" in the unpaid bar.
     var onGetLikely: (() -> Void)?
+    /// Opens the test editor for a run ("Save as test" in the bar, once the picker has closed).
+    var onMakeTest: ((DebugRun) -> Void)?
     var verbose = false {
         didSet {
             axWatcher.verbose = verbose
@@ -61,6 +63,8 @@ final class Coordinator {
     private var typedQueries: [String] = []
     private var capturedScreenshot: URL?
     private let pickTracker = PickTracker()
+    /// "Save as test" was clicked in the bar for this picker.
+    private var saveTestRequested = false
 
     init() {
         supportDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -78,6 +82,7 @@ final class Coordinator {
         hud.model.onSend = { [weak self] text in self?.sendFeedback(text) }
         hud.model.onRejectAll = { [weak self] in self?.sendFeedback(nil) }
         hud.model.onGetLikely = { [weak self] in self?.onGetLikely?() }
+        hud.model.onSaveAsTest = { [weak self] in self?.requestSaveAsTest() }
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         // No click-time snapshots at all unless the user opted into screenshots.
         snapshotter.isSuspended = { [weak self] in
@@ -222,6 +227,7 @@ final class Coordinator {
         pendingFeedback = []
         typedQueries = []
         capturedScreenshot = nil
+        saveTestRequested = false
         autoMode = Settings.autoSuggest && CGPreflightScreenCaptureAccess()
         Log.write("picker", "OPENED in \(picker.appName) via \(picker.source) frame=\(picker.frame.map { "\($0)" } ?? "?")")
 
@@ -339,21 +345,45 @@ final class Coordinator {
     /// Evals: if the picker was confirmed (not cancelled), save what the user typed and what they
     /// actually picked as a draft test case. Off unless EvalCapture is enabled.
     private func recordDraftIfPicked(_ picker: Picker, reason: String) {
-        guard pickTracker.isTracking else { return }
-        let pick = pickTracker.end()
-        guard EvalCapture.isEnabled, isLicensed(), reason != "app quitting" else { return }
-        guard pick.confirmed else {
-            Log.write("evals", "picker closed without a confirmed pick (\(pick.how)), no draft")
+        let saveRequested = saveTestRequested
+        saveTestRequested = false
+        guard reason != "app quitting" else {
+            pickTracker.end()
             return
         }
-        // Copies in the Likely folder stand for their originals.
-        let picked = pick.urls.map { folder.sourcePath(forPicked: $0) ?? $0.path }
-        debugRun?.pickedPaths = picked
-        debugRun?.log("Picked: \(picked.isEmpty ? "unknown" : picked.joined(separator: ", ")) (\(pick.how))")
-        EvalCapture.saveDraft(app: picker.appName, windowTitle: debugRun?.windowTitle ?? picker.windowTitle,
-                              button: picker.buttonTitle, queries: typedQueries,
-                              screenshot: autoMode ? capturedScreenshot : nil, picked: picked, how: pick.how,
-                              suggested: debugRun?.files.filter(\.added).map(\.path) ?? [])
+        var picked: [String] = []
+        var how = "pick not tracked"
+        if pickTracker.isTracking {
+            let pick = pickTracker.end()
+            how = pick.how
+            if pick.confirmed {
+                // Copies in the Likely folder stand for their originals.
+                picked = pick.urls.map { folder.sourcePath(forPicked: $0) ?? $0.path }
+                debugRun?.pickedPaths = picked
+                debugRun?.log("Picked: \(picked.isEmpty ? "unknown" : picked.joined(separator: ", ")) (\(pick.how))")
+            }
+            if !pick.confirmed { Log.write("evals", "picker closed without a confirmed pick (\(pick.how))") }
+        }
+        if saveRequested, let run = debugRun {
+            // Opened after the picker is gone, so it never competes with the picker for focus or selection.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.onMakeTest?(run) }
+            return
+        }
+        guard EvalCapture.isEnabled, isLicensed(), how.hasPrefix("confirmed") else { return }
+        EvalCapture.saveCaptured(app: picker.appName, windowTitle: debugRun?.windowTitle ?? picker.windowTitle,
+                                 button: picker.buttonTitle, queries: typedQueries,
+                                 screenshot: autoMode ? capturedScreenshot : nil, picked: picked, how: how,
+                                 suggested: debugRun?.files.filter(\.added).map(\.path) ?? [])
+    }
+
+    /// "Save as test" in the bar: remember it, and start reading the picker's selection so the
+    /// editor can open with the user's pick as the expected answer.
+    private func requestSaveAsTest() {
+        guard let picker = active, debugRun != nil else { return }
+        saveTestRequested = true
+        hud.model.saveRequested = true
+        if !pickTracker.isTracking { pickTracker.begin(window: picker.element, pid: picker.pid) }
+        pickTracker.poll()
     }
 
     /// For a sheet, its parent window; otherwise the app's first normal window that isn't the picker.

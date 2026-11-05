@@ -2,32 +2,28 @@ import AppKit
 import ApplicationServices
 import LikelyEvalKit
 
-/// Turns real use into draft eval cases: when a picker is confirmed, what the user typed (plus the
-/// app, window title and screenshot) and the file(s) they actually picked go to drafts.jsonl, for the
-/// user to approve in Settings → Evals. Cancelled pickers are never recorded.
+/// Turns real use into eval cases automatically: when a picker is confirmed, what the user typed
+/// (plus the app, window title and screenshot) and the file(s) they actually picked are added to
+/// cases.jsonl, tagged "captured". Cancelled pickers are never recorded. If the pick couldn't be
+/// read, nothing goes into cases; a "needs expected" entry goes to drafts.jsonl instead.
 ///
-/// On by default in dev builds only; release builds have an opt-in toggle (Settings → Evals).
+/// Off by default in every build: "Automatically save picks as tests" in Settings → Evals.
 enum EvalCapture {
-    static let defaultsKey = "evalCapture"
-
-    static var defaultValue: Bool {
-        #if LIKELY_DEV
-        return true
-        #else
-        return false
-        #endif
-    }
+    static let defaultsKey = "evalAutoCapture"
+    static let capturedTag = "captured"
+    static let defaultValue = false
 
     static var isEnabled: Bool {
         get { UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? defaultValue }
         set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
     }
 
-    /// Saves a draft. Nothing is saved if there's nothing to replay (no typed query and no screenshot).
-    static func saveDraft(app: String, windowTitle: String?, button: String?, queries: [String], screenshot: URL?,
+    /// Saves a case (or, without a known pick, a draft). Nothing is saved if there's nothing to replay
+    /// (no typed query and no screenshot).
+    static func saveCaptured(app: String, windowTitle: String?, button: String?, queries: [String], screenshot: URL?,
                           picked: [String], how: String, suggested: [String]) {
         guard !queries.isEmpty || screenshot != nil else {
-            Log.write("evals", "picked without typing or a screenshot, no draft")
+            Log.write("evals", "picked without typing or a screenshot, not saved")
             return
         }
         let existing = (try? EvalCaseFile.load(EvalStorage.draftsURL).cases) ?? []
@@ -46,7 +42,7 @@ enum EvalCapture {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let tilde: (String) -> String = { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 }
         var expect = Expectation()
-        var tags: [String] = []
+        var tags = [capturedTag]
         if picked.count == 1, isDirectory(picked[0]) {
             expect = Expectation(folder: tilde(picked[0]), mode: "folder-or-contents")
             tags.append("folder")
@@ -68,11 +64,14 @@ enum EvalCapture {
         let draft = EvalCase(id: id, query: queries.isEmpty ? [""] : queries,
                              context: EvalCase.Context(app: app, windowTitle: windowTitle, screenshot: screenshotPath, button: button),
                              expect: expect, tags: tags, source: "captured", notes: notes)
+        // Unknown pick: keep it out of the tests; it waits under "Needs expected" in Settings → Evals.
+        let destination = picked.isEmpty ? EvalStorage.draftsURL : EvalStorage.casesURL
         do {
-            try EvalCaseFile.append(draft, to: EvalStorage.draftsURL)
-            Log.write("evals", "draft \(id) saved (\(picked.isEmpty ? "pick unknown" : "\(picked.count) picked"))")
+            try EvalCaseFile.append(draft, to: destination)
+            Log.write("evals", picked.isEmpty ? "pick unknown: \(id) saved to drafts (needs expected)" : "test \(id) saved (\(picked.count) picked)")
+            DispatchQueue.main.async { EvalCaseStore.shared.reload() }
         } catch {
-            Log.write("evals", "couldn't save draft: \(error)")
+            Log.write("evals", "couldn't save captured test: \(error)")
         }
     }
 

@@ -91,19 +91,18 @@ struct EvalsSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Toggle("Save my picks as draft tests", isOn: $capture)
-                Text("When you pick a file in a picker Likely helped with, save what you typed and what you picked as a draft (on this Mac only). Cancelled pickers are never saved."
-                     + (EvalCapture.defaultValue ? " On by default in dev builds." : ""))
+                Toggle("Automatically save picks as tests", isOn: $capture)
+                Text("When you pick a file in a picker Likely helped with, what you typed and what you picked become a test (tagged “captured”, on this Mac only). Cancelled pickers are never saved.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Picker("", selection: $section) {
                     Text("Tests (\(store.cases.count))").tag(Section.tests)
-                    Text("Drafts (\(store.drafts.count))").tag(Section.drafts)
+                    Text("Needs expected (\(store.drafts.count))").tag(Section.drafts)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 220)
+                .frame(width: 260)
                 Spacer()
                 TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 160)
                 if section == .tests {
@@ -118,8 +117,8 @@ struct EvalsSettings: View {
             list
                 .overlay {
                     if visible.isEmpty {
-                        Text(section == .tests ? "No tests yet. Add one with New Test…, from the Debug View, or approve a draft."
-                                               : "No drafts. With saving turned on, picks you make show up here.")
+                        Text(section == .tests ? "No tests yet. Use “Save as test” in the bar above a picker, New Test…, or turn on automatic saving."
+                                               : "Nothing here. Picks Likely couldn't read show up here for you to fill in.")
                             .multilineTextAlignment(.center).foregroundStyle(.secondary).padding(30)
                     }
                 }
@@ -179,7 +178,7 @@ struct EvalsSettings: View {
                     Button(role: .destructive) { store.delete(c) } label: { Image(systemName: "trash") }
                         .help("Delete this test")
                 } else {
-                    Button("Approve") { store.approve(c, draftID: c.id) }
+                    Button("Add to Tests") { store.approve(c, draftID: c.id) }
                         .disabled(c.needsExpected)
                         .help(c.needsExpected ? "Choose the expected file first (Fix…)" : "Move to your tests")
                     Button("Fix…") { editing = EditorRequest(evalCase: c, mode: .editDraft(c.id)) }
@@ -200,8 +199,23 @@ struct EditorRequest: Identifiable {
     let id = UUID()
     var evalCase: EvalCase
     var mode: Mode
-    /// Files Likely suggested in the run this comes from, offered as one-click expected files.
+    /// Files Likely suggested in the run this comes from, offered as checkboxes.
     var suggestions: [String] = []
+
+    /// A new test prefilled from a picker run: typed queries, app, window title, screenshot,
+    /// Likely's suggestions as checkboxes, and the user's pick (if Accessibility read it) checked.
+    static func from(run: DebugRun) -> EditorRequest {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let tilde: (String) -> String = { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 }
+        let picked = run.pickedPaths.map(tilde)
+        let c = EvalCase(id: EvalCase.slug(run.queries.first ?? run.appName, fallback: "case"),
+                         query: run.queries,
+                         context: EvalCase.Context(app: run.appName, windowTitle: run.windowTitle,
+                                                   screenshot: run.screenshotURL?.path, button: run.buttonTitle),
+                         expect: picked.count > 1 ? Expectation(allOf: picked) : Expectation(anyOf: picked.isEmpty ? nil : picked),
+                         tags: run.screenshotURL != nil ? ["screenshot"] : [], source: "manual")
+        return EditorRequest(evalCase: c, mode: .newCase, suggestions: run.files.filter(\.added).map(\.path))
+    }
 }
 
 /// Edits one case: queries, context, expected files (chosen with a file panel), tags, notes.
@@ -219,6 +233,8 @@ struct EvalCaseEditor: View {
     @State private var paths: [String]
     @State private var tags: String
     @State private var notes: String
+    /// Files chosen with the panel (kept listed even when unchecked).
+    @State private var extraChosen: [String] = []
 
     init(request: EditorRequest, dismiss: @escaping () -> Void) {
         self.request = request
@@ -243,7 +259,7 @@ struct EvalCaseEditor: View {
         switch request.mode {
         case .newCase: return "New Test"
         case .editCase: return "Edit Test"
-        case .editDraft: return "Fix Draft"
+        case .editDraft: return "Choose the Expected File"
         }
     }
 
@@ -282,26 +298,24 @@ struct EvalCaseEditor: View {
                 }
                 LabeledContent("") {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(paths, id: \.self) { path in
-                            HStack {
-                                Image(systemName: isFolder(path) ? "folder" : "doc").foregroundStyle(.secondary)
-                                Text(EvalPath.display(path)).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
-                                Spacer()
-                                Button { paths.removeAll { $0 == path } } label: { Image(systemName: "minus.circle") }
-                                    .buttonStyle(.borderless)
-                            }
-                        }
-                        HStack {
-                            Button(kind == .folder ? "Choose Folder…" : "Add Files…", action: choose)
-                            if !request.suggestions.isEmpty {
-                                Menu("Add a Suggestion") {
-                                    ForEach(request.suggestions, id: \.self) { s in
-                                        Button(EvalPath.display(s)) { add([tilde(s)]) }
-                                    }
+                        // Likely's suggestions and anything chosen, each with a checkbox: checked = expected.
+                        ForEach(candidates, id: \.self) { path in
+                            Toggle(isOn: Binding(
+                                get: { paths.contains(path) },
+                                set: { on in
+                                    if on { if kind == .folder { paths = [path] } else { add([path]) } } else { paths.removeAll { $0 == path } }
+                                })) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: isFolder(path) ? "folder" : "doc").foregroundStyle(.secondary)
+                                    Text(EvalPath.display(path)).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
                                 }
-                                .fixedSize()
                             }
+                            .toggleStyle(.checkbox)
                         }
+                        if candidates.isEmpty {
+                            Text("No suggestions to pick from.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Button(kind == .folder ? "Choose Folder…" : "Choose Other Files or Folders…", action: choose)
                     }
                 }
                 TextField("Tags", text: $tags, prompt: Text("image, documents, folder"))
@@ -316,7 +330,7 @@ struct EvalCaseEditor: View {
                 Button("Cancel", action: dismiss).keyboardShortcut(.cancelAction)
                 if case .editDraft(let draftID) = request.mode {
                     Button("Save Draft") { store.saveDraft(built(), replacing: draftID); dismiss() }
-                    Button("Approve") { store.approve(built(), draftID: draftID); dismiss() }
+                    Button("Add to Tests") { store.approve(built(), draftID: draftID); dismiss() }
                         .keyboardShortcut(.defaultAction).disabled(!valid)
                 } else {
                     Button("Save", action: save).keyboardShortcut(.defaultAction).disabled(!valid)
@@ -325,6 +339,13 @@ struct EvalCaseEditor: View {
         }
         .padding(20)
         .frame(width: 600, height: 500)
+    }
+
+    /// Suggestions first (best first), then anything else chosen.
+    private var candidates: [String] {
+        var list = request.suggestions.map(tilde)
+        for p in paths + extraChosen where !list.contains(p) { list.append(p) }
+        return list
     }
 
     private var isDraft: Bool { if case .editDraft = request.mode { return true } else { return false } }
@@ -377,6 +398,7 @@ struct EvalCaseEditor: View {
         }
         guard panel.runModal() == .OK else { return }
         let chosen = panel.urls.map { tilde($0.path) }
+        for c in chosen where !extraChosen.contains(c) { extraChosen.append(c) }
         if kind == .folder { paths = Array(chosen.prefix(1)) } else { add(chosen) }
     }
 

@@ -7,8 +7,8 @@ through the app's real prompt and agent runner, and every answer is scored.
 - **Cases** are JSON Lines. Your own live outside the repo; the repo ships a public, synthetic suite.
 - **The runner** is the Likely binary itself in a headless mode (`--eval`), so it measures exactly what
   the app does: same prompt template, same agent runners and sandboxes, same FILE: filtering.
-- **Capture** turns real use into draft cases: when you confirm a pick, Likely records what you typed
-  and what you picked, for you to approve in Settings → Evals.
+- **Capture** turns real use into cases: "Save as test" in the bar above a picker, or (opt-in)
+  automatically saving every confirmed pick as a test.
 
 ## Running
 
@@ -115,13 +115,18 @@ The scoring code lives in `Sources/LikelyEvalKit` (no app dependencies) and is u
 
 ## Writing your own cases
 
-Your cases live in `~/Library/Application Support/Likely/evals/cases.jsonl`. Three ways to add one:
+Your cases live in `~/Library/Application Support/Likely/evals/cases.jsonl`. Ways to add one:
 
-1. **Settings → Evals → New Test…**: type the query (one message per line), choose the expected files or
-   folders with a file chooser, pick any of / all of / folder.
-2. **Debug View → Make This a Test**: takes a real run's typed query, app and window title, and lets you
-   choose the expected files (Likely's suggestions are one click away).
-3. **Approve a draft** (see Capture) or edit the file by hand.
+1. **"Save as test" in the bar above the picker** (next to "N found · Not these", once a search has
+   finished). Pick your file and close the picker as usual; then a small editor opens, prefilled with what
+   you typed, the app and window title, Likely's suggestions as checkboxes, and what you picked already
+   checked. "Choose Other Files or Folders…" adds more; choose any of / all of / folder; Save.
+   The editor deliberately waits until the picker has closed: a Likely window (or a second file panel)
+   opening while the picker is up would take focus from it and could change its selection, and waiting
+   means the actual pick can be prefilled as the answer.
+2. **Menu bar → Make Last Search a Test…**: the same editor for the most recent search.
+3. **Debug View → Make This a Test…** for any recent run, or **Settings → Evals → New Test…** from scratch.
+4. **Automatic saving** (see Capture), or edit the file by hand.
 
 Good cases are specific about *your* files: "the signed offer letter", "the PDF my landlord asked for",
 "our logo with the transparent background". Use `anyOf` when there are equivalent copies, `allOf` when
@@ -131,11 +136,14 @@ model is weak.
 
 ## Capture from real use
 
-When a picker closes with a confirmed pick, Likely saves a **draft** to `…/evals/drafts.jsonl` with
-what you typed, the app, the window title, the screenshot (if one was taken, copied to
-`…/evals/screenshots/`), and the file(s) you picked. Drafts show up in Settings → Evals → Drafts, where
-you approve them (they move to cases.jsonl), fix the expected files, or discard them. Nothing is
-recorded for cancelled pickers, or when you neither typed anything nor had a screenshot.
+With **Settings → Evals → "Automatically save picks as tests"** turned on (off by default in every build),
+each confirmed pick becomes a case in `cases.jsonl` right away, with no approval step: what you typed,
+the app, the window title, the screenshot (if one was taken, copied to `…/evals/screenshots/`), and the
+file(s) you picked. Captured cases have `"source": "captured"` and the tag `captured`, so they're easy to
+filter, edit or delete in Settings → Evals. Nothing is recorded for cancelled pickers, or when you neither
+typed anything nor had a screenshot. If the pick can't be read, it stays out of your tests: it's logged
+and kept in `drafts.jsonl`, shown under **Needs expected** in Settings → Evals, where you can choose the
+file (Fix…) and add it to your tests, or discard it.
 
 How the pick is read (Accessibility; `PickTracker` in `Sources/Likely/Evals/EvalCapture.swift`):
 
@@ -150,13 +158,11 @@ How the pick is read (Accessibility; `PickTracker` in `Sources/Likely/Evals/Eval
   `AXCancelButton`, Return/Enter, Escape/⌘., and double-clicks. The panel closing within a few seconds of a
   confirm is a pick; a cancel, or a close with no signal, records nothing.
 - **Copies.** If you picked one of Likely's copies in `~/Likely`, the draft gets the original's path.
-- If the pick can't be read (e.g. a sandboxed app's panel that Likely only sees as a window), the draft
-  is still saved with `"expect": {}` and the tag `needs-expected`, for you to fill in.
+- If the pick can't be read (e.g. a sandboxed app's panel that Likely only sees as a window), the entry
+  goes to drafts with `"expect": {}` and the tag `needs-expected`.
 
-**Privacy.** Capture is on by default only in dev builds. In release builds it's an opt-in toggle in
-Settings → Evals ("Save my picks as draft tests"), off by default. Everything stays on your Mac in
-`~/Library/Application Support/Likely/evals`; nothing is uploaded, and drafts are never run until you
-approve them and start a run yourself.
+**Privacy.** Automatic saving is off by default in all builds. Everything stays on your Mac in
+`~/Library/Application Support/Likely/evals`; nothing is uploaded, and no case runs until you start a run.
 
 ## Privacy and the fixture suite
 
@@ -181,7 +187,8 @@ Codex runs inside its own sandbox, which can't be nested, so for Codex isolation
 
 - `Sources/LikelyEvalKit/`: case format, path rules, scoring, results, reports (tested in `Tests/LikelyEvalKitTests`).
 - `Sources/Likely/Evals/EvalCLI.swift`: `--eval` mode (suites, runner loop, dry-run sink, isolation).
-- `Sources/Likely/Evals/EvalCapture.swift`: drafts from real use (`EvalCapture`, `PickTracker`).
-- `Sources/Likely/Evals/EvalsSettings.swift`: Settings → Evals and the case editor (also used by the Debug View).
+- `Sources/Likely/Evals/EvalCapture.swift`: cases from real use (`EvalCapture`, `PickTracker`).
+- `Sources/Likely/Evals/EvalsSettings.swift`: Settings → Evals and the case editor (also used by the bar's
+  "Save as test", the menu bar item and the Debug View).
 - Shared with the app: `PromptBuilder` (Coordinator.swift) builds every agent message;
   `LikelyFolder.screen(path:)` decides which FILE: lines Likely shows.
