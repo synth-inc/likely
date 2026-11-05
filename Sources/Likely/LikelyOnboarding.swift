@@ -143,7 +143,7 @@ struct LikelyOnboardingView: View {
                     // Optional, as in Onit's QuickEdit: explained in a "(See how)" sheet.
                     OnboardingPermissionRow(
                         icon: "camera.viewfinder", title: "Screenshots", badge: "Optional",
-                        description: "Likely can send your agent a screenshot of the app you're uploading from, so it can suggest files before you type anything. It may improve results, but we know it's a scary permission, so it's up to you.",
+                        description: "Likely can send your agent a screenshot of the app you're uploading from along with what you type, so a few words are enough. It may improve results, but we know it's a scary permission, so it's up to you.",
                         isGranted: state.screenRecording, shouldPulse: false,
                         note: "Already allowed it?",
                         secondaryTitle: "Quit & Reopen",
@@ -642,7 +642,7 @@ struct ScreenshotExplainerSheet: View {
 
     var body: some View {
         VStack(alignment: .center, spacing: 28) {
-            EditableText("With screenshots, Likely can see what you're uploading to and suggest files before you type.")
+            EditableText("With screenshots, Likely can see what you're uploading to, so a few words are enough when you search.")
                 .font(.system(size: 18, weight: .regular))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
@@ -653,7 +653,7 @@ struct ScreenshotExplainerSheet: View {
                 example(withAccess: true)
             }
 
-            EditableText("Screenshots are only used when a file picker opens, and only sent to the agent you chose.")
+            EditableText("Screenshots are only used when you search from a file picker, and only sent to the agent you chose.")
                 .font(.system(size: 12))
                 .foregroundColor(Color(NSColor.secondaryLabelColor))
                 .multilineTextAlignment(.center)
@@ -674,7 +674,7 @@ struct ScreenshotExplainerSheet: View {
 
     private func example(withAccess: Bool) -> some View {
         VStack(alignment: .center, spacing: 12) {
-            EditableText(withAccess ? "With: ✅ Suggestions appear on their own" : "Without: ❌ You describe what you need")
+            EditableText(withAccess ? "With: ✅ A few words are enough" : "Without: ❌ You describe what you need")
                 .font(.system(size: 14))
             VStack(alignment: .leading, spacing: 10) {
                 // A tiny "page behind the picker".
@@ -701,7 +701,7 @@ struct ScreenshotExplainerSheet: View {
                 HStack(spacing: 8) {
                     Image(systemName: withAccess ? "sparkle.magnifyingglass" : "text.cursor")
                         .foregroundColor(.onboardingBlue300)
-                    Text(withAccess ? "app-icon-1024.png ready in Likely" : "Type \"the 1024 app icon\" above the picker")
+                    Text(withAccess ? "Type \"icon\": app-icon-1024.png ready in Likely" : "Type \"the 1024 app icon\" above the picker")
                         .font(.system(size: 12))
                 }
                 .padding(10)

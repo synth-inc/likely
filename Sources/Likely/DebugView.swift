@@ -14,6 +14,9 @@ final class DebugRun: ObservableObject, Identifiable {
     @Published var model: String?
     @Published var events: [(Date, String)] = []
     @Published var files: [(path: String, added: Bool)] = []
+    /// Files put in the Likely folder as recent files when the picker opened (to measure how often
+    /// the picked file was one of them).
+    @Published var recentFiles: [String] = []
     @Published var outcome: String?
     @Published var closedReason: String?
 
@@ -136,6 +139,20 @@ private struct RunDetail: View {
                                 .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                                 .frame(width: 54, alignment: .trailing)
                             Text(event.1).textSelection(.enabled)
+                        }
+                    }
+                }
+
+                section("Recent files") {
+                    if run.recentFiles.isEmpty {
+                        Text("None").foregroundStyle(.secondary)
+                    }
+                    ForEach(run.recentFiles, id: \.self) { path in
+                        HStack {
+                            Text(path).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                            Spacer()
+                            Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+                                .buttonStyle(.link)
                         }
                     }
                 }

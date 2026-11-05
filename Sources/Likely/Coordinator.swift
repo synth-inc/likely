@@ -1,7 +1,8 @@
 import AppKit
 import ApplicationServices
 
-/// Detects pickers opening and closing, and runs the screenshot → claude → ~/Likely pipeline.
+/// Detects pickers opening and closing. On open, the Likely folder gets the most recently added files;
+/// when the user types in the bar, it runs the (screenshot +) description → agent → ~/Likely search.
 final class Coordinator {
     struct Picker {
         let pid: pid_t
@@ -15,8 +16,12 @@ final class Coordinator {
         var windowTitle: String?
     }
 
-    /// Automatic suggestions need screenshots; without them Likely waits for the user to type.
-    private var autoMode = true
+    /// Whether the user has started a search for this picker (nothing searches before they type).
+    private var searchStarted = false
+    /// Whether this picker was already pointed at the Likely folder (at most once per picker).
+    private var navigated = false
+    /// The screenshot for this picker's search, if Screen Recording is allowed, taken when it opened.
+    private var captureTask: Task<WindowCapture.Result?, Never>?
 
     enum State { case idle, searching, done }
 
@@ -76,7 +81,7 @@ final class Coordinator {
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         // No click-time snapshots at all unless the user opted into screenshots.
         snapshotter.isSuspended = { [weak self] in
-            self?.paused == true || self?.active != nil || !Settings.autoSuggest || !CGPreflightScreenCaptureAccess()
+            self?.paused == true || self?.active != nil || !CGPreflightScreenCaptureAccess()
                 || self?.isLicensed() != true
         }
     }
@@ -215,7 +220,9 @@ final class Coordinator {
         missedPolls = 0
         lastPrompt = nil
         pendingFeedback = []
-        autoMode = Settings.autoSuggest && CGPreflightScreenCaptureAccess()
+        searchStarted = false
+        navigated = false
+        captureTask = nil
         Log.write("picker", "OPENED in \(picker.appName) via \(picker.source) frame=\(picker.frame.map { "\($0)" } ?? "?")")
 
         // The previous picker's copies were kept for its app; a new picker replaces them.
@@ -234,48 +241,67 @@ final class Coordinator {
             return
         }
 
-        folder.setStatus(autoMode ? "Looking at the context" : "Type what you're looking for above the picker")
         let debugRun = DebugStore.shared.begin(appName: picker.appName, detectedVia: picker.source)
         self.debugRun = debugRun
-        debugRun.log("Picker opened")
-        if Settings.openToLikely, let window = picker.element {
-            let generation = generation
-            PickerNavigator.selectLikelyInSidebar(of: window) { [weak self] in self?.generation == generation && self?.active != nil }
-        }
+        debugRun.log("Picker opened, window title: \(picker.windowTitle ?? "-")")
+        showRecentFiles(debugRun: debugRun)
+        if Settings.openToLikely { navigateToLikely(reason: "picker opened") }
         hud.show(attachedTo: picker.element, fallbackFrame: picker.frame)
+        // Nothing runs until the user describes the file in the bar; the empty field and its placeholder say it.
+        hud.model.status = ""
+        hud.model.working = false
+        onStateChange?(.idle, "Waiting for a description")
 
-        guard autoMode else {
-            // Input-first: nothing runs until the user describes the file in the bar.
-            hud.model.status = ""   // the empty field and its placeholder say it
-            hud.model.working = false
-            onStateChange?(.idle, "Waiting for a description")
-            debugRun.log("Waiting for a description (screenshots off), window title: \(picker.windowTitle ?? "-")")
-            return
-        }
-        onStateChange?(.searching, "Looking at the context")
-
-        let generation = generation
+        // With Screen Recording, the window behind the picker goes along with the description.
+        guard CGPreflightScreenCaptureAccess() else { return }
         let screenshotURL = supportDirectory.appendingPathComponent("run/context.png")
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            var capture: WindowCapture.Result?
+        captureTask = Task { @MainActor [weak self] in
+            guard let self else { return nil }
             do {
+                let capture: WindowCapture.Result
                 if let snapshot = await self.snapshotter.awaitSnapshot(for: picker.pid) {
                     capture = try WindowCapture.save(snapshot, to: screenshotURL)
                 } else {
                     capture = try await WindowCapture.captureNow(pid: picker.pid, pickerFrame: picker.frame, to: screenshotURL)
                 }
-                Log.write("capture", "\(capture!.mode) title=\(capture!.windowTitle ?? "-")")
-                DebugStore.shared.attachScreenshot(screenshotURL, mode: capture!.mode, to: debugRun)
-                debugRun.log("Screenshot: \(capture!.mode)")
+                Log.write("capture", "\(capture.mode) title=\(capture.windowTitle ?? "-")")
+                DebugStore.shared.attachScreenshot(screenshotURL, mode: capture.mode, to: debugRun)
+                debugRun.log("Screenshot: \(capture.mode)")
+                return capture
             } catch {
                 Log.write("capture", "screenshot failed: \(error)")
                 debugRun.captureMode = "failed: \(error)"
                 debugRun.log("Screenshot failed: \(error)")
+                return nil
             }
-            guard self.generation == generation, self.active != nil else { return }
-            self.launchAgent(picker: picker, capture: capture)
         }
+    }
+
+    /// The most recently added files, cloned into the Likely folder right away (no agent involved).
+    /// Without any, the folder shows a hint to type instead.
+    private func showRecentFiles(debugRun: DebugRun) {
+        let hint = "Type what you're looking for above the picker"
+        guard Settings.showRecentFiles else { return folder.setStatus(hint) }
+        let generation = generation
+        folder.showRecent(limit: Settings.recentFileCount, roots: SearchFolder.all.map(\.url)) { [weak self] result, added in
+            debugRun.recentFiles = added
+            debugRun.log("Recent files: \(added.count) via \(result.source) in \(result.milliseconds) ms")
+            Log.write("recent", "\(added.count) via \(result.source) in \(result.milliseconds) ms: \(added.joined(separator: ", "))")
+            guard let self, self.generation == generation, self.active != nil, !self.searchStarted, added.isEmpty else { return }
+            self.folder.setStatus(hint)
+        }
+    }
+
+    /// Selects the Likely folder in the picker's sidebar, once per picker: when it opens, or (with
+    /// "Jump to Likely Folder" off) when the user submits a search.
+    private func navigateToLikely(reason: String) {
+        guard !navigated, let window = active?.element else { return }
+        navigated = true
+        let generation = generation
+        let debugRun = debugRun
+        debugRun?.log("Jumping to the Likely folder (\(reason))")
+        PickerNavigator.selectLikelyInSidebar(of: window, isCurrent: { [weak self] in self?.generation == generation && self?.active != nil },
+                                              onResult: { debugRun?.log("Sidebar: \($0)") })
     }
 
     private func pickerClosed(reason: String) {
@@ -380,8 +406,7 @@ final class Coordinator {
         lastPrompt = prompt
         lastImage = agent.takesImages ? capture?.url : nil
         if !pendingFeedback.isEmpty {
-            let lead = autoMode ? "The user already added:" : "The user described what they're looking for:"
-            prompt += "\n\n\(lead) " + pendingFeedback.map { "\"\($0)\"" }.joined(separator: " ")
+            prompt += "\n\nThe user described what they're looking for: " + pendingFeedback.map { "\"\($0)\"" }.joined(separator: " ")
             pendingFeedback = []
         }
         debugRun?.prompt = prompt
@@ -417,16 +442,27 @@ final class Coordinator {
     /// The current suggestions are removed and Claude is told not to repeat them.
     private func sendFeedback(_ text: String?) {
         guard let picker = active, isLicensed() else { return }
-        if !autoMode, lastPrompt == nil, let text {
-            // First description in input-first mode: this starts the search.
+        if !searchStarted {
+            // The first description starts the search (nothing to reject before that).
+            guard let text else { return }
+            searchStarted = true
             pendingFeedback = [text]
             debugRun?.log("You: \(text)")
             Log.write("feedback", "request: \(text)")
+            // The results replace the recent files rather than mixing with them.
+            folder.clearRecent()
             folder.setStatus("Looking for \(text)")
+            navigateToLikely(reason: "search submitted")
             hud.model.status = "Looking for \"\(text)\""
             hud.model.working = true
             onStateChange?(.searching, "Searching")
-            launchAgent(picker: picker, capture: nil)
+            let capture = captureTask
+            let generation = generation
+            Task { @MainActor [weak self] in
+                let result = await capture?.value
+                guard let self, self.generation == generation, self.active != nil else { return }
+                self.launchAgent(picker: picker, capture: result)
+            }
             return
         }
         let rejected = folder.suggestedSources
@@ -587,10 +623,18 @@ enum Settings {
         get { UserDefaults.standard.stringArray(forKey: "extraSearchFolders") ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: "extraSearchFolders") }
     }
-    /// Suggest files as soon as a picker opens. Only takes effect with the Screenshots permission.
-    static var autoSuggest: Bool {
-        get { UserDefaults.standard.object(forKey: "autoSuggest") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "autoSuggest") }
+    /// Put the most recently added files in the Likely folder when a picker opens.
+    static var showRecentFiles: Bool {
+        get { UserDefaults.standard.object(forKey: "showRecentFiles") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showRecentFiles") }
+    }
+    static let recentFileCountRange = 1...10
+    static var recentFileCount: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: "recentFileCount") as? Int ?? 3
+            return min(max(value, recentFileCountRange.lowerBound), recentFileCountRange.upperBound)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "recentFileCount") }
     }
     static var codexModel: String {
         get { UserDefaults.standard.string(forKey: "codexModel") ?? "gpt-5.6-luna" }
