@@ -19,6 +19,7 @@ struct SettingsView: View {
             AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }
             PromptSettings().tabItem { Label("Prompt", systemImage: "text.alignleft") }
             PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }
+            EvalsSettings().tabItem { Label("Evals", systemImage: "checklist") }
             if MenuBarGlyph.isDebugEnabled {
                 DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }
             }

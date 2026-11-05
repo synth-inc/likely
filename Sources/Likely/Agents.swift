@@ -67,7 +67,8 @@ final class AgentDetector: ObservableObject {
         }
     }
 
-    private static func locateAll() -> [String: String] {
+    /// Blocking (may ask a login shell); `scan` runs it in the background. The eval runner calls it directly.
+    static func locateAll() -> [String: String] {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
         let dirs = ["\(home)/.local/bin", "\(home)/.claude/local", "/opt/homebrew/bin", "/usr/local/bin", "\(home)/.npm-global/bin", "\(home)/.bun/bin"]

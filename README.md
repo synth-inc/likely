@@ -44,6 +44,13 @@ Then commit and deploy the appcast in onit-server (the script prints the command
   (Read/Glob/Grep, `mdfind`, `ls`, …). Claude prints `STATUS:` / `FILE:` lines; the app does the copying
   (APFS clones), so Claude never writes anything.
 
+## Evals
+
+`Likely --eval fixtures --agent opencode` runs the public eval suite (synthetic files in `evals/fixtures`)
+headlessly through the app's real prompt and agent runner, and writes `results.json` + `report.html`.
+Your own cases live in `~/Library/Application Support/Likely/evals/cases.jsonl` ("Save as test" in the bar above a
+picker, menu bar → Make Last Search a Test…, Settings → Evals, or automatic saving of picks). See [docs/EVALS.md](docs/EVALS.md).
+
 Logs: `~/Library/Logs/Likely/likely.log` (menu → Verbose AX Logging logs every AX event).
 
 ## License
