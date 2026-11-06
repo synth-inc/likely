@@ -1,4 +1,5 @@
 import Foundation
+import LikelyTools
 
 /// Runs OpenCode: `opencode run --format json`, with the screenshot attached via `-f`. OpenCode has
 /// no sandbox of its own and its bash allowlist only sees command names (`ls > file` passes as `ls`),
@@ -29,12 +30,21 @@ final class OpenCodeRunner: AgentRunner {
     /// everything not listed (edit/write/patch, webfetch, task, question, …), which also removes those
     /// tools from the model's view. Shell writes are stopped by the sandbox; the bash list keeps the agent
     /// on search commands, and find's -exec/-ok could otherwise run anything.
-    private static let permission = """
-    {"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","external_directory":"allow",\
-    "bash":{"*":"deny","ls":"allow","ls *":"allow","mdfind *":"allow","mdls *":"allow","find *":"allow",\
-    "grep *":"allow","head *":"allow","tail *":"allow","stat *":"allow","wc *":"allow","echo *":"allow",\
-    "find *-exec*":"deny","find *-ok*":"deny","find *-delete*":"deny","find *-fprint*":"deny","find *-fls*":"deny"}}
-    """
+    /// The user's tools (see ToolStore) are allowed after the built-in commands and before the `find`
+    /// denials, so those still win.
+    static let fileTools = ["read", "glob", "grep", "list", "external_directory"]
+    static let bashAllowed = ["ls", "ls *", "mdfind *", "mdls *", "find *", "grep *", "head *", "tail *", "stat *", "wc *", "echo *"]
+
+    static func permission(extra commands: [String]) -> String {
+        let allow: [(pattern: String, action: String)] = [("*", "deny")] + bashAllowed.map { ($0, "allow") }
+        let deny = ["find *-exec*", "find *-ok*", "find *-delete*", "find *-fprint*", "find *-fls*"].map { (pattern: $0, action: "deny") }
+        let builtIn = Set(allow.map(\.pattern))
+        let extra = ToolPermissions.openCode(commands).filter { !builtIn.contains($0.pattern) }
+        let bash = ToolPermissions.orderedJSONObject((allow + extra + deny).map { ($0.pattern, .string($0.action)) })
+        return ToolPermissions.orderedJSONObject(
+            (["*"] + fileTools).map { ($0, .string($0 == "*" ? "deny" : "allow")) }
+                + [("bash", .raw(bash))])
+    }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
         cancel()
@@ -90,14 +100,12 @@ final class OpenCodeRunner: AgentRunner {
         // user's config. Credentials live in the data dir (~/.local/share/opencode) and still apply.
         let configHome = workDir.appendingPathComponent("opencode-config").path
         env["XDG_CONFIG_HOME"] = configHome
-        env["OPENCODE_PERMISSION"] = Self.permission
+        env["OPENCODE_PERMISSION"] = Self.permission(extra: ToolStore.shared.activeCommands)
         for flag in ["OPENCODE_PURE", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE",
                      "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_LSP_DOWNLOAD"] {
             env[flag] = "1"
         }
-        let dir = (executable as NSString).deletingLastPathComponent   // npm installs need `node` beside them
-        env["PATH"] = [dir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
-            .joined(separator: ":")
+        env["PATH"] = AgentPath.value(agentExecutable: executable, inherited: env["PATH"])
 
         let dataDir = env["XDG_DATA_HOME"].map { $0 + "/opencode" } ?? home + "/.local/share/opencode"
         let writable = [

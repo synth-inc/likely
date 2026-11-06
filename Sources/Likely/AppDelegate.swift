@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(pauseItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Debug View…", action: #selector(showDebugView), keyEquivalent: "d").target = self
+        menu.addItem(withTitle: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
         if Updater.isEnabled {
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
@@ -182,6 +183,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         debugWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Settings on the Tools tab: extra tools such as photo search give the agent better results.
+    @objc private func showToolSettings() {
+        SettingsNavigation.shared.tab = .tools
+        showSettings()
     }
 
     @objc private func showSettings() {

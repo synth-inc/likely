@@ -376,6 +376,7 @@ final class Coordinator {
             return
         }
         prepareRunner(for: agent)
+        ToolStore.shared.reloadIfChanged()   // in case tools.json was edited and the watcher hasn't fired yet
         var prompt = Self.prompt(picker: picker, capture: capture, imageAttached: agent.takesImages)
         lastPrompt = prompt
         lastImage = agent.takesImages ? capture?.url : nil
@@ -470,14 +471,19 @@ final class Coordinator {
                 : "A screenshot of what they were looking at (picker excluded) is at \(capture.url.path). Read it first."
         }
             ?? "No screenshot is available; work from the app name, window title and what the user says."
-        return PromptTemplate.render(Settings.promptTemplate, values: [
+        // The tools section goes where {{tools}} is, or at the end of templates that don't have it.
+        let tools = ToolStore.shared.promptSection
+        var template = Settings.promptTemplate
+        if !tools.isEmpty && !template.contains("{{tools}}") { template += "\n\n{{tools}}" }
+        return PromptTemplate.render(template, values: [
             "context": context,
             "screenshot": screenshot,
             "app": picker.appName,
             "windowTitle": capture?.windowTitle ?? picker.windowTitle ?? "",
             "likelyFolder": LikelyFolder.url.path,
             "searchFolders": SearchFolder.promptDescription,
-        ])
+            "tools": tools,
+        ]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -490,6 +496,7 @@ enum PromptTemplate {
         ("windowTitle", "Title of the window behind the picker"),
         ("likelyFolder", "Path of your Likely folder"),
         ("searchFolders", "Folders to search (built-in, cloud, and ones you added)"),
+        ("tools", "Your extra tools (Tools tab); added at the end if the template doesn't place it"),
     ]
 
     static let `default` = """
