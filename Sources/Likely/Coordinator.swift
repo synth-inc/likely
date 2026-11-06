@@ -552,6 +552,8 @@ enum PromptBuilder {
                 : "A screenshot of what they were looking at (picker excluded) is at \(url.path). Read it first."
         }
             ?? "No screenshot is available; work from the app name, window title and what the user says."
+        let fullName = NSFullUserName()
+        if !fullName.isEmpty { context += " The user is \(fullName)." }
         return PromptTemplate.render(template, values: [
             "context": context,
             "screenshot": screenshot,
@@ -601,14 +603,20 @@ enum PromptTemplate {
     Output protocol (an app parses your text; nothing else you write is shown):
     - Before each step, write a line `STATUS: <what you're doing, under 8 words>`, e.g. `STATUS: Looking at the context`, `STATUS: Searching Documents for app icons`, `STATUS: Checking recent downloads`.
     - The moment you find a strong candidate, write a line `FILE: /absolute/path/to/file`. Don't wait until the end. Best first, at most 8 total. Files that exist, or a whole folder (its path) when the user asks for a folder.
-    - Aim for 3–6 tool calls, then stop.
+    - Aim for about 4–8 tool calls (run independent searches together), then stop.
 
-    Search tips:
-    - Spotlight: `mdfind -onlyin ~ 'kMDItemDisplayName == "*invoice*"cd'`, full text `mdfind -onlyin ~/Documents "quarterly report"`, by source site `mdfind 'kMDItemWhereFroms == "*example.com*"'`, by type `mdfind -onlyin ~ 'kMDItemContentTypeTree == "public.image" && kMDItemFSContentChangeDate >= $time.today(-7)'`.
-    - Recency: `ls -lt ~/Downloads ~/Desktop ~/Documents | head -40`.
-    - Where to look: {{searchFolders}}. Folders the user added are good bets. Elsewhere in ~ is fine too.
-    - Hidden or app-specific folders only if the obvious places come up empty.
-    - Ignore {{likelyFolder}} itself. Never modify anything.
+    How to search: build your own search terms, as you would for a web search. Never search only the user's literal words.
+    1. Before searching, write a short list of queries:
+       - stems, singulars and formal names (receipts → receipt; W2s → W-2, "Form W-2", W2);
+       - words likely to appear inside the file (an invoice: "invoice", "amount due", the vendor; a lease: "lease agreement", "landlord", "tenant");
+       - likely file-name words, and likely folder names (a year, a topic or project).
+    2. Run several in one command, on names and on contents (Spotlight matches whole words in text), e.g. `mdfind -onlyin ~ 'kMDItemDisplayName == "*invoice*"cd || kMDItemDisplayName == "*receipt*"cd'; mdfind -onlyin ~ 'kMDItemTextContent == "invoice"cd || kMDItemTextContent == "amount due"cd'`, or plain `mdfind "term"`. Recent files: `ls -lt ~/Downloads ~/Desktop ~/Documents | head -40`.
+    3. Merge: prefer files found by several queries or inside folders that match the request (year, topic, project, person); use those folders to narrow big result sets, but keep strong matches from elsewhere.
+    4. Verify: open the top hits (Read a document, view an image) before writing FILE lines. A file whose name says nothing (Scan…, Document_…, IMG_…) can only be judged by opening it. Unless one file is clearly it, list several distinct candidates (up to 8), best first.
+
+    More Spotlight: by source site `mdfind 'kMDItemWhereFroms == "*example.com*"'`, by type `mdfind -onlyin ~ 'kMDItemContentTypeTree == "public.image" && kMDItemFSContentChangeDate >= $time.today(-7)'`.
+    Where to look: {{searchFolders}}. Folders the user added are good bets. Elsewhere in ~ is fine too.
+    Hidden or app-specific folders only if the obvious places come up empty. Ignore {{likelyFolder}} itself. Never modify anything.
     """
 
     static func render(_ template: String, values: [String: String]) -> String {
