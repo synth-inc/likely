@@ -125,10 +125,9 @@ Your cases live in `~/Library/Application Support/Likely/evals/cases.jsonl`. Way
    The editor deliberately waits until the picker has closed: a Likely window (or a second file panel)
    opening while the picker is up would take focus from it and could change its selection, and waiting
    means the actual pick can be prefilled as the answer.
-2. **Menu bar → Make Last Search a Test…**: the same editor for the most recent search.
-3. **Settings → History → Make Eval** for any past search (see Search history).
-4. **Debug View → Make This a Test…** for any recent run, or **Settings → Evals → New Test…** from scratch.
-5. **Automatic saving** (see Capture), or edit the file by hand.
+2. **Settings → History → Make Eval** for any past search, including the most recent one (see Search history).
+3. **Debug View → Make This a Test…** for any recent run, or **Settings → Evals → New Test…** from scratch.
+4. **Automatic saving** (see Capture), or edit the file by hand.
 
 Good cases are specific about *your* files: "the signed offer letter", "the PDF my landlord asked for",
 "our logo with the transparent background". Use `anyOf` when there are equivalent copies, `allOf` when
