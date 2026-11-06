@@ -32,17 +32,17 @@ final class OpenCodeRunner: AgentRunner {
     /// on search commands, and find's -exec/-ok could otherwise run anything.
     /// The user's tools (see ToolStore) are allowed after the built-in commands and before the `find`
     /// denials, so those still win.
+    static let fileTools = ["read", "glob", "grep", "list", "external_directory"]
+    static let bashAllowed = ["ls", "ls *", "mdfind *", "mdls *", "find *", "grep *", "head *", "tail *", "stat *", "wc *", "echo *"]
+
     static func permission(extra commands: [String]) -> String {
-        let allow: [(pattern: String, action: String)] = [
-            ("*", "deny"), ("ls", "allow"), ("ls *", "allow"), ("mdfind *", "allow"), ("mdls *", "allow"), ("find *", "allow"),
-            ("grep *", "allow"), ("head *", "allow"), ("tail *", "allow"), ("stat *", "allow"), ("wc *", "allow"), ("echo *", "allow"),
-        ]
+        let allow: [(pattern: String, action: String)] = [("*", "deny")] + bashAllowed.map { ($0, "allow") }
         let deny = ["find *-exec*", "find *-ok*", "find *-delete*", "find *-fprint*", "find *-fls*"].map { (pattern: $0, action: "deny") }
         let builtIn = Set(allow.map(\.pattern))
         let extra = ToolPermissions.openCode(commands).filter { !builtIn.contains($0.pattern) }
         let bash = ToolPermissions.orderedJSONObject((allow + extra + deny).map { ($0.pattern, .string($0.action)) })
         return ToolPermissions.orderedJSONObject(
-            ["*", "read", "glob", "grep", "list", "external_directory"].map { ($0, .string($0 == "*" ? "deny" : "allow")) }
+            (["*"] + fileTools).map { ($0, .string($0 == "*" ? "deny" : "allow")) }
                 + [("bash", .raw(bash))])
     }
 

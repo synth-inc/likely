@@ -2,7 +2,8 @@
 
 Likely's search agent can only run a few read-only search commands (`mdfind`, `mdls`, `ls`, `grep`, `head`,
 `stat`, plus each agent's own file reading). Tools let you give it more: any command-line program you
-have installed, with instructions for when to use it.
+have installed, with instructions for when to use it. Settings → Tools lists the built-in ones under
+"Built in" (always on, read from the runners' own allowlists) below your tools.
 
 Tools live in one file, the source of truth:
 

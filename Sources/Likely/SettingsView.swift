@@ -406,14 +406,14 @@ private struct ToolsSettings: View {
 
     var body: some View {
         Form {
-            Section {
-                Label("Your agent runs these commands on its own, without asking you. Only add commands that read; never ones that change, move or delete files.",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.callout)
-                if let note = ToolPermissions.agentNotes[agentID] {
-                    Text(note).font(.caption).foregroundStyle(.secondary)
+            if case .configured = photoState {} else {
+                Section {
+                    PhotoSearchRow(installed: rclipInstalled, setUp: { settingUpPhotos = true },
+                                   enable: { store.save(PhotoSearch.standardEntry) })
                 }
+            }
+
+            Section {
                 if let error = store.loadError {
                     Text("\(error). Using the built-in search commands only; fix the file or save a tool here (the broken file is kept as tools.invalid.json).")
                         .font(.caption).foregroundStyle(.red)
@@ -421,9 +421,9 @@ private struct ToolsSettings: View {
                 ForEach(store.issues, id: \.self) { issue in
                     Text(issue).font(.caption).foregroundStyle(.orange)
                 }
-                if case .configured = photoState {} else {
-                    PhotoSearchRow(installed: rclipInstalled, setUp: { settingUpPhotos = true },
-                                   enable: { store.save(PhotoSearch.standardEntry) })
+                if store.tools.isEmpty {
+                    Text("None yet. Add one, or ask your coding agent to set one up (below).")
+                        .foregroundStyle(.secondary)
                 }
                 ForEach(store.tools) { tool in
                     ToolRow(tool: tool, results: testResults[tool.id],
@@ -433,14 +433,46 @@ private struct ToolsSettings: View {
                 }
             } header: {
                 HStack {
-                    Text("Tools")
+                    Text("Your tools")
                     Spacer()
                     Button("Reveal tools.json") { revealFile() }.controlSize(.small)
-                    Button("Add Tool…") {
+                    Button {
                         editing = ToolDraft(CustomTool(id: "", name: "", commands: [], instructions: ""), isNew: true)
+                    } label: {
+                        Label("Add Tool", systemImage: "plus")
                     }
                     .controlSize(.small)
                 }
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Your agent runs these commands on its own, without asking you. Only add commands that read; never ones that change, move or delete files.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    if let note = ToolPermissions.agentNotes[agentID] {
+                        Text(note).foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption)
+            }
+
+            Section {
+                ForEach(BuiltInTools.entries(for: agentID), id: \.self) { entry in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.name).font(.body.monospaced())
+                            if !entry.purpose.isEmpty {
+                                Text(entry.purpose).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Text("Always on").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Built in")
+            } footer: {
+                Text("What \(AgentKind.with(id: agentID)?.name ?? "your agent") can always use. These only read.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Set up with your coding agent") {

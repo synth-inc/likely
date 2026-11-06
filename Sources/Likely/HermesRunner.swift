@@ -48,8 +48,9 @@ final class HermesRunner: AgentRunner {
     /// `--source tool` keeps these sessions out of the user's session lists; `--ignore-rules` skips
     /// SOUL.md/AGENTS.md/memory. terminal = shell (mdfind etc.), file = read_file/search_files,
     /// vision = vision_analyze for the screenshot. Writes from any of them are stopped by the sandbox.
+    static let toolsets = ["terminal", "file", "vision"]
     private static let baseArguments = ["chat", "--format", "stream-json", "--source", "tool", "--ignore-rules",
-                                        "-t", "terminal,file,vision"]
+                                        "-t", toolsets.joined(separator: ",")]
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
         cancel()
