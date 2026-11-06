@@ -11,18 +11,26 @@ struct SettingsActions {
     var verboseChanged: (Bool) -> Void
 }
 
+/// The selected Settings tab, so the menu bar can open Settings on a given tab.
+final class SettingsNavigation: ObservableObject {
+    enum Tab: Hashable { case general, agent, prompt, tools, permissions, debug }
+    static let shared = SettingsNavigation()
+    @Published var tab: Tab = .general
+}
+
 struct SettingsView: View {
     let actions: SettingsActions
+    @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
-        TabView {
-            GeneralSettings(actions: actions).tabItem { Label("General", systemImage: "gearshape") }
-            AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }
-            PromptSettings().tabItem { Label("Prompt", systemImage: "text.alignleft") }
-            ToolsSettings().tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
-            PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }
+        TabView(selection: $navigation.tab) {
+            GeneralSettings(actions: actions).tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsNavigation.Tab.general)
+            AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }.tag(SettingsNavigation.Tab.agent)
+            PromptSettings().tabItem { Label("Prompt", systemImage: "text.alignleft") }.tag(SettingsNavigation.Tab.prompt)
+            ToolsSettings().tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }.tag(SettingsNavigation.Tab.tools)
+            PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }.tag(SettingsNavigation.Tab.permissions)
             if MenuBarGlyph.isDebugEnabled {
-                DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }
+                DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }.tag(SettingsNavigation.Tab.debug)
             }
         }
         .padding(20)
@@ -387,6 +395,14 @@ private struct ToolsSettings: View {
     @State private var deleting: CustomTool?
     @State private var testResults: [String: [ToolCheck]] = [:]
     @State private var copied = false
+    @State private var rclipInstalled = false
+    @State private var settingUpPhotos = false
+
+    private var photoState: PhotoSearch.State { PhotoSearch.state(tools: store.tools, rclipInstalled: rclipInstalled) }
+
+    private func detectRclip() {
+        if case .found = AgentPath.resolve("rclip", in: ToolCheck.directories(agentID: agentID)) { rclipInstalled = true } else { rclipInstalled = false }
+    }
 
     var body: some View {
         Form {
@@ -405,9 +421,9 @@ private struct ToolsSettings: View {
                 ForEach(store.issues, id: \.self) { issue in
                     Text(issue).font(.caption).foregroundStyle(.orange)
                 }
-                if store.tools.isEmpty {
-                    Text("No tools yet. Add one, or ask your coding agent to set one up (below).")
-                        .foregroundStyle(.secondary)
+                if case .configured = photoState {} else {
+                    PhotoSearchRow(installed: rclipInstalled, setUp: { settingUpPhotos = true },
+                                   enable: { store.save(PhotoSearch.standardEntry) })
                 }
                 ForEach(store.tools) { tool in
                     ToolRow(tool: tool, results: testResults[tool.id],
@@ -453,7 +469,14 @@ private struct ToolsSettings: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { store.reloadIfChanged() }
+        .onAppear {
+            store.reloadIfChanged()
+            detectRclip()
+        }
+        .onChange(of: agentID) { _, _ in detectRclip() }
+        .sheet(isPresented: $settingUpPhotos) {
+            PhotoSearchSetupSheet(installed: rclipInstalled, checkAgain: detectRclip) { settingUpPhotos = false }
+        }
         .sheet(item: $editing) { draft in
             ToolEditor(draft: draft, agentID: agentID) { tool in
                 store.save(tool)
@@ -524,10 +547,15 @@ struct ToolCheck: Hashable {
     let result: AgentPath.Resolution
 
     static func run(_ commands: [String], agentID: String) -> [ToolCheck] {
+        let directories = directories(agentID: agentID)
+        return commands.map { ToolCheck(command: $0, result: AgentPath.resolve($0, in: directories)) }
+    }
+
+    /// The PATH the runner for `agentID` gives its agent.
+    static func directories(agentID: String) -> [String] {
         let kind = AgentKind.with(id: agentID)
         let executable = kind.flatMap { $0.id == "claude" ? ClaudeLocator.path ?? AgentDetector.shared.path(for: $0) : AgentDetector.shared.path(for: $0) }
-        let directories = AgentPath.directories(agentExecutable: executable, inherited: ProcessInfo.processInfo.environment["PATH"])
-        return commands.map { ToolCheck(command: $0, result: AgentPath.resolve($0, in: directories)) }
+        return AgentPath.directories(agentExecutable: executable, inherited: ProcessInfo.processInfo.environment["PATH"])
     }
 }
 
@@ -640,5 +668,79 @@ private struct ToolEditor: View {
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
         }
+    }
+}
+
+/// The suggested "Photo search (rclip)" row, shown until tools.json has an rclip entry.
+private struct PhotoSearchRow: View {
+    let installed: Bool
+    let setUp: () -> Void
+    let enable: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            if installed {
+                Toggle(isOn: Binding(get: { false }, set: { if $0 { enable() } })) { label }
+                    .toggleStyle(.switch)
+                Spacer()
+            } else {
+                label
+                Spacer()
+                Button("Set Up…", action: setUp).controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Photo search (rclip)")
+            Text(installed ? "Find photos by what's in them. rclip is installed; turn on to add it." : "Find photos by what's in them")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// How to get rclip: a prompt for the user's coding agent, which installs and indexes it and adds the entry.
+private struct PhotoSearchSetupSheet: View {
+    let installed: Bool
+    let checkAgain: () -> Void
+    let done: () -> Void
+    @State private var copied = false
+    private let prompt = ToolPrompts.setupPrompt(request: ToolPrompts.photoSearchRequest)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Photo search").font(.headline)
+            Text("Photos have no searchable names or text, so your agent needs rclip to find them by what they show. Paste this into Claude Code, Codex or another coding agent to set it up.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                Text(prompt)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(6)
+            }
+            .frame(height: 200)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+            HStack {
+                Button("Check Again", action: checkAgain)
+                Text(installed ? "rclip found" : "rclip not found yet")
+                    .font(.caption).foregroundStyle(installed ? .green : .secondary)
+                Spacer()
+                if copied { Text("Copied").font(.caption).foregroundStyle(.secondary) }
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(prompt, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
+                }
+                Button("Done", action: done).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 540)
     }
 }

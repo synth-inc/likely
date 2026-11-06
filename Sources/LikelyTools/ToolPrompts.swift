@@ -40,7 +40,17 @@ public enum ToolPrompts {
 
     /// The prompt the user pastes into their own coding agent to add a tool for them. Built from the
     /// validator's constants so it states exactly the rules Likely enforces.
-    public static var setupPrompt: String {
+    public static var setupPrompt: String { setupPrompt(request: "") }
+
+    /// What the photo search setup asks the user's coding agent for, after "What I want:".
+    public static let photoSearchRequest = """
+    Set up image search with rclip: install it (brew install rclip, or pipx install rclip), build its index of the \
+    images in my home folder (the setup command in the example above), check that \
+    `cd ~ && rclip -n -t 5 "a photo of a dog"` prints results, then add the example rclip entry above to tools.json, enabled.
+    """
+
+    /// The setup prompt with "What I want:" filled in (empty `request` leaves it for the user).
+    public static func setupPrompt(request: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let path = AgentPath.directories(agentExecutable: nil, inherited: nil, home: home)
             .map { $0.hasPrefix(home) ? "~" + $0.dropFirst(home.count) : $0 }
@@ -85,7 +95,36 @@ public enum ToolPrompts {
         3. Add the entry, check that the file is valid JSON (e.g. `python3 -m json.tool ~/"Library/Application Support/Likely/tools.json"`), and tell me \
         what you added.
 
-        What I want:\u{20}
+        What I want: \(request)
         """
+    }
+}
+
+/// The suggested "Photo search (rclip)" row in Settings → Tools.
+public enum PhotoSearch {
+    public enum State: Equatable {
+        /// rclip isn't on the agents' PATH: offer setup through a coding agent.
+        case notInstalled
+        /// rclip is installed but tools.json has no entry for it: offer a toggle that adds the example entry.
+        case installed
+        /// tools.json has an entry (by id or by an `rclip` command): it's an ordinary tool row.
+        case configured(id: String)
+    }
+
+    public static func entry(in tools: [CustomTool]) -> CustomTool? {
+        tools.first { $0.id == ToolPrompts.example.id }
+            ?? tools.first { tool in tool.cleanedCommands.contains { ToolValidator.firstWord(of: $0).lowercased() == "rclip" } }
+    }
+
+    public static func state(tools: [CustomTool], rclipInstalled: Bool) -> State {
+        if let entry = entry(in: tools) { return .configured(id: entry.id) }
+        return rclipInstalled ? .installed : .notInstalled
+    }
+
+    /// The entry the toggle writes: the standard example, enabled.
+    public static var standardEntry: CustomTool {
+        var tool = ToolPrompts.example
+        tool.enabled = true
+        return tool
     }
 }

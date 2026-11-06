@@ -207,3 +207,39 @@ final class ToolPromptsTests: XCTestCase {
         XCTAssertEqual(file.tools, [ToolPrompts.example])
     }
 }
+
+final class PhotoSearchTests: XCTestCase {
+    let other = CustomTool(id: "exif", name: "EXIF", commands: ["exiftool -s"], instructions: "")
+
+    func testNotInstalled() {
+        XCTAssertEqual(PhotoSearch.state(tools: [], rclipInstalled: false), .notInstalled)
+        XCTAssertEqual(PhotoSearch.state(tools: [other], rclipInstalled: false), .notInstalled)
+    }
+
+    func testInstalledWithoutEntry() {
+        XCTAssertEqual(PhotoSearch.state(tools: [other], rclipInstalled: true), .installed)
+    }
+
+    func testEntryPresent() {
+        XCTAssertEqual(PhotoSearch.state(tools: [other, PhotoSearch.standardEntry], rclipInstalled: true), .configured(id: "rclip"))
+        // An entry counts even if rclip isn't found (the row then shows why with Test), or if it's disabled.
+        var disabled = PhotoSearch.standardEntry
+        disabled.enabled = false
+        XCTAssertEqual(PhotoSearch.state(tools: [disabled], rclipInstalled: false), .configured(id: "rclip"))
+        // Found by command when the id differs.
+        let custom = CustomTool(id: "images", name: "Images", commands: ["cd", "/opt/homebrew/bin/rclip -n"], instructions: "")
+        XCTAssertEqual(PhotoSearch.state(tools: [custom], rclipInstalled: true), .configured(id: "images"))
+    }
+
+    func testStandardEntryIsTheExampleEnabledAndValid() {
+        XCTAssertTrue(PhotoSearch.standardEntry.isActive)
+        XCTAssertEqual(PhotoSearch.standardEntry.commands, ToolPrompts.example.commands)
+    }
+
+    func testPhotoSetupPromptFillsWhatIWant() {
+        let prompt = ToolPrompts.setupPrompt(request: ToolPrompts.photoSearchRequest)
+        XCTAssertTrue(prompt.hasSuffix("What I want: " + ToolPrompts.photoSearchRequest))
+        XCTAssertTrue(prompt.contains(ToolPrompts.exampleJSON))
+        XCTAssertTrue(ToolPrompts.photoSearchRequest.contains("brew install rclip"))
+    }
+}

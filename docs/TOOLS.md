@@ -88,6 +88,10 @@ the network fails at run time. Do that work in the tool's setup, outside Likely.
 
 ## Worked example: image search with rclip
 
+Settings → Tools (also menu bar → Improve Results…) always lists **Photo search (rclip)**. Without rclip
+it offers **Set Up…**, a prompt for your coding agent that does the steps below. With rclip installed it's
+a toggle that writes the entry below. Once tools.json has an rclip entry, it's an ordinary tool.
+
 [rclip](https://github.com/yurijmikhalevich/rclip) searches images by what they show, using a local CLIP
 index.
 
