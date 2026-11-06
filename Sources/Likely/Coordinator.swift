@@ -21,7 +21,6 @@ final class Coordinator {
     enum State { case idle, searching, done }
 
     var onStateChange: ((State, String) -> Void)?
-    var paused = false
     /// Whether Likely may search. Without a license, pickers still get the bar, but in its unpaid state:
     /// no agent, no copies, no jumping to the Likely folder.
     var isLicensed: () -> Bool = { true }
@@ -76,7 +75,7 @@ final class Coordinator {
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         // No click-time snapshots at all unless the user opted into screenshots.
         snapshotter.isSuspended = { [weak self] in
-            self?.paused == true || self?.active != nil || !Settings.autoSuggest || !CGPreflightScreenCaptureAccess()
+            self?.active != nil || !Settings.autoSuggest || !CGPreflightScreenCaptureAccess()
                 || self?.isLicensed() != true
         }
     }
@@ -151,7 +150,7 @@ final class Coordinator {
             pickerClosed(reason: "AXUIElementDestroyed")
             return
         }
-        guard Self.windowEvents.contains(notification), !paused else { return }
+        guard Self.windowEvents.contains(notification) else { return }
 
         var window = element
         if AX.string(element, kAXRoleAttribute) == kAXApplicationRole {
@@ -189,7 +188,7 @@ final class Coordinator {
     }
 
     private func handlePanelServiceWindow(_ window: WindowInfo) {
-        guard !paused, window.bounds.width > 300, window.bounds.height > 200,
+        guard window.bounds.width > 300, window.bounds.height > 200,
               let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
         if let active, active.pid == app.processIdentifier {

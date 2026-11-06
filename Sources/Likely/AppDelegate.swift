@@ -6,7 +6,6 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
-    private let pauseItem = NSMenuItem(title: "Pause", action: #selector(togglePause), keyEquivalent: "")
 
     private let coordinator = Coordinator()
     private var debugWindow: NSWindow?
@@ -68,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard Settings.onboarded else { return }
         if !started {
             startWhenTrusted()
-        } else if !coordinator.paused {
+        } else {
             stateItem.title = Self.watchingTitle
         }
         setIcon(.idle)
@@ -114,17 +113,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateItem.isEnabled = false
         menu.addItem(stateItem)
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Open Likely Folder", action: #selector(openFolder), keyEquivalent: "").target = self
-        pauseItem.target = self
-        menu.addItem(pauseItem)
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Debug View…", action: #selector(showDebugView), keyEquivalent: "d").target = self
         menu.addItem(withTitle: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
         if Updater.isEnabled {
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
         }
         if MenuBarGlyph.isDebugEnabled {
+            menu.addItem(withTitle: "Debug View…", action: #selector(showDebugView), keyEquivalent: "d").target = self
             // Dev builds only: flip through the candidate menu bar glyphs in place.
             let debug = NSMenu()
             debug.addItem(withTitle: "Next Glyph", action: #selector(nextGlyph), keyEquivalent: "").target = self
@@ -156,19 +151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func nextGlyph() { MenuBarGlyph.cycle(by: 1) }
     @objc private func previousGlyph() { MenuBarGlyph.cycle(by: -1) }
 
-    @objc private func openFolder() {
-        try? LikelyFolder.create()
-        NSWorkspace.shared.open(LikelyFolder.url)
-    }
-
     @objc private func checkForUpdates() {
         MainActor.assumeIsolated { Updater.shared.checkForUpdates() }
-    }
-
-    @objc private func togglePause() {
-        coordinator.paused.toggle()
-        pauseItem.state = coordinator.paused ? .on : .off
-        stateItem.title = coordinator.paused ? "Paused" : Self.watchingTitle
     }
 
     @objc private func showDebugView() {
