@@ -80,7 +80,7 @@ One JSON object per line. Blank lines and lines starting with `#` or `//` are ig
 | `context.button` | optional | the picker's confirm button ("Open", "Upload", …) |
 | `expect` | required | one of the three forms below; `{}` means "not filled in yet" (skipped) |
 | `tags` | optional | free-form; filter with `--tags`, broken down in the report |
-| `source` | optional | `manual`, `captured` or `fixture` |
+| `source` | optional | `manual`, `captured`, `history` or `fixture` |
 | `notes`, `createdAt` | optional | for humans; ISO 8601 date |
 | `searchFolders` | optional | tell the agent to search only these folders (see Isolation) |
 
@@ -126,8 +126,9 @@ Your cases live in `~/Library/Application Support/Likely/evals/cases.jsonl`. Way
    opening while the picker is up would take focus from it and could change its selection, and waiting
    means the actual pick can be prefilled as the answer.
 2. **Menu bar → Make Last Search a Test…**: the same editor for the most recent search.
-3. **Debug View → Make This a Test…** for any recent run, or **Settings → Evals → New Test…** from scratch.
-4. **Automatic saving** (see Capture), or edit the file by hand.
+3. **Settings → History → Make Eval** for any past search (see Search history).
+4. **Debug View → Make This a Test…** for any recent run, or **Settings → Evals → New Test…** from scratch.
+5. **Automatic saving** (see Capture), or edit the file by hand.
 
 Good cases are specific about *your* files: "the signed offer letter", "the PDF my landlord asked for",
 "our logo with the transparent background". Use `anyOf` when there are equivalent copies, `allOf` when
@@ -165,6 +166,22 @@ How the pick is read (Accessibility; `PickTracker` in `Sources/Likely/Evals/Eval
 **Privacy.** Automatic saving is off by default in all builds. Everything stays on your Mac in
 `~/Library/Application Support/Likely/evals`; nothing is uploaded, and no case runs until you start a run.
 
+## Search history
+
+With **Settings → History → "Save search history"** on (the default; independent of automatic saving),
+every picker Likely searched for is kept in `~/Library/Application Support/Likely/history.jsonl`, newest
+500 only: the time, the app, the window title and confirm button, what you typed (in order), the
+originals the agent suggested (not the `~/Likely` copies), and what you picked, when the picker was
+confirmed and the pick could be read (same `PickTracker` as Capture). Pickers where nothing ran (nothing
+typed in input-first mode, or no license) aren't recorded. Turning the toggle off stops recording;
+**Clear History…** deletes the file. It's never uploaded or included in eval runs.
+
+Each row has **Make Eval**: a sheet with the query (editable, one message per line), the pick (checked)
+and Likely's suggestions as checkboxes, **Add Files…** for anything else, and any-of / all-of. Saving
+appends a case to `cases.jsonl` with `"source": "history"` and the tag `history`, and marks the row
+"test saved". The entry format is `SearchHistoryEntry` in `Sources/LikelyEvalKit/SearchHistory.swift`;
+unreadable lines are skipped, and kept until they age out.
+
 ## Privacy and the fixture suite
 
 Your cases name your files, and running them sends those paths (and whatever the agent reads) to the
@@ -189,6 +206,8 @@ Codex runs inside its own sandbox, which can't be nested, so for Codex isolation
 - `Sources/LikelyEvalKit/`: case format, path rules, scoring, results, reports (tested in `Tests/LikelyEvalKitTests`).
 - `Sources/Likely/Evals/EvalCLI.swift`: `--eval` mode (suites, runner loop, dry-run sink, isolation).
 - `Sources/Likely/Evals/EvalCapture.swift`: cases from real use (`EvalCapture`, `PickTracker`).
+- `Sources/LikelyEvalKit/SearchHistory.swift`, `Sources/Likely/Evals/SearchHistorySettings.swift`: search
+  history (file format, history → case) and Settings → History with the Make Eval sheet.
 - `Sources/Likely/Evals/EvalsSettings.swift`: Settings → Evals and the case editor (also used by the bar's
   "Save as test", the menu bar item and the Debug View).
 - Shared with the app: `PromptBuilder` (Coordinator.swift) builds every agent message;
