@@ -11,7 +11,7 @@ public struct EvalCase: Codable, Identifiable, Hashable {
     public var context: Context?
     public var expect: Expectation
     public var tags: [String]
-    /// "manual", "captured" or "fixture".
+    /// "manual", "captured", "history" or "fixture".
     public var source: String?
     public var notes: String?
     /// ISO 8601.

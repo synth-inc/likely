@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import LikelyEvalKit
 
 /// Detects pickers opening and closing, and runs the screenshot → claude → ~/Likely pipeline.
 final class Coordinator {
@@ -253,7 +254,8 @@ final class Coordinator {
         debugRun.windowTitle = picker.windowTitle
         debugRun.buttonTitle = picker.buttonTitle
         debugRun.log("Picker opened")
-        if EvalCapture.isEnabled { pickTracker.begin(window: picker.element, pid: picker.pid) }
+        // Read the pick for automatic tests and for search history.
+        if EvalCapture.isEnabled || SearchHistoryStore.isEnabled { pickTracker.begin(window: picker.element, pid: picker.pid) }
         if Settings.openToLikely, let window = picker.element {
             let generation = generation
             PickerNavigator.selectLikelyInSidebar(of: window) { [weak self] in self?.generation == generation && self?.active != nil }
@@ -304,7 +306,8 @@ final class Coordinator {
         hud.hide()
         if runner.isBusy { debugRun?.log("Picker closed, \(agentName) cancelled") }
         runner.cancel()
-        recordDraftIfPicked(picker, reason: reason)
+        let pick = recordDraftIfPicked(picker, reason: reason)
+        recordHistory(picker, picked: pick.picked, how: pick.how)
         // Keep the copies: the app that opened the picker often reads the file after it closes
         // (browsers upload it, Mail attaches it). They go when the next picker opens or after a while.
         folder.release()
@@ -344,12 +347,14 @@ final class Coordinator {
 
     /// Evals: if the picker was confirmed (not cancelled), save what the user typed and what they
     /// actually picked as a draft test case. Off unless EvalCapture is enabled.
-    private func recordDraftIfPicked(_ picker: Picker, reason: String) {
+    /// Returns the pick (empty unless confirmed and readable) and how the picker closed.
+    @discardableResult
+    private func recordDraftIfPicked(_ picker: Picker, reason: String) -> (picked: [String], how: String) {
         let saveRequested = saveTestRequested
         saveTestRequested = false
         guard reason != "app quitting" else {
             pickTracker.end()
-            return
+            return ([], reason)
         }
         var picked: [String] = []
         var how = "pick not tracked"
@@ -367,13 +372,27 @@ final class Coordinator {
         if saveRequested, let run = debugRun {
             // Opened after the picker is gone, so it never competes with the picker for focus or selection.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.onMakeTest?(run) }
-            return
+            return (picked, how)
         }
-        guard EvalCapture.isEnabled, isLicensed(), how.hasPrefix("confirmed") else { return }
+        guard EvalCapture.isEnabled, isLicensed(), how.hasPrefix("confirmed") else { return (picked, how) }
         EvalCapture.saveCaptured(app: picker.appName, windowTitle: debugRun?.windowTitle ?? picker.windowTitle,
                                  button: picker.buttonTitle, queries: typedQueries,
                                  screenshot: autoMode ? capturedScreenshot : nil, picked: picked, how: how,
                                  suggested: debugRun?.files.filter(\.added).map(\.path) ?? [])
+        return (picked, how)
+    }
+
+    /// Search history (Settings → History): one entry per picker Likely searched for, whether or
+    /// not anything was picked. Pickers where nothing ran (unpaid, nothing typed in input-first mode)
+    /// aren't recorded.
+    private func recordHistory(_ picker: Picker, picked: [String], how: String) {
+        guard SearchHistoryStore.isEnabled, let run = debugRun, lastPrompt != nil || !typedQueries.isEmpty else { return }
+        var suggested: [String] = []
+        for file in run.files where file.added && !suggested.contains(file.path) { suggested.append(file.path) }
+        SearchHistoryStore.shared.record(SearchHistoryEntry(
+            date: ISO8601DateFormatter().string(from: run.date), app: picker.appName,
+            windowTitle: run.windowTitle ?? picker.windowTitle, button: picker.buttonTitle,
+            queries: typedQueries, suggested: suggested, picked: picked, outcome: how))
     }
 
     /// "Save as test" in the bar: remember it, and start reading the picker's selection so the
