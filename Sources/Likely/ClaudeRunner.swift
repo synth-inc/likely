@@ -1,4 +1,5 @@
 import Foundation
+import LikelyTools
 
 /// Runs `claude -p` headless with read-only tools and parses its stream-json output into
 /// status updates and candidate file paths. Claude never writes anything; the app does the copying.
@@ -22,6 +23,11 @@ final class ClaudeRunner: AgentRunner {
         "Read", "Glob", "Grep",
         "Bash(ls:*)", "Bash(mdfind:*)", "Bash(mdls:*)", "Bash(head:*)", "Bash(stat:*)", "Bash(grep:*)",
     ]
+
+    /// The built-in tools plus `Bash(<prefix>:*)` for each command of the user's tools (see ToolStore).
+    static func allowedTools(extra commands: [String]) -> [String] {
+        ToolPermissions.merged(allowedTools, ToolPermissions.claude(commands))
+    }
 
     private var process: Process?
     private var buffer = Data()
@@ -56,7 +62,7 @@ final class ClaudeRunner: AgentRunner {
             "--add-dir", FileManager.default.homeDirectoryForCurrentUser.path,
         ] + SearchFolder.outsideHome.flatMap { ["--add-dir", $0] } + [
             "--allowedTools",
-        ] + Self.allowedTools
+        ] + Self.allowedTools(extra: ToolStore.shared.activeCommands)
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
                                                              profile: AgentSandbox.privacyOnlyProfile)
@@ -66,9 +72,7 @@ final class ClaudeRunner: AgentRunner {
         var env = ProcessInfo.processInfo.environment
         // Use the claude.ai login rather than whatever API key a parent shell exported.
         env.removeValue(forKey: "ANTHROPIC_API_KEY")
-        let claudeDir = (claudePath as NSString).deletingLastPathComponent
-        env["PATH"] = [claudeDir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
-            .joined(separator: ":")
+        env["PATH"] = AgentPath.value(agentExecutable: claudePath, inherited: env["PATH"])
         process.environment = env
 
         let stdin = Pipe()

@@ -1,12 +1,15 @@
 import Darwin
 import Foundation
+import LikelyTools
 
 /// Runs Nous Research's Hermes Agent: `hermes chat -q … --format stream-json` in its own `likely`
 /// profile, inside a Seatbelt sandbox that denies file writes outside Hermes' own state.
 ///
 /// Hermes has no read-only mode (its approvals only catch "dangerous" commands; `echo > file` runs),
-/// so the sandbox is the safety boundary. Every `hermes chat` is a client of a per-profile gateway
-/// daemon that actually runs the agent and its tools, so the daemon must start inside the sandbox too:
+/// so the sandbox is the safety boundary. For the same reason there's no command allowlist to extend:
+/// the user's tools (ToolStore) reach Hermes through the prompt only, and run inside the sandbox.
+///
+/// Every `hermes chat` is a client of a per-profile gateway daemon that actually runs the agent and its tools, so the daemon must start inside the sandbox too:
 /// - the `likely` profile is `gateway.standalone`, so the user's own gateway never serves it;
 /// - a stub `launchctl` on PATH makes Hermes start the daemon as a plain child (which inherits the
 ///   sandbox) instead of as a launchd job (which wouldn't), and the real launchctl/osascript/open are
@@ -305,9 +308,7 @@ extension HermesRunner {
         var env = ProcessInfo.processInfo.environment
         for key in env.keys where key.hasPrefix("HERMES_") { env.removeValue(forKey: key) }
         env["HERMES_HOME"] = profileDir.path
-        let dir = (executable as NSString).deletingLastPathComponent
-        env["PATH"] = [stubDir(workDir).path, dir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
-            .joined(separator: ":")
+        env["PATH"] = stubDir(workDir).path + ":" + AgentPath.value(agentExecutable: executable, inherited: env["PATH"])
         return env
     }
 

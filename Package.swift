@@ -15,9 +15,13 @@ let package = Package(
         // Reusable onboarding UI + permission helpers (from DockLock / Onit). Meant to move to its own
         // package once a second app adopts it.
         .target(name: "OnboardingKit", path: "Sources/OnboardingKit"),
+        // User-added agent tools (tools.json): model, validation, permission mapping, prompts. Foundation
+        // only, unit-tested. See docs/TOOLS.md.
+        .target(name: "LikelyTools", path: "Sources/LikelyTools"),
+        .testTarget(name: "LikelyToolsTests", dependencies: ["LikelyTools"], path: "Tests/LikelyToolsTests"),
         .executableTarget(
             name: "Likely",
-            dependencies: ["OnboardingKit", .product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["OnboardingKit", "LikelyTools", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Likely",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
     ]
