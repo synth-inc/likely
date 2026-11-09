@@ -7,7 +7,8 @@ public enum EvalReport {
     public static func textSummary(_ run: EvalRun, previous: EvalRun? = nil) -> String {
         let s = run.summary
         var lines: [String] = []
-        lines.append("Suite \(run.suite) · \(run.agent) \(run.model) · k=\(run.k)\(run.isolated ? " · isolated" : "")")
+        lines.append("Suite \(run.suite) · \(run.agent) \(run.model) · k=\(run.k)\(run.isolated ? " · isolated" : "")"
+                     + (run.interrupted == true ? " · INTERRUPTED (partial results)" : ""))
         var main = "Passed \(s.passed)/\(s.scored) (\(pct(s.passRate)))  hit@1 \(pct(s.hitAt1))  hit@3 \(pct(s.hitAt3))  hit@\(run.k) \(pct(s.hitAtK))"
         main += "  recall \(pct(s.meanRecall))  precision \(s.meanPrecision.map(pct) ?? "–")"
         lines.append(main)
@@ -19,6 +20,8 @@ public enum EvalReport {
         lines.append(perf)
         if let previous {
             let p = previous.summary
+            let differs = run.mismatches(with: previous)
+            if !differs.isEmpty { lines.append("note: the previous run used different settings (\(differs.joined(separator: ", "))); not a like-for-like comparison") }
             lines.append("vs previous (\(previous.startedAt), \(previous.agent) \(previous.model)): pass \(pct(p.passRate)) → \(pct(s.passRate)), hit@1 \(pct(p.hitAt1)) → \(pct(s.hitAt1))")
             let changes = caseChanges(run, previous)
             if !changes.fixed.isEmpty { lines.append("  now passing: " + changes.fixed.joined(separator: ", ")) }
@@ -77,7 +80,7 @@ public enum EvalReport {
         </style></head><body>
         <h1>Likely eval: \(esc(run.suite))</h1>
         <div class="muted">\(esc(run.agent)) · \(esc(run.model)) · k=\(run.k) · timeout \(Int(run.timeoutSeconds))s\
-        \(run.isolated ? " · isolated" : "") · prompt \(esc(run.promptHash)) · Likely \(esc(run.likelyVersion))<br>
+        \(run.isolated ? " · isolated" : "")\(run.interrupted == true ? " · <span class=\"warn\">interrupted (partial results)</span>" : "") · prompt \(esc(run.promptHash)) · Likely \(esc(run.likelyVersion))<br>
         \(esc(run.startedAt)) → \(esc(run.finishedAt))\(run.tags.isEmpty ? "" : " · tags: " + esc(run.tags.joined(separator: ", ")))</div>
         <div class="tiles">
         """
@@ -108,6 +111,10 @@ public enum EvalReport {
             let changes = caseChanges(run, previous)
             h += "<h2>Compared with the previous run</h2><p class=\"muted\">\(esc(previous.startedAt)) · \(esc(previous.agent)) \(esc(previous.model))"
             h += " · prompt \(esc(previous.promptHash))\(previousPath.map { " · <code>\(esc($0))</code>" } ?? "")</p>"
+            let differs = run.mismatches(with: previous)
+            if !differs.isEmpty {
+                h += "<p class=\"warn\">Different settings: \(esc(differs.joined(separator: ", "))). Not a like-for-like comparison.</p>"
+            }
             h += "<p>Pass rate \(pct(previous.summary.passRate)) → <b>\(pct(s.passRate))</b>. "
             h += changes.fixed.isEmpty ? "" : "<span class=\"up\">Now passing: \(esc(changes.fixed.joined(separator: ", ")))</span>. "
             h += changes.broke.isEmpty ? "" : "<span class=\"down\">Now failing: \(esc(changes.broke.joined(separator: ", ")))</span>."

@@ -48,6 +48,7 @@ Then commit and deploy the appcast in onit-server (the script prints the command
 
 `Likely --eval fixtures --agent opencode` runs the public eval suite (synthetic files in `evals/fixtures`)
 headlessly through the app's real prompt and agent runner, and writes `results.json` + `report.html`.
+Eval mode, Settings → Evals and "Save as test" exist only in dev builds (`./build.sh`), not in release builds.
 Your own cases live in `~/Library/Application Support/Likely/evals/cases.jsonl` ("Save as test" in the bar above a
 picker, Settings → History → Make Eval, Settings → Evals, or automatic saving of picks). See [docs/EVALS.md](docs/EVALS.md).
 

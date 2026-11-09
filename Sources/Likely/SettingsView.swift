@@ -20,7 +20,9 @@ struct SettingsView: View {
             PromptSettings().tabItem { Label("Prompt", systemImage: "text.alignleft") }
             PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }
             HistorySettings().tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+            #if LIKELY_DEV
             EvalsSettings().tabItem { Label("Evals", systemImage: "checklist") }
+            #endif
             if MenuBarGlyph.isDebugEnabled {
                 DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }
             }

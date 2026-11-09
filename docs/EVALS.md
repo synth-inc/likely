@@ -39,7 +39,6 @@ $APP --eval fixtures --dry-run                   # print the prompts; run nothin
 | `--out <dir>` | see below | results folder |
 | `--no-isolate` | | don't sandbox cases that set `searchFolders` |
 | `--verbose` | | also print Likely's log lines |
-| `--allow-eval` | | required in release builds (or `LIKELY_ALLOW_EVAL=1`) |
 
 From the app: **Settings → Evals → Run Suite…** runs the same command as a subprocess and shows its
 progress; **Open Last Report** opens the newest report.
@@ -49,18 +48,29 @@ Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-
 - `results.json`: every case's suggestions, score, timings, cost, tool calls (schema: `EvalRun` in
   `Sources/LikelyEvalKit/EvalResults.swift`).
 - `report.html`: self-contained report: summary tiles, per-tag table, per-case details, and a comparison
-  with the previous run of the same suite (any agent), including which cases started or stopped passing.
-- `cases/<id>/prompt.txt` and `cases/<id>/transcript.jsonl`: the exact first message and the agent's raw stream.
+  with the previous run of the same suite, including which cases started or stopped passing. It prefers a
+  previous run with the same agent, model, k, tags and `--case` filter; if there's none, it compares with
+  the newest run of the suite and says which settings differ.
+- `cases/<n>-<id>/prompt.txt` and `cases/<n>-<id>/transcript.jsonl`: the exact first message and the
+  agent's raw stream (every turn, relaunches included). `<n>` is the case's position in the suite, so
+  cases that share an id keep separate folders.
 - `prompt-template.txt`: the template used (its hash is in the report, to tell prompt versions apart).
 
 The command prints one line per case and a summary, and exits 0 when the run completes (whatever the
-pass rate) or 2 on a usage/setup error.
+pass rate), 1 if the results couldn't be written, or 2 on a usage/setup error. A case passes only if it
+ran to the end: a timeout or error counts as a failure even if the right file was already suggested.
 
-### Licensing
+Ctrl-C (SIGINT) or SIGTERM (what **Stop** in Run Suite sends) cancels the running cases, stops their
+agents, skips the rest and writes partial results (marked *interrupted*); the exit status is then 130 or
+143. Closing the Run Suite sheet or quitting Likely stops a run the same way.
 
-Eval mode doesn't check the license: it's a developer tool. Dev builds (`./build.sh`, `LIKELY_DEV`) allow it;
-release builds refuse it unless you pass `--allow-eval` or set `LIKELY_ALLOW_EVAL=1`. Without `--eval`,
-release builds behave exactly as before.
+### Dev builds only
+
+Eval mode is a developer tool and doesn't check the license, so it exists only in dev builds
+(`./build.sh`, which compiles with `LIKELY_DEV`). Release builds (`LIKELY_DISTRIBUTION=1`) contain no
+`--eval` mode, no Settings → Evals tab and no "Save as test" in the bar; there's no flag to turn them on.
+The case format and file handling (`LikelyEvalKit`) are in every build: search history uses them.
+Dev builds also bundle `evals/fixtures` in the app, so the public suite runs from Settings too.
 
 ## Case format
 
@@ -220,12 +230,22 @@ image, a landscape and an app icon, all for a made-up "Jordan Rivera". Its cases
 `searchFolders: ["files"]`, which turns on **isolation** (unless `--no-isolate`):
 
 - the prompt's search folders become the fixture folder, plus a note to search only there;
-- the agent's sandbox denies reading `~/Desktop`, `~/Documents`, `~/Downloads`, `~/Pictures`, `~/Movies`,
-  `~/Music`, iCloud Drive, `~/Library/CloudStorage`, Mail, Messages, app containers and your extra search
-  folders (the fixture folder stays readable even if the repo lives under one of them);
-- Spotlight is blocked (its index would list your files by name), so agents use `ls`/`find`/`grep`.
+- the prompt drops the template's "Elsewhere in ~ is fine too";
+- the agent's sandbox denies reading **all of your home folder** and `/Volumes` (and your extra search
+  folders), then allows back only the fixture folder, the case's work folder, the agent CLIs' own config
+  and state (`~/.claude`, `~/.claude.json`, `~/.gemini`, `~/.hermes`, `~/.config`, `~/.local`, `~/.cache`,
+  toolchains such as `~/.nvm` or `~/.bun`, shell startup files, the login keychain) and the agent's install
+  folder. So a fixture run can't read `~/Likely`, `~/Library/Application Support/Likely` (your cases and
+  their screenshots), `~/Library/Logs/Likely` or your documents. Rules are per case (`EvalIsolation` in
+  `LikelyEvalKit`), so `--jobs` > 1 never mixes them up;
+- Spotlight is blocked (its index would list your files by name), so agents use `ls`/`find`/`grep`;
+- Hermes: its gateway runs inside the sandbox of the client that started it, so an eval never reuses a
+  gateway it didn't start with the same rules (it restarts it) and stops its gateway when it exits.
+  Isolated Hermes runs need `--jobs 1`.
 
-Codex runs inside its own sandbox, which can't be nested, so for Codex isolation is the prompt only.
+**Codex can't be isolated**: it runs inside its own sandbox, which can't be nested. Isolated suites run
+with Codex print a warning, keep only the prompt's "search there only", and are recorded as *not
+isolated*; Run Suite shows a note when you pick Codex for the public fixtures.
 
 ## Code map
 

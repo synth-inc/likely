@@ -235,6 +235,7 @@ private struct HUDView: View {
                 }
                 .buttonStyle(.plain)
                 .underline()
+                #if LIKELY_DEV
                 Text("·")
                 Button(model.saveRequested ? "Test opens after you pick" : "Save as test") {
                     model.onSaveAsTest?()
@@ -244,6 +245,7 @@ private struct HUDView: View {
                 .underline(!model.saveRequested)
                 .disabled(model.saveRequested)
                 .help("Save this search as an eval test. The editor opens when the picker closes, with what you picked as the answer.")
+                #endif
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)

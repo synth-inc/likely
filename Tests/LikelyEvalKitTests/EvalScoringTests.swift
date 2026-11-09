@@ -55,16 +55,16 @@ final class EvalScoringTests: XCTestCase {
 
     func testAllOfWithFolderEntry() {
         // The K1s folder plus a K-1 filed elsewhere: the folder, or files inside it, cover the first entry.
-        let e = ResolvedExpectation(kind: .allOf, paths: ["/T/K1s", "/T/1099s/Fundrise/K-1.pdf"], folderEntries: ["/T/K1s"])
-        let viaFolder = EvalScorer.score(suggestions: ["/T/K1s", "/T/1099s/Fundrise/K-1.pdf"], expected: e, k: 8)
+        let e = ResolvedExpectation(kind: .allOf, paths: ["/T/K1s", "/T/1099s/Broker/K-1.pdf"], folderEntries: ["/T/K1s"])
+        let viaFolder = EvalScorer.score(suggestions: ["/T/K1s", "/T/1099s/Broker/K-1.pdf"], expected: e, k: 8)
         XCTAssertTrue(viaFolder.pass)
-        let viaContents = EvalScorer.score(suggestions: ["/T/K1s/MS/a.pdf", "/T/1099s/Fundrise/K-1.pdf"], expected: e, k: 8)
+        let viaContents = EvalScorer.score(suggestions: ["/T/K1s/MS/a.pdf", "/T/1099s/Broker/K-1.pdf"], expected: e, k: 8)
         XCTAssertTrue(viaContents.pass)
         XCTAssertEqual(viaContents.precision, 1)
-        let missingFundrise = EvalScorer.score(suggestions: ["/T/K1s"], expected: e, k: 8)
-        XCTAssertFalse(missingFundrise.pass)
-        XCTAssertEqual(missingFundrise.missing, ["/T/1099s/Fundrise/K-1.pdf"])
-        XCTAssertEqual(missingFundrise.recall, 0.5)
+        let missingBroker = EvalScorer.score(suggestions: ["/T/K1s"], expected: e, k: 8)
+        XCTAssertFalse(missingBroker.pass)
+        XCTAssertEqual(missingBroker.missing, ["/T/1099s/Broker/K-1.pdf"])
+        XCTAssertEqual(missingBroker.recall, 0.5)
     }
 
     func testFolderOrContents() {

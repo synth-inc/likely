@@ -36,6 +36,8 @@ enum EvalCapture {
             // The live screenshot is overwritten by the next picker: keep a copy with the case.
             let copy = EvalStorage.screenshotsURL.appendingPathComponent("\(id).png")
             try? FileManager.default.createDirectory(at: EvalStorage.screenshotsURL, withIntermediateDirectories: true)
+            // copyItem fails if the file exists (a leftover from a case that was removed by hand).
+            try? FileManager.default.removeItem(at: copy)
             if (try? FileManager.default.copyItem(at: screenshot, to: copy)) != nil { screenshotPath = copy.path }
         }
 
@@ -72,6 +74,7 @@ enum EvalCapture {
             DispatchQueue.main.async { EvalCaseStore.shared.reload() }
         } catch {
             Log.write("evals", "couldn't save captured test: \(error)")
+            if let screenshotPath { try? FileManager.default.removeItem(atPath: screenshotPath) }
         }
     }
 
