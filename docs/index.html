@@ -121,59 +121,6 @@
 
 
 
-    <!-- 7. WHAT LEAVES YOUR MAC (plain-language version of the table in privacy.html) -->
-    <section id="leaves" class="wrap section" aria-labelledby="leaves-h">
-      <h2 id="leaves-h" data-copy-id="leaves.title">What leaves your Mac</h2>
-      <div class="panel leaves">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th scope="col" data-copy-id="leaves.head.to">Where it goes</th>
-              <th scope="col" data-copy-id="leaves.head.what">What</th>
-              <th scope="col" data-copy-id="leaves.head.when">When</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row" data-copy-id="leaves.ai.to">The AI provider you picked, through your own coding agent and account</th>
-              <td>
-                <ul>
-                  <li data-copy-id="leaves.ai.w1">What you typed</li>
-                  <li data-copy-id="leaves.ai.w2">The app’s name and window title</li>
-                  <li data-copy-id="leaves.ai.w3">A screenshot of the window behind the picker, if screenshots are on</li>
-                  <li data-copy-id="leaves.ai.w4">Your name, if “Include my name in searches” is on</li>
-                  <li data-copy-id="leaves.ai.w5">Names and paths of files the agent finds, and the contents of files it opens</li>
-                  <li data-copy-id="leaves.ai.w6">Instructions for any tools you added</li>
-                </ul>
-              </td>
-              <td data-copy-id="leaves.ai.when">Only when you search</td>
-            </tr>
-            <tr>
-              <th scope="row" data-copy-id="leaves.server.to">Likely’s license server</th>
-              <td data-copy-id="leaves.server.what">A random install ID, and whether your license is active</td>
-              <td data-copy-id="leaves.server.when">When you activate and when Likely checks your license</td>
-            </tr>
-            <tr>
-              <th scope="row" data-copy-id="leaves.stripe.to">Stripe</th>
-              <td data-copy-id="leaves.stripe.what">Your email and payment details. Your card number never reaches us.</td>
-              <td data-copy-id="leaves.stripe.when">When you buy or manage a subscription</td>
-            </tr>
-            <tr>
-              <th scope="row" data-copy-id="leaves.updates.to">Update checks</th>
-              <td data-copy-id="leaves.updates.what">Your IP address and app version, like any download</td>
-              <td data-copy-id="leaves.updates.when">When Likely checks for or downloads an update</td>
-            </tr>
-            <tr>
-              <th scope="row" data-copy-id="leaves.stays.to">Stays on your Mac</th>
-              <td data-copy-id="leaves.stays.what">Your files (Likely copies them locally), search history, test cases, screenshots and logs</td>
-              <td data-copy-id="leaves.stays.when">Always</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="leaves-note" data-copy-id="leaves.note">Likely doesn't run an AI. Searches go to the AI provider you choose, under your own account and their privacy terms.</p>
-      <p class="leaves-more" data-copy-id="leaves.more">No analytics, no telemetry, no crash reports. The details are in our <a href="privacy.html">privacy policy</a>.</p>
-    </section>
 
     <!-- 8. PRICING -->
     <section id="pricing" class="wrap section" aria-labelledby="price-h">
@@ -223,8 +170,56 @@
           <p data-copy-id="faq.agent.a">It can search and read files to find what you asked for, nothing more. It can’t change or delete anything, and it can’t read Likely’s own data, like your search history or logs. It’s kept out of Photos, Mail, Messages, Contacts, Notes and Safari unless you allow them in Settings → Permissions.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.provider.q">What goes to the AI provider?</span></summary>
-          <p data-copy-id="faq.provider.a">Your request, the app and window you’re in, a screenshot if screenshots are on, and the contents of any file the agent opens to check it. It goes to the agent you chose, under your account with that provider. Likely never sends your searches or files to us.</p>
+          <summary><span data-copy-id="faq.provider.q">What leaves my Mac?</span></summary>
+          <p data-copy-id="faq.provider.a">Likely doesn’t run an AI. Searches go to the agent you chose, under your account with that provider. Likely never sends your searches or files to us.</p>
+          <div class="faq-table">
+            <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-copy-id="leaves.head.to">Where it goes</th>
+                      <th scope="col" data-copy-id="leaves.head.what">What</th>
+                      <th scope="col" data-copy-id="leaves.head.when">When</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row" data-copy-id="leaves.ai.to">The AI provider you picked, through your own coding agent and account</th>
+                      <td>
+                        <ul>
+                          <li data-copy-id="leaves.ai.w1">What you typed</li>
+                          <li data-copy-id="leaves.ai.w2">The app’s name and window title</li>
+                          <li data-copy-id="leaves.ai.w3">A screenshot of the window behind the picker, if screenshots are on</li>
+                          <li data-copy-id="leaves.ai.w4">Your name, if “Include my name in searches” is on</li>
+                          <li data-copy-id="leaves.ai.w5">Names and paths of files the agent finds, and the contents of files it opens</li>
+                          <li data-copy-id="leaves.ai.w6">Instructions for any tools you added</li>
+                        </ul>
+                      </td>
+                      <td data-copy-id="leaves.ai.when">Only when you search</td>
+                    </tr>
+                    <tr>
+                      <th scope="row" data-copy-id="leaves.server.to">Likely’s license server</th>
+                      <td data-copy-id="leaves.server.what">A random install ID, whether your license is active, and your IP address, like any web request</td>
+                      <td data-copy-id="leaves.server.when">When you activate and when Likely checks your license</td>
+                    </tr>
+                    <tr>
+                      <th scope="row" data-copy-id="leaves.stripe.to">Stripe</th>
+                      <td data-copy-id="leaves.stripe.what">Your email and payment details. Your card number never reaches us.</td>
+                      <td data-copy-id="leaves.stripe.when">When you buy or manage a subscription</td>
+                    </tr>
+                    <tr>
+                      <th scope="row" data-copy-id="leaves.updates.to">Update checks</th>
+                      <td data-copy-id="leaves.updates.what">Your IP address and app version, like any download</td>
+                      <td data-copy-id="leaves.updates.when">When Likely checks for or downloads an update</td>
+                    </tr>
+                    <tr>
+                      <th scope="row" data-copy-id="leaves.stays.to">Stays on your Mac</th>
+                      <td data-copy-id="leaves.stays.what">Your search history, test cases and logs, and the copies in your Likely folder</td>
+                      <td data-copy-id="leaves.stays.when">Always</td>
+                    </tr>
+                  </tbody>
+                </table>
+          </div>
+          <p class="faq-more" data-copy-id="faq.provider.more">The details are in our <a href="privacy.html">privacy policy</a>.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.screenshots.q">Are screenshots required? Where do they go?</span></summary>

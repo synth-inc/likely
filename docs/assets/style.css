@@ -130,7 +130,9 @@ h1 em { font-style: normal; color: var(--text-2); }
 .section-more { text-align: center; margin-top: 20px; font-size: 14px; color: var(--text-2); }
 @media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
 
-/* What leaves your Mac */
+/* What leaves your Mac (table inside the Q&A) */
+.faq-table { overflow-x: auto; padding: 0 0 8px; }
+.faq .faq-more { font-size: 14px; color: var(--text-2); }
 .leaves { max-width: 760px; margin: 0 auto; padding: 8px 24px; overflow-x: auto; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .data-table th, .data-table td { text-align: left; vertical-align: top; padding: 14px 12px 14px 0; }
