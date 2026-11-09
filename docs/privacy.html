@@ -42,7 +42,7 @@
 
     <h1 data-copy-id="privacy.title">Privacy Policy</h1>
     <p class="meta" data-copy-id="privacy.effective">Effective date: <span class="placeholder">[EFFECTIVE DATE: set at publish]</span></p>
-    <p class="lede" data-copy-id="privacy.lede">Likely is built so that very little leaves your Mac. It doesn’t run an AI of its own, has no analytics, and never uploads your files to us. This policy explains exactly what does leave, where it goes, and how to delete what stays.</p>
+    <p class="lede" data-copy-id="privacy.lede">Likely is built so that very little leaves your Mac. The app doesn’t run an AI of its own, has no analytics or telemetry of its own, and never uploads your files to us. Our license server does keep records and analytics about the requests it receives, and Stripe sends us details of purchases. This policy explains what leaves your Mac, where it goes, what we keep, and how to delete it.</p>
 
     <ol class="toc" aria-label="Contents">
       <li><a href="#who" data-copy-id="privacy.toc.who">Who we are</a></li>
@@ -50,10 +50,15 @@
       <li><a href="#leaves" data-copy-id="privacy.toc.leaves">What leaves your Mac</a></li>
       <li><a href="#ai" data-copy-id="privacy.toc.ai">AI providers</a></li>
       <li><a href="#payment" data-copy-id="privacy.toc.payment">Payment</a></li>
+      <li><a href="#providers" data-copy-id="privacy.toc.providers">Our service providers</a></li>
       <li><a href="#updates" data-copy-id="privacy.toc.updates">Updates</a></li>
       <li><a href="#local" data-copy-id="privacy.toc.local">Data on your Mac</a></li>
       <li><a href="#retention" data-copy-id="privacy.toc.retention">Retention</a></li>
       <li><a href="#rights" data-copy-id="privacy.toc.rights">Your rights</a></li>
+      <li><a href="#categories" data-copy-id="privacy.toc.categories">Categories and recipients</a></li>
+      <li><a href="#gdpr" data-copy-id="privacy.toc.gdpr">EEA, UK and Swiss users</a></li>
+      <li><a href="#security" data-copy-id="privacy.toc.security">Security and breaches</a></li>
+      <li><a href="#transfers" data-copy-id="privacy.toc.transfers">If Likely changes hands</a></li>
       <li><a href="#children" data-copy-id="privacy.toc.children">Children</a></li>
       <li><a href="#changes" data-copy-id="privacy.toc.changes">Changes</a></li>
       <li><a href="#contact" data-copy-id="privacy.toc.contact">Contact</a></li>
@@ -61,28 +66,29 @@
 
     <h2 id="who" data-copy-id="privacy.who.title">1. Who we are</h2>
     <p data-copy-id="privacy.who.p1">Likely is a macOS menu bar app made by Synthetic Exploration, Inc., a Delaware corporation (“Synth”, “we”, “us”). This policy covers the Likely app, its license and update services, and this website (synth-inc.github.io/likely). Our <a href="terms.html">Terms of Service</a> cover your use of the paid app and services.</p>
-    <p data-copy-id="privacy.who.p2">Likely’s source code is public under the GPL-3.0 license at <a href="https://github.com/synth-inc/likely">github.com/synth-inc/likely</a>, so you can check everything here against the code.</p>
+    <p data-copy-id="privacy.who.p2">Likely’s source code is public under the GPL-3.0 license at <a href="https://github.com/synth-inc/likely">github.com/synth-inc/likely</a>, so you can check what the app does against the code.</p>
 
     <h2 id="collect" data-copy-id="privacy.collect.title">2. What we collect, and what we don’t</h2>
-    <p data-copy-id="privacy.collect.p1">We (Synth) receive only what we need to sell and license the app:</p>
+    <p data-copy-id="privacy.collect.p1">We (Synth) receive only what we need to sell and license the app and to keep our server running:</p>
     <ul>
-      <li data-copy-id="privacy.collect.li1"><b>App and install ID.</b> When Likely activates and when it checks your license, it sends our server the app’s identifier (“likely”) and a random ID created when you install it. The ID isn’t derived from your hardware, name or files.</li>
-      <li data-copy-id="privacy.collect.li2"><b>Purchase and license records.</b> There’s no sign-up or sign-in: Likely activates with the random install ID. If you buy a license, our server links the purchase to that install ID and keeps the plan, whether the license is active, when a subscription renews or ends, and Stripe’s reference numbers for the purchase (customer, checkout, payment and subscription IDs). Our server doesn’t store your email address.</li>
-      <li data-copy-id="privacy.collect.li2b"><b>Your email, through Stripe.</b> The email address you enter at checkout goes to Stripe, which keeps it with your purchase and sends your receipts. Because the purchase is in our Stripe account, we can see that email and your purchase history there, for example to answer a support or refund request.</li>
+      <li data-copy-id="privacy.collect.li1"><b>An anonymous account and install ID.</b> On first launch, before you buy anything, Likely creates an anonymous account on our license server. The account is identified by a random ID created when you install Likely (the install ID), which isn’t derived from your hardware, name or files. The app sends that ID and the app’s identifier (“likely”) when it signs in, and checks your license at launch and about every 12 hours. Builds you make yourself with the free option don’t contact our server.</li>
+      <li data-copy-id="privacy.collect.li2"><b>Purchase and license records.</b> There’s no sign-up or sign-in. If you buy a license, our server links the purchase to your account and keeps the plan, whether the license is active, when a subscription renews or ends, and Stripe’s reference numbers for the purchase (customer, checkout, payment and subscription IDs). Your account record itself doesn’t include your email address, but the Stripe records below do.</li>
+      <li data-copy-id="privacy.collect.li2b"><b>Purchase details from Stripe.</b> When you buy, renew, cancel or get a refund, Stripe sends our server a notification, and we store each one in full. These include the email address and name you enter at checkout, your billing address and country, and your card’s brand, last 4 digits and expiry date. They never include your full card number or security code. We can also see these details and your purchase history in our Stripe account, for example to answer a support or refund request.</li>
       <li data-copy-id="privacy.collect.li3"><b>Network information.</b> Like any web server, ours (and GitHub, which hosts downloads and this site) sees your IP address when the app or your browser connects.</li>
+      <li data-copy-id="privacy.collect.li4"><b>Server analytics.</b> Our license server sends a record of every request it handles, including license checks and update checks, to PostHog, our analytics provider. Each record includes the address requested, the response status and how long it took, your account number on our server (when the app is signed in), your IP address, and the user agent (the app’s name and version and, for license checks, version numbers of macOS components). Errors on our server are recorded the same way. When the app signs in, PostHog is also told your account number, so the records can be grouped by account. We use this to keep the server reliable, find problems, and understand how the service is used.</li>
     </ul>
     <p data-copy-id="privacy.collect.p2">We don’t collect:</p>
     <ul>
       <li data-copy-id="privacy.collect.no1">your files, file names or folder contents;</li>
       <li data-copy-id="privacy.collect.no2">your searches, screenshots or search history;</li>
       <li data-copy-id="privacy.collect.no3">what your AI provider sends back;</li>
-      <li data-copy-id="privacy.collect.no4">analytics, telemetry or crash reports. Likely has none;</li>
-      <li data-copy-id="privacy.collect.no5">your card details, which go to Stripe and never reach us.</li>
+      <li data-copy-id="privacy.collect.no4">analytics, telemetry or crash reports from the app. The app has none; the server analytics above cover only requests to our server;</li>
+      <li data-copy-id="privacy.collect.no5">your full card number or security code, which go to Stripe and never reach us.</li>
     </ul>
-    <p data-copy-id="privacy.collect.p3">We don’t sell personal information or use it for advertising.</p>
+    <p data-copy-id="privacy.collect.p3">We don’t sell personal information or share it for cross-context behavioral advertising, and we don’t use it to train AI models.</p>
 
     <h2 id="leaves" data-copy-id="privacy.leaves.title">3. What leaves your Mac</h2>
-    <p data-copy-id="privacy.leaves.p1">This is everything Likely sends off your Mac, who receives it, and when.</p>
+    <p data-copy-id="privacy.leaves.p1">This is what Likely itself sends off your Mac, who receives it, and when.</p>
     <div class="panel leaves">
       <table class="data-table">
         <thead>
@@ -97,49 +103,66 @@
             <th scope="row" data-copy-id="privacy.table.ai.to">The AI provider you picked (Anthropic, OpenAI, Google, or the provider behind OpenCode or Hermes), through your own CLI and account</th>
             <td>
               <ul>
-                <li data-copy-id="privacy.table.ai.w1">your search query;</li>
+                <li data-copy-id="privacy.table.ai.w1">your search query, and anything you type after it, including which suggestions you turned down;</li>
                 <li data-copy-id="privacy.table.ai.w2">the name of the app that opened the picker and its window title;</li>
-                <li data-copy-id="privacy.table.ai.w3">a screenshot of the window behind the picker, if “Send a screenshot with searches” is on;</li>
-                <li data-copy-id="privacy.table.ai.w4">your name, if “Include my name in searches” is on;</li>
-                <li data-copy-id="privacy.table.ai.w5">names and paths of files the agent finds;</li>
+                <li data-copy-id="privacy.table.ai.w8">the text of the picker’s button (such as “Upload” or “Open”);</li>
+                <li data-copy-id="privacy.table.ai.w3">a screenshot of the window behind the picker, only if you turned on “Send a screenshot with searches” (it’s off by default);</li>
+                <li data-copy-id="privacy.table.ai.w4">your name (your Mac account’s full name), unless you turn off “Include my name in searches” in Settings → Prompt (it’s on by default);</li>
+                <li data-copy-id="privacy.table.ai.w9">the paths of your Likely folder and search folders, which include your Mac account name (for example <code>/Users/you</code>);</li>
+                <li data-copy-id="privacy.table.ai.w5">the output of the agent’s search commands, such as the names and paths of files it finds;</li>
                 <li data-copy-id="privacy.table.ai.w6">the contents of files the agent opens;</li>
-                <li data-copy-id="privacy.table.ai.w7">the instructions for any tools you added.</li>
+                <li data-copy-id="privacy.table.ai.w7">the instructions for any tools you added, and what those tools return;</li>
+                <li data-copy-id="privacy.table.ai.w10">anything you wrote into a custom prompt in Settings → Prompt.</li>
               </ul>
             </td>
             <td data-copy-id="privacy.table.ai.when">Only when you submit a search</td>
           </tr>
           <tr>
             <th scope="row" data-copy-id="privacy.table.server.to">Likely’s license server (run by us on Heroku)</th>
-            <td data-copy-id="privacy.table.server.what">App ID and random install ID; your plan and license status, and Stripe’s IDs for your purchase</td>
-            <td data-copy-id="privacy.table.server.when">At activation, at license checks (at launch and about every 12 hours), and when you buy</td>
+            <td data-copy-id="privacy.table.server.what">App ID and random install ID; your plan and license status, and Stripe’s IDs for your purchase. Each request is also recorded in our analytics (PostHog) with your IP address, user agent and account number.</td>
+            <td data-copy-id="privacy.table.server.when">At first launch, at license checks (at launch and about every 12 hours), and when you buy</td>
           </tr>
           <tr>
             <th scope="row" data-copy-id="privacy.table.stripe.to">Stripe</th>
-            <td data-copy-id="privacy.table.stripe.what">What you enter at checkout or in Stripe’s billing portal: your email and payment details</td>
+            <td data-copy-id="privacy.table.stripe.what">What you enter at checkout or in Stripe’s billing portal: your email, name, billing address and payment details. Stripe sends us the purchase details, but never your full card number (see <a href="#payment">Payment</a>).</td>
             <td data-copy-id="privacy.table.stripe.when">When you buy or manage a subscription</td>
           </tr>
           <tr>
             <th scope="row" data-copy-id="privacy.table.updates.to">Update feed (our server) and GitHub releases</th>
-            <td data-copy-id="privacy.table.updates.what">IP address and app version</td>
-            <td data-copy-id="privacy.table.updates.when">When Likely checks for or downloads an update</td>
+            <td data-copy-id="privacy.table.updates.what">IP address and app version. Requests to the feed are recorded in our analytics like other server requests.</td>
+            <td data-copy-id="privacy.table.updates.when">When a paid build checks for or downloads an update</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p data-copy-id="privacy.leaves.p2">Nothing else leaves your Mac. Your files, search history, eval cases, screenshots and logs stay on it (see <a href="#local">Data on your Mac</a>).</p>
+    <p data-copy-id="privacy.leaves.p2">Likely itself sends nothing else. Your files, search history, eval cases, screenshots and logs stay on your Mac (see <a href="#local">Data on your Mac</a>). The agent you choose is a separate program, though: it can reach the internet over HTTPS, and tools you add to it could send data elsewhere. What they send depends on the agent and the tools, not on Likely.</p>
+    <p data-copy-id="privacy.leaves.p3"><b>Screenshots are off unless you turn them on.</b> “Send a screenshot with searches” is off by default and also needs macOS’s Screen Recording permission. When it’s on, Likely keeps one screenshot of the front window in memory, refreshed when you click or press a ⌘-shortcut, so it can show your agent what was behind the picker. That screenshot is never written to disk or sent unless you search. When you do, it’s saved to a temporary file for your agent, which Likely deletes afterwards.</p>
+    <p data-copy-id="privacy.leaves.p4"><b>Your name is included by default.</b> Searches include your Mac account’s full name, so the agent can recognize your own documents (“my résumé”). You can turn this off with “Include my name in searches” in Settings → Prompt.</p>
 
     <h2 id="ai" data-copy-id="privacy.ai.title">4. AI providers</h2>
     <p data-copy-id="privacy.ai.p1">Likely doesn’t run an AI. When you type a search, Likely starts the coding agent you chose in Settings (Claude Code, Codex, Gemini CLI, OpenCode or Hermes) on your Mac. The agent runs under your own account with that provider and searches with Spotlight and read-only tools. Likely then copies the files it suggests into your Likely folder.</p>
-    <p data-copy-id="privacy.ai.p2">What the agent sends to its provider is governed by your agreement with that provider and its privacy terms, not by this policy. We don’t receive your searches or the provider’s answers. Likely reads only the file suggestions the agent prints, on your Mac.</p>
-    <p data-copy-id="privacy.ai.p3">You control what goes to the provider: screenshots and your name each have a switch in Settings, the agent only searches when you type, and you choose which tools to add.</p>
+    <p data-copy-id="privacy.ai.p2">What the agent sends to its provider is governed by your agreement with that provider and its privacy terms, not by this policy. Your provider isn’t our processor: we don’t receive your searches or the provider’s answers, and you and your provider decide how they’re handled. Likely reads only the file suggestions the agent prints, on your Mac.</p>
+    <p data-copy-id="privacy.ai.p4"><b>Your provider may train on what you send.</b> Depending on the provider and your plan, consumer AI plans and free models may use your searches, screenshots and file contents to train or improve their models. Check your provider’s privacy settings and terms; many let you turn this off in your account settings.</p>
+    <p data-copy-id="privacy.ai.p5"><b>OpenCode’s free model.</b> OpenCode’s default free model needs no account. Searches you make with it are handled under OpenCode’s terms and privacy policy, and free models are among those that may use what you send to improve them.</p>
+    <p data-copy-id="privacy.ai.p3">You control what goes to the provider: screenshots and your name each have a switch in Settings, the agent only searches when you type, and you choose which tools to add and what your prompt says.</p>
 
     <h2 id="payment" data-copy-id="privacy.payment.title">5. Payment</h2>
-    <p data-copy-id="privacy.payment.p1">Purchases go through Stripe Checkout, and subscriptions are managed in Stripe’s billing portal. Stripe processes your payment under its own <a href="https://stripe.com/privacy">privacy policy</a>. Your card details go to Stripe and never reach us. Stripe tells our server when a purchase, renewal, cancellation or refund happens, so we can turn your license on or off. We can see your email and purchase history in our Stripe account.</p>
+    <p data-copy-id="privacy.payment.p1">Purchases go through Stripe Checkout, and subscriptions are managed in Stripe’s billing portal. Stripe processes your payment under its own <a href="https://stripe.com/privacy">privacy policy</a>. Your full card number and security code go to Stripe and never reach us. Stripe tells our server when a purchase, renewal, cancellation or refund happens, so we can turn your license on or off. We store each of those notifications in full, including your email, name, billing address and country, and your card’s brand, last 4 digits and expiry date. We use them to run your license, handle refunds and support, and keep accounting records. We can also see your email and purchase history in our Stripe account.</p>
 
-    <h2 id="updates" data-copy-id="privacy.updates.title">6. Updates</h2>
-    <p data-copy-id="privacy.updates.p1">Paid builds of Likely check for updates with Sparkle. The update feed is on our server and the download comes from GitHub releases, so both see your IP address and app version. Sparkle’s optional system-profile reporting is off, so no information about your Mac is sent with the check. You can turn off automatic checks in Settings. Builds you make yourself from source don’t check for updates.</p>
+    <h2 id="providers" data-copy-id="privacy.providers.title">6. Our service providers</h2>
+    <p data-copy-id="privacy.providers.p1">These companies process personal information for us, for these purposes only:</p>
+    <ul>
+      <li data-copy-id="privacy.providers.heroku"><b>Heroku</b> (Salesforce) hosts our license server, its database and its logs.</li>
+      <li data-copy-id="privacy.providers.stripe"><b>Stripe</b> processes payments and manages subscriptions. Stripe is also an independent controller for some of its own processing, such as fraud prevention, under its privacy policy.</li>
+      <li data-copy-id="privacy.providers.posthog"><b>PostHog</b> receives our server’s analytics: a record of each request, described in <a href="#collect">section 2</a>.</li>
+      <li data-copy-id="privacy.providers.github"><b>GitHub</b> hosts Likely’s downloads, its source code and this website, and sees your IP address when you visit or download.</li>
+    </ul>
+    <p data-copy-id="privacy.providers.p2">Your AI provider isn’t on this list because it doesn’t work for us: Likely sends your searches to it from your Mac, under your own account.</p>
 
-    <h2 id="local" data-copy-id="privacy.local.title">7. Data on your Mac, and how to delete it</h2>
+    <h2 id="updates" data-copy-id="privacy.updates.title">7. Updates</h2>
+    <p data-copy-id="privacy.updates.p1">Paid builds of Likely check for updates with Sparkle. The update feed is on our server and the download comes from GitHub releases, so both see your IP address and app version, and requests to the feed are recorded in our analytics. Sparkle’s optional system-profile reporting is off, so no other information about your Mac is sent with the check. Sparkle asks before installing an update unless you choose to install updates automatically, and you can turn off automatic checks in Settings. Builds you make yourself from source, free or dev, don’t check for updates.</p>
+
+    <h2 id="local" data-copy-id="privacy.local.title">8. Data on your Mac, and how to delete it</h2>
     <p data-copy-id="privacy.local.p1">Likely keeps its working data on your Mac, where we can’t see it:</p>
     <ul>
       <li data-copy-id="privacy.local.li1"><code>~/Likely</code> (or the folder you chose): copies of suggested files. Copies are cloned locally and cleared shortly after the picker closes; your originals are never changed.</li>
@@ -147,23 +170,89 @@
       <li data-copy-id="privacy.local.li3"><code>~/Library/Logs/Likely</code>: Likely’s log, which may mention past searches.</li>
       <li data-copy-id="privacy.local.li4">Likely’s preferences (<code>inc.synth.likely</code>), which hold your settings, the install ID and your cached license status, and a Keychain item (<code>inc.synth.likely.server</code>) holding an access token for the license server.</li>
     </ul>
-    <p data-copy-id="privacy.local.p2">To delete search history, use Settings → History. To delete everything, quit Likely and delete the folders above, then run <code>defaults delete inc.synth.likely</code> in Terminal and remove the Keychain item in Keychain Access. Your AI provider’s CLI may keep its own session logs; see its documentation.</p>
+    <p data-copy-id="privacy.local.p2">To delete search history, use Settings → History. To delete all of Likely’s data on your Mac, quit Likely and delete the folders above, then run <code>defaults delete inc.synth.likely</code> in Terminal and remove the Keychain item in Keychain Access. Your AI provider’s CLI may keep its own session logs; see its documentation.</p>
 
-    <h2 id="retention" data-copy-id="privacy.retention.title">8. Retention</h2>
-    <p data-copy-id="privacy.retention.p1">We keep account and license records (install ID, plan, license status and Stripe’s purchase IDs) for as long as your license is active, and after that only as long as we need to for legal, tax and accounting purposes, or to resolve disputes. Stripe keeps payment records under its own policy. Server logs that include IP addresses are kept only as long as our hosting providers retain them.</p>
+    <h2 id="retention" data-copy-id="privacy.retention.title">9. Retention</h2>
+    <p data-copy-id="privacy.retention.p1">We keep each kind of record only as long as we need it:</p>
+    <ul>
+      <li data-copy-id="privacy.retention.accounts"><b>Account and license records</b> (install ID, plan, license status and Stripe’s purchase IDs): for buyers, while your license is active and then for <span class="placeholder">[BUYER RECORDS: e.g. 7 years]</span> for tax, accounting and disputes. If you never buy, your anonymous account is deleted <span class="placeholder">[NON-BUYER ACCOUNTS: e.g. 90 days]</span> after the app last contacted our server.</li>
+      <li data-copy-id="privacy.retention.stripe"><b>Stripe notifications we store:</b> <span class="placeholder">[STRIPE EVENTS: e.g. 7 years]</span>, for tax and accounting. Stripe keeps its own payment records under its own policy.</li>
+      <li data-copy-id="privacy.retention.posthog"><b>Analytics records in PostHog:</b> <span class="placeholder">[POSTHOG EVENTS: e.g. 12 months]</span>.</li>
+      <li data-copy-id="privacy.retention.logs"><b>Server logs</b> (which include IP addresses): <span class="placeholder">[SERVER LOGS: e.g. 30 days; confirm Heroku’s and any log drain’s retention]</span>.</li>
+    </ul>
+    <p data-copy-id="privacy.retention.p2">When you ask us to delete your information, we complete the request within 30 days. The only exception is purchase records we must keep by law, such as tax records, which we then keep only for that purpose and only for as long as the law requires.</p>
 
-    <h2 id="rights" data-copy-id="privacy.rights.title">9. Your rights</h2>
-    <p data-copy-id="privacy.rights.p1">Depending on where you live, you may have the right to access, correct, delete or export the personal information we hold about you, or to object to how we use it. To make a request, including asking us to delete your account and license records, email <a href="mailto:contact@cloudless.so">contact@cloudless.so</a> from the address you used at checkout, or include your install ID (run <code>defaults read inc.synth.likely installId</code> in Terminal). We’ll answer within the time the law requires. You can also complain to your local data protection authority.</p>
+    <h2 id="rights" data-copy-id="privacy.rights.title">10. Your rights</h2>
+    <p data-copy-id="privacy.rights.p1">Depending on where you live, you may have the right to know what personal information we hold about you and to access, correct, delete or export it, or to object to or limit how we use it. To make a request, including asking us to delete your account, license and purchase records, email <a href="mailto:contact@cloudless.so">contact@cloudless.so</a> from the address you used at checkout, or include your receipt number. We use these to find your records and confirm the request is yours. If you never bought a license, your anonymous account isn’t linked to anything that identifies you, and it’s deleted automatically (see <a href="#retention">Retention</a>).</p>
+    <p data-copy-id="privacy.rights.p3">We’ll respond within 30 days. If we decline any part of a request, we’ll tell you why; you can appeal by replying “appeal”, and we’ll review the decision and answer within 30 days. If you’re still unhappy, you can complain to your state attorney general or your local data protection authority.</p>
+    <p data-copy-id="privacy.rights.p4">You can ask someone else (an authorized agent) to make a request for you. We may ask for proof that they’re allowed to, and ask you to confirm the request. We won’t treat you differently, for example by charging you more or giving you a lesser service, because you used any of these rights.</p>
+    <p data-copy-id="privacy.rights.p5"><b>Do Not Track.</b> We don’t track you across other websites or services, and this website has no analytics or advertising cookies, so we don’t change anything in response to Do Not Track signals.</p>
     <p data-copy-id="privacy.rights.p2">Data on your Mac is already under your control; you can delete it at any time as described above.</p>
 
-    <h2 id="children" data-copy-id="privacy.children.title">10. Children</h2>
-    <p data-copy-id="privacy.children.p1">Likely isn’t directed at children under 13, and we don’t knowingly collect personal information from them. If you believe a child has given us personal information, contact us and we’ll delete it.</p>
+    <h2 id="categories" data-copy-id="privacy.categories.title">11. Categories and recipients</h2>
+    <p data-copy-id="privacy.categories.p1">For California and other US state privacy laws, these are the categories of personal information we’ve collected in the last 12 months, where they come from, and who receives them. We use them for the purposes in sections 2 and 5: licensing, payments, refunds and support, security, and keeping the server reliable. We disclose them only to the service providers in <a href="#providers">section 6</a>, and we don’t sell or share them for cross-context behavioral advertising.</p>
+    <div class="panel">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th scope="col" data-copy-id="privacy.categories.head.cat">Category</th>
+            <th scope="col" data-copy-id="privacy.categories.head.what">What, and from where</th>
+            <th scope="col" data-copy-id="privacy.categories.head.to">Disclosed to</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" data-copy-id="privacy.categories.ids.cat">Identifiers</th>
+            <td data-copy-id="privacy.categories.ids.what">Install ID and account number (from the app); IP address (from your connection); email address, name and Stripe’s IDs (from Stripe)</td>
+            <td data-copy-id="privacy.categories.ids.to">Heroku, Stripe, PostHog (account number and IP address only), GitHub (IP address only)</td>
+          </tr>
+          <tr>
+            <th scope="row" data-copy-id="privacy.categories.records.cat">Customer records</th>
+            <td data-copy-id="privacy.categories.records.what">Name, billing address, and card brand, last 4 digits and expiry (from Stripe)</td>
+            <td data-copy-id="privacy.categories.records.to">Heroku, Stripe</td>
+          </tr>
+          <tr>
+            <th scope="row" data-copy-id="privacy.categories.commercial.cat">Commercial information</th>
+            <td data-copy-id="privacy.categories.commercial.what">Plan, purchases, renewals, cancellations and refunds (from Stripe and the app)</td>
+            <td data-copy-id="privacy.categories.commercial.to">Heroku, Stripe</td>
+          </tr>
+          <tr>
+            <th scope="row" data-copy-id="privacy.categories.activity.cat">Internet activity</th>
+            <td data-copy-id="privacy.categories.activity.what">Requests the app makes to our server, with times, status and user agent (from the app)</td>
+            <td data-copy-id="privacy.categories.activity.to">Heroku, PostHog</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
-    <h2 id="changes" data-copy-id="privacy.changes.title">11. Changes</h2>
-    <p data-copy-id="privacy.changes.p1">If we change this policy, we’ll post the new version here and update the effective date. If a change is material, for example if Likely starts sending something new off your Mac, we’ll say so in the app or the release notes before it takes effect.</p>
+    <h2 id="gdpr" data-copy-id="privacy.gdpr.title">12. EEA, UK and Swiss users</h2>
+    <p data-copy-id="privacy.gdpr.p1"><b>Controller.</b> Synthetic Exploration, Inc. is the controller of the personal information described here. Address: <span class="placeholder">[POSTAL ADDRESS]</span>. Email: <a href="mailto:contact@cloudless.so">contact@cloudless.so</a>. Representative in the EU and UK: <span class="placeholder">[EU/UK REPRESENTATIVE: name and address, if required]</span>.</p>
+    <p data-copy-id="privacy.gdpr.p2"><b>Legal bases.</b> We rely on:</p>
+    <ul>
+      <li data-copy-id="privacy.gdpr.contract"><b>Contract</b>, to create your account, check your license, deliver updates, take payment, and handle refunds and support;</li>
+      <li data-copy-id="privacy.gdpr.legal">a <b>legal obligation</b>, to keep purchase records for tax and accounting;</li>
+      <li data-copy-id="privacy.gdpr.interests">our <b>legitimate interests</b> in keeping the service reliable and secure, preventing fraud and abuse, and understanding how the service is used, for server analytics and logs. You can object to this at any time;</li>
+      <li data-copy-id="privacy.gdpr.consent">your <b>consent</b>, before we use information we already hold in a materially new way.</li>
+    </ul>
+    <p data-copy-id="privacy.gdpr.p3"><b>Processors and transfers.</b> Our processors are listed in <a href="#providers">section 6</a>. We’re based in the US, and so are our servers and providers’ processing, so your information is transferred to the US. For transfers from the EEA, UK and Switzerland we rely on <span class="placeholder">[TRANSFER MECHANISM: e.g. the EU-US Data Privacy Framework, or Standard Contractual Clauses]</span>.</p>
+    <p data-copy-id="privacy.gdpr.p4"><b>Your AI provider.</b> Your AI provider isn’t our processor. Likely sends your searches to it from your Mac, under your own account, and you and your provider decide how they’re handled.</p>
+    <p data-copy-id="privacy.gdpr.p5">You can also complain to the data protection authority where you live or work.</p>
 
-    <h2 id="contact" data-copy-id="privacy.contact.title">12. Contact</h2>
-    <p data-copy-id="privacy.contact.p1">Synthetic Exploration, Inc.<br>Email: <a href="mailto:contact@cloudless.so">contact@cloudless.so</a></p>
+    <h2 id="security" data-copy-id="privacy.security.title">13. Security and breaches</h2>
+    <p data-copy-id="privacy.security.p1">The app talks to our server only over HTTPS. If a breach affects your personal information, we’ll tell you without undue delay, by email if we have your address and on this website, and we’ll notify the authorities as the law requires.</p>
+
+    <h2 id="transfers" data-copy-id="privacy.transfers.title">14. If Likely changes hands</h2>
+    <p data-copy-id="privacy.transfers.p1">If Synth or Likely is sold, merged or otherwise transferred, the new owner must honor this policy for information collected under it. We’ll tell you before your information is transferred, and you can ask us to delete it first.</p>
+    <p data-copy-id="privacy.transfers.p2">Likely’s license server is shared with another Synth product, Onit. Likely’s records are used only for Likely, not for our other products.</p>
+
+    <h2 id="children" data-copy-id="privacy.children.title">15. Children</h2>
+    <p data-copy-id="privacy.children.p1">Likely isn’t directed at children under 13, and we don’t knowingly collect personal information from them. If you’re 13 to 17, or otherwise under the age of majority where you live, you need a parent or guardian to agree to our <a href="terms.html#eligibility">Terms</a> for you and to make any purchase. If you believe a child under 13 has given us personal information, contact us and we’ll delete it.</p>
+
+    <h2 id="changes" data-copy-id="privacy.changes.title">16. Changes</h2>
+    <p data-copy-id="privacy.changes.p1">If we change this policy, we’ll post the new version here and update the effective date. If a change is material, for example if Likely starts sending something new off your Mac, we’ll tell you in the app, and by email if we have your address, at least 30 days before it takes effect. We won’t use information we already hold in a materially new way unless you first opt in.</p>
+
+    <h2 id="contact" data-copy-id="privacy.contact.title">17. Contact</h2>
+    <p data-copy-id="privacy.contact.p1">Synthetic Exploration, Inc.<br><span class="placeholder">[POSTAL ADDRESS]</span><br>Email: <a href="mailto:contact@cloudless.so">contact@cloudless.so</a></p>
   </main>
 
   <footer class="foot">

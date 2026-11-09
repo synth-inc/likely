@@ -214,7 +214,7 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
         <article class="panel plan">
           <p class="vote" data-copy-id="pricing.once.vote">One-time</p>
           <p class="price"><span data-copy-id="pricing.once.price">$29</span><small data-copy-id="pricing.once.unit">once</small></p>
-          <p class="plan-body" data-copy-id="pricing.once.body">One payment, and you can use the app, forever.</p>
+          <p class="plan-body" data-copy-id="pricing.once.body">One payment, and you can use the app for as long as you like. Includes updates for <span class="placeholder">[UPDATE SCOPE: e.g. all 1.x versions]</span>.</p>
           <a class="btn btn-quiet" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg"><span data-copy-id="pricing.once.cta">Download</span></a>
         </article>
         <article class="panel plan">
@@ -265,22 +265,23 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
                         <ul>
                           <li data-copy-id="leaves.ai.w1">What you typed</li>
                           <li data-copy-id="leaves.ai.w2">The app’s name and window title</li>
-                          <li data-copy-id="leaves.ai.w3">A screenshot of the window behind the picker, if screenshots are on</li>
-                          <li data-copy-id="leaves.ai.w4">Your name, if “Include my name in searches” is on</li>
+                          <li data-copy-id="leaves.ai.w3">A screenshot of the window behind the picker, only if you turn screenshots on (they’re off by default)</li>
+                          <li data-copy-id="leaves.ai.w4">Your name (your Mac account’s full name), unless you turn it off in Settings → Prompt</li>
                           <li data-copy-id="leaves.ai.w5">Names and paths of files the agent finds, and the contents of files it opens</li>
-                          <li data-copy-id="leaves.ai.w6">Instructions for any tools you added</li>
+                          <li data-copy-id="leaves.ai.w7">The picker’s button text, the paths of your Likely and search folders, and suggestions you turned down</li>
+                          <li data-copy-id="leaves.ai.w6">Instructions for any tools you added, and your prompt if you changed it</li>
                         </ul>
                       </td>
                       <td data-copy-id="leaves.ai.when">Only when you search</td>
                     </tr>
                     <tr>
                       <th scope="row" data-copy-id="leaves.server.to">Likely’s license server</th>
-                      <td data-copy-id="leaves.server.what">A random install ID, whether your license is active, and your IP address, like any web request</td>
-                      <td data-copy-id="leaves.server.when">When you activate and when Likely checks your license</td>
+                      <td data-copy-id="leaves.server.what">A random install ID, whether your license is active, and your IP address, like any web request. Each request is recorded in our analytics (PostHog), and the server keeps the purchase details Stripe sends it.</td>
+                      <td data-copy-id="leaves.server.when">At first launch, when Likely checks your license, and when you buy</td>
                     </tr>
                     <tr>
                       <th scope="row" data-copy-id="leaves.stripe.to">Stripe</th>
-                      <td data-copy-id="leaves.stripe.what">Your email and payment details. Your card number never reaches us.</td>
+                      <td data-copy-id="leaves.stripe.what">Your email, name, billing address and payment details. Stripe sends us the purchase details, but your full card number never reaches us.</td>
                       <td data-copy-id="leaves.stripe.when">When you buy or manage a subscription</td>
                     </tr>
                     <tr>
@@ -300,9 +301,8 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
         </details>
         <details>
           <summary><span data-copy-id="faq.screenshots.q">Are screenshots required? Where do they go?</span></summary>
-          <!-- DEFAULT: "Send a screenshot with searches" is on by default once Screen Recording is granted
-             (SettingsView.swift, sendScreenshot = true). If the default changes to off, update this answer. -->
-          <p data-copy-id="faq.screenshots.a">No. A screenshot of the window behind the picker is sent only when you search, and only to the agent you chose. You can turn them off in Settings, and they’re never sent if you don’t grant Screen Recording.</p>
+          <!-- DEFAULT: "Send a screenshot with searches" is off by default (synth-inc/likely PR "default-screenshots-off"). -->
+          <p data-copy-id="faq.screenshots.a">No. They’re off unless you turn on “Send a screenshot with searches” in Settings, which also needs the Screen Recording permission. When they’re on, Likely keeps one screenshot of the front window in memory, so it can show your agent what was behind the picker. It’s saved and sent only when you search, and only to the agent you chose.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.history.q">Does Likely keep a record of my searches?</span></summary>
@@ -318,7 +318,7 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
         </details>
         <details>
           <summary><span data-copy-id="faq.account.q">Do I need an account?</span></summary>
-          <p data-copy-id="faq.account.a">No. There’s no sign-up, and purchases work without an account.</p>
+          <p data-copy-id="faq.account.a">No. There’s no sign-up or sign-in. Likely identifies your install with a random ID, and purchases work without an account.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.accessibility.q">Why does it want Accessibility permission?</span></summary>
@@ -330,7 +330,7 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
         </details>
         <details>
           <summary><span data-copy-id="faq.switch.q">What if I switch Macs?</span></summary>
-          <p data-copy-id="faq.switch.a">Restoring a purchase by email is coming, but isn’t here yet. Until then, open an issue on GitHub and we’ll sort it out.</p>
+          <p data-copy-id="faq.switch.a">Restoring a purchase in the app is coming, but isn’t here yet. Until then, email <a href="mailto:contact@cloudless.so">contact@cloudless.so</a> from the address you used at checkout, or with your receipt number, and we’ll sort it out.</p>
         </details>
       </div>
     </section>
