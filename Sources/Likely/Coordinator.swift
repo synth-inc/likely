@@ -56,8 +56,8 @@ final class Coordinator {
     }
 
     let supportDirectory: URL
-    /// The agents' work folder for a search (screenshot, last-run.jsonl).
-    var runDirectory: URL { supportDirectory.appendingPathComponent("run") }
+    /// The last search's agent transcript (see AgentTranscript).
+    var transcriptURL: URL { AgentTranscript.searchURL(supportDirectory: supportDirectory) }
     private let axWatcher = AXWatcher()
     private let windowWatcher = WindowListWatcher()
     private let snapshotter = PrePickerSnapshotter()
@@ -91,7 +91,9 @@ final class Coordinator {
             .appendingPathComponent("Library/Application Support/Likely", isDirectory: true)
         try? OwnerOnly.createDirectory(supportDirectory.appendingPathComponent("run"))
         Self.removeScreenshots(in: supportDirectory.appendingPathComponent("run"))
-        if !AgentTranscript.isKept { AgentTranscript.remove(in: supportDirectory.appendingPathComponent("run")) }
+        // Older versions kept the agent's transcript in the work folder, which agents may read.
+        try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent("run/last-run.jsonl"))
+        if !AgentTranscript.isKept { try? FileManager.default.removeItem(at: AgentTranscript.searchURL(supportDirectory: supportDirectory)) }
         Settings.migrate()
         folder = LikelyFolder(supportDirectory: supportDirectory)
 
@@ -210,7 +212,7 @@ final class Coordinator {
            candidate.roughlyEquals(frame) { return }
         let verdict = PickerHeuristics.evaluate(window)
         let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
-        Log.write("detect", "\(public: appName) \(public: notification) \(AX.describe(window)) → \(verdict.logLine)")
+        Log.write("detect", "\(meta: appName) \(meta: notification) \(AX.describe(window)) → \(verdict.logLine)")
 
         if verdict.isPicker {
             PickerHeuristics.logDiagnostics(window)
@@ -241,7 +243,7 @@ final class Coordinator {
         let picker = Picker(pid: app.processIdentifier, appName: app.localizedName ?? "?", element: nil,
                             cgWindowID: window.id, frame: window.bounds, buttonTitle: nil, source: "cg:panel-service",
                             windowTitle: Self.titleBehindPicker(pid: app.processIdentifier, picker: nil))
-        Log.write("detect", "panel service window #\(window.id) while \(public: picker.appName) is frontmost")
+        Log.write("detect", "panel service window #\(window.id) while \(meta: picker.appName) is frontmost")
         pickerOpened(picker)
     }
 
@@ -262,7 +264,7 @@ final class Coordinator {
         navigated = false
         // Keeps the snapshotter's snapshot: it's of the click that opened this picker.
         cancelScreenshot(forgetSnapshot: false)
-        Log.write("picker", "OPENED in \(public: picker.appName) via \(public: picker.source) frame=\(picker.frame) title=\(sensitive: picker.windowTitle)")
+        Log.write("picker", "OPENED in \(meta: picker.appName) via \(meta: picker.source) frame=\(picker.frame) title=\(sensitive: picker.windowTitle)")
 
         // The previous picker's copies were kept for its app; a new picker replaces them.
         cleanupTimer?.invalidate()
@@ -326,7 +328,7 @@ final class Coordinator {
                 let capture = try WindowCapture.save(image, to: url)
                 self.screenshotURL = url
                 self.screenshotPNG = capture.png
-                Log.write("capture", "\(public: capture.mode) title=\(sensitive: capture.windowTitle)")
+                Log.write("capture", "\(meta: capture.mode) title=\(sensitive: capture.windowTitle)")
                 if let title = capture.windowTitle { debugRun.windowTitle = title }
                 DebugStore.shared.attachScreenshot(capture.png, mode: capture.mode, to: debugRun)
                 debugRun.log("Screenshot: \(capture.mode)")
@@ -377,7 +379,7 @@ final class Coordinator {
         folder.showRecent(limit: Settings.recentFileCount, roots: SearchFolder.all.map(\.url)) { [weak self] result, added in
             debugRun.recentFiles = added
             debugRun.log("Recent files: \(added.count) via \(result.source) in \(result.milliseconds) ms")
-            Log.write("recent", "\(added.count) via \(public: result.source) in \(result.milliseconds) ms: \(paths: added)")
+            Log.write("recent", "\(added.count) via \(meta: result.source) in \(result.milliseconds) ms: \(paths: added)")
             guard let self, self.generation == generation, self.active != nil, !self.searchStarted, added.isEmpty else { return }
             self.folder.setStatus(hint)
         }
@@ -416,7 +418,7 @@ final class Coordinator {
         folder.release()
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         debugRun?.closedReason = reason
-        Log.write("picker", "CLOSED in \(public: picker.appName) (\(public: reason))")
+        Log.write("picker", "CLOSED in \(meta: picker.appName) (\(meta: reason))")
         onStateChange?(.idle, isLicensed() ? "Watching for file pickers" : "Inactive · Get Likely")
     }
 
@@ -471,9 +473,9 @@ final class Coordinator {
                 debugRun?.log("Picked: \(picked.isEmpty ? "unknown" : picked.joined(separator: ", ")) (\(pick.how))")
             }
             if pick.confirmed {
-                Log.write("picker", "picked \(picked.count) (\(public: pick.how)): \(paths: picked)")
+                Log.write("picker", "picked \(picked.count) (\(meta: pick.how)): \(paths: picked)")
             } else {
-                Log.write("evals", "picker closed without a confirmed pick (\(public: pick.how))")
+                Log.write("evals", "picker closed without a confirmed pick (\(meta: pick.how))")
             }
         }
         if saveRequested, let run = debugRun {
@@ -594,8 +596,9 @@ final class Coordinator {
             message = "Done – found \(foundCount) file\(foundCount == 1 ? "" : "s")"
         }
         // The error summary is the agent's own text.
-        let logged: LogMessage = outcome.success ? "\(public: message)" : "\(public: agentName) error – \(sensitive: outcome.summary.prefix(60))"
-        Log.write("agent", "\(logged) cost=\(public: outcome.costUSD.map { String(format: "$%.4f", $0) })")
+        let logged: LogMessage = outcome.success ? "\(meta: message)"
+            : "\(meta: agentName) error kind=\(AgentFailureKind.classify(outcome.summary)) – \(sensitive: outcome.summary.prefix(60))"
+        Log.write("agent", "\(logged) cost=\(outcome.costUSD)")
         // Done: drop the status file so only real suggestions are left in the folder, and the
         // screenshot file (kept in memory in case the user follows up).
         folder.removeStatus()

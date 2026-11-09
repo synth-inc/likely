@@ -180,7 +180,7 @@ final class LicenseStore: ObservableObject {
             fresh.save()
             cached = fresh
             lastError = nil
-            Log.write("license", "entitlement active=\(entitlement.active) kind=\(public: entitlement.kind) status=\(public: entitlement.status)")
+            Log.write("license", "entitlement active=\(entitlement.active) kind=\(meta: entitlement.kind) status=\(meta: entitlement.status)")
         } catch {
             lastError = error.localizedDescription
             Log.write("license", "entitlement check failed: \(error: error)")

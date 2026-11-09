@@ -19,7 +19,7 @@ enum PickerNavigator {
             onResult?("\"\(folderName)\" already selected", false)
         case .notFound(let why, let noSidebar):
             guard attempt < 8 else {
-                Log.write("navigate", "gave up: \(public: why). Is ~/Likely pinned in the Finder sidebar?")
+                Log.write("navigate", "gave up: \(meta: why). Is ~/Likely pinned in the Finder sidebar?")
                 onResult?("gave up: \(why)", noSidebar)
                 return
             }

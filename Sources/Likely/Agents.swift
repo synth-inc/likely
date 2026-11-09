@@ -61,7 +61,7 @@ final class AgentDetector: ObservableObject {
             DispatchQueue.main.async {
                 self.paths = found
                 self.isScanning = false
-                Log.write("agents", "found: \(LogMessage.joined(found.sorted { $0.key < $1.key }.map { "\(public: $0.key)=\(path: $0.value)" }))")
+                Log.write("agents", "found: \(LogMessage.joined(found.sorted { $0.key < $1.key }.map { "\(meta: $0.key)=\(path: $0.value)" }))")
                 completion?()
             }
         }

@@ -263,7 +263,7 @@ final class LikelyFolder {
         let likelyURL = Self.url
         guard !sources.contains(source.path), !pending.contains(source.path) else { return completion(false) }
         if let reason = screened.refusal {
-            if reason != "in the Likely folder" { Log.write("likely", "skip \(path: source) (\(public: reason))") }
+            if reason != "in the Likely folder" { Log.write("likely", "skip \(path: source) (\(meta: reason))") }
             return completion(false)
         }
         let home = fm.homeDirectoryForCurrentUser.path
@@ -503,7 +503,7 @@ extension LikelyFolder {
             }
             defer { close(item.fd) }
             if let reason = refusal(for: item.realPath) {
-                Log.write("likely", "skip \(path: source) (opened \(path: item.realPath): \(public: reason))")
+                Log.write("likely", "skip \(path: source) (opened \(path: item.realPath): \(meta: reason))")
                 return nil
             }
             if item.isDirectory && !NSWorkspace.shared.isFilePackage(atPath: item.realPath) {

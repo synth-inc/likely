@@ -97,10 +97,10 @@ private struct GeneralSettings: View {
     @State private var pinned = SidebarFavorites.contains(LikelyFolder.url)
 
     private var logDetailsCaption: String {
-        let until = Date(timeIntervalSince1970: logDetailsUntil)
+        _ = logDetailsUntil   // the stored copy: changes re-render this; the switch itself decides
         var text: String
-        if until > Date() {
-            text = "On until \(until.formatted(date: .abbreviated, time: .shortened)): the log includes what you type, window titles, file names and paths, and your agent's output, plus every accessibility event. It turns off by itself after 24 hours or when you quit Likely. What's already in the log stays until you clear it."
+        if let until = Log.details.expiry {
+            text = "On until \(until.formatted(date: .abbreviated, time: .shortened)): the log includes what you type, window titles, file names and paths, and your agent's output, plus every accessibility event. It turns off by itself after 24 hours or when you quit Likely. Those lines go to a separate detailed log, deleted when details turn off."
         } else {
             text = "Off: the log keeps events, timings and counts, but not what you type, window titles, file names or your agent's output. Turn on to send the log with a bug report; it turns off by itself after 24 hours or when you quit Likely."
         }
@@ -173,12 +173,12 @@ private struct GeneralSettings: View {
             if Updater.isEnabled { UpdatesSection() }
             Section("Troubleshooting") {
                 Toggle("Log details for troubleshooting", isOn: Binding(
-                    get: { logDetailsUntil > Date().timeIntervalSince1970 },
+                    get: { logDetailsUntil > 0 && Log.details.isSwitchedOn },
                     set: { actions.logDetailsChanged($0) }))
                 Text(logDetailsCaption).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Open Debug View") { actions.showDebugView() }
-                    Button("Open Log") { NSWorkspace.shared.open(Log.fileURL) }
+                    Button("Open Log") { NSWorkspace.shared.open(Log.fileToOpen) }
                     Button("Clear Log") { Log.clear() }
                     Spacer()
                     Button("Run Onboarding Again") { actions.showOnboarding() }

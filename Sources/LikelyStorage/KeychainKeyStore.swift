@@ -84,6 +84,8 @@ public final class KeychainKeyStore: DataKeyStore {
 
     public func storeKey(_ key: Data) throws {
         let status = SecItemAdd(addQuery(key) as CFDictionary, nil)
+        // Another process (or thread) made the key between our lookup and this add: DataCipher reads theirs.
+        if status == errSecDuplicateItem { throw DataKeyAlreadyStored() }
         guard status == errSecSuccess else { throw KeychainError(status: status) }
     }
 

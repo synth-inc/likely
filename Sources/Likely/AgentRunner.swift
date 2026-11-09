@@ -32,6 +32,9 @@ struct AgentLaunchOptions {
     /// Append to last-run.jsonl instead of starting it over (evals keep every turn of a case,
     /// including relaunches).
     var appendTranscript = false
+    /// Where the raw JSON stream goes. nil: `transcripts/last-run.jsonl` next to the work folder
+    /// (AgentTranscript.url). Never inside the work folder: agents may read that one.
+    var transcriptURL: URL?
     /// Launched by `--eval`: Hermes then never reuses a gateway it didn't start with these rules.
     var isEval = false
     /// The user's tools this launch may use (allowlist and sandbox profile). nil: the ones the app
@@ -39,13 +42,24 @@ struct AgentLaunchOptions {
     var tools: [CustomTool]?
 }
 
-/// The raw JSON stream each runner saves to <workDir>/last-run.jsonl. It holds the whole search (the
-/// prompt, what the agent read, its answers), so release builds keep it only while "Log details for
-/// troubleshooting" is on, and only the last run (each run starts it over). Dev builds and evals
-/// (`append`, their own case folders) always keep it.
+/// The raw JSON stream each runner saves (last-run.jsonl). It holds the queries, everything the agent
+/// read and the files it found, so it's kept outside the work folder: that folder is the one part of
+/// Likely's data an agent may read (its screenshot and config files), and Codex's sandbox can't deny
+/// a file pattern inside it. Next to it instead (…/Likely/transcripts for searches; an eval case's
+/// own folder, whose `agent` subfolder is the work folder), which every agent is denied.
 enum AgentTranscript {
-    static let fileName = "last-run.jsonl"
+    static func url(workDir: URL, options: AgentLaunchOptions) -> URL {
+        options.transcriptURL ?? workDir.deletingLastPathComponent().appendingPathComponent("transcripts/last-run.jsonl")
+    }
 
+    /// Where a search's transcript goes (the app's runs; evals pass their own `transcriptURL`).
+    static func searchURL(supportDirectory: URL) -> URL {
+        supportDirectory.appendingPathComponent("transcripts/last-run.jsonl")
+    }
+
+    /// It holds the whole search, so release builds keep it only while "Log details for
+    /// troubleshooting" is on, and only the last run (each run starts it over). Dev builds and evals
+    /// (`append`, their own case folders) always keep it.
     static var isKept: Bool { Log.details.showsDetails }
 
     /// Owner-only (0600) from creation. nil when transcripts aren't kept (an older one is removed).
@@ -55,11 +69,6 @@ enum AgentTranscript {
             return nil
         }
         return try? OwnerOnly.openForWriting(url, truncate: !append)
-    }
-
-    /// Removes the transcript in a work folder (details turned off, or launch without them).
-    static func remove(in workDir: URL) {
-        try? FileManager.default.removeItem(at: workDir.appendingPathComponent(fileName))
     }
 }
 
@@ -158,7 +167,7 @@ final class CodexRunner: AgentRunner {
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent(AgentTranscript.fileName)
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         var arguments = ["exec"] + Self.baseArguments(workDir: workDir) + ["-m", model, prompt]
@@ -177,9 +186,39 @@ final class CodexRunner: AgentRunner {
 
     func cancel() {
         stopProcess()
+        if let threadID { Self.deleteSession(threadID) }
         threadID = nil
         try? transcript?.close()
         transcript = nil
+    }
+
+    /// Codex keeps each conversation in ~/.codex/sessions/<yyyy>/<MM>/<dd>/rollout-<time>-<thread>.jsonl
+    /// (the queries and the attached screenshot, in plaintext). `codex exec --ephemeral` would keep
+    /// none, but then a follow-up couldn't `resume` it, so instead the file is deleted when the picker
+    /// closes. Looked for in the folders of the last few days (local and UTC dates can differ).
+    static func deleteSession(_ threadID: String, codexHome: URL = CodexRunner.codexHome, now: Date = Date()) {
+        guard threadID.range(of: #"^[A-Za-z0-9-]+$"#, options: .regularExpression) != nil else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let fm = FileManager.default
+            let sessions = codexHome.appendingPathComponent("sessions")
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy/MM/dd"
+            let days = Set((-2...1).map { formatter.string(from: now.addingTimeInterval(Double($0) * 86_400)) })
+            for day in days {
+                let folder = sessions.appendingPathComponent(day)
+                for name in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasSuffix("-\(threadID).jsonl") {
+                    if (try? fm.removeItem(at: folder.appendingPathComponent(name))) != nil {
+                        Log.write("codex", "deleted its session file for this search")
+                    }
+                }
+            }
+        }
+    }
+
+    static var codexHome: URL {
+        if let home = ProcessInfo.processInfo.environment["CODEX_HOME"], !home.isEmpty { return URL(fileURLWithPath: home) }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
     }
 
     private func stopProcess() {
@@ -240,7 +279,7 @@ final class CodexRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("codex", "started \(public: arguments.first == "exec" && arguments.dropFirst().first == "resume" ? "resume" : "exec") model=\(public: model) pid=\(process.processIdentifier)")
+            Log.write("codex", "started \(public: arguments.first == "exec" && arguments.dropFirst().first == "resume" ? "resume" : "exec") model=\(meta: model) pid=\(process.processIdentifier)")
         } catch {
             Log.write("codex", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch codex", costUSD: nil))
@@ -284,7 +323,7 @@ final class CodexRunner: AgentRunner {
             turnEnded = true
             isBusy = false
             let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
-            Log.write("codex", "turn failed: \(sensitive: message.prefix(300))")
+            Log.write("codex", "turn failed kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(300))")
             onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
         default:
             break

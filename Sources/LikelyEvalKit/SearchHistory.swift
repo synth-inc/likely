@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LikelyStorage
 
@@ -160,8 +161,10 @@ public enum SearchHistoryFile {
 
     /// Moves plaintext history (`plain`: a build without encryption's, or an older version's) into
     /// the encrypted file `encrypted`, after what's already there, keeping the order. Lines are sealed
-    /// as they are, even ones that don't decode, so nothing readable is left; an entry already in
-    /// `encrypted` (an earlier conversion that stopped half way) isn't added twice. Encrypted lines in
+    /// as they are, even ones that don't decode, so nothing readable is left; a line already in
+    /// `encrypted` (an earlier conversion that stopped half way), or twice in `plain`, isn't added
+    /// twice. That's decided by a hash of the line's exact text, not by entry id: two versions of the
+    /// same entry are both kept, and lines that don't decode are deduplicated too. Encrypted lines in
     /// `plain` (sealed by an earlier test build of Likely) aren't Likely's to convert: they stay in
     /// `plain`, untouched. The encrypted file is written first, then `plain` is rewritten without the
     /// converted lines (or removed when nothing is left), so a failure at any point loses nothing.
@@ -174,12 +177,8 @@ public enum SearchHistoryFile {
         guard !toConvert.isEmpty else { return 0 }
         let kept = source.filter(DataCipher.isSealedLine)
         var existing = try rawLines(encrypted)
-        let present = Set(existing.compactMap { line -> String? in
-            guard case .success(let e?) = open(line, cipher: cipher) else { return nil }
-            return e.id
-        })
-        for line in toConvert {
-            if let e = decode(line), present.contains(e.id) { continue }
+        var present = Set(existing.compactMap { (try? cipher.openLine($0)).map(lineHash) })
+        for line in toConvert where present.insert(lineHash(line)).inserted {
             existing.append(try cipher.sealLine(line))
         }
         try write(existing, to: encrypted)
@@ -190,6 +189,8 @@ public enum SearchHistoryFile {
         }
         return toConvert.count
     }
+
+    static func lineHash(_ line: String) -> Data { Data(SHA256.hash(data: Data(line.utf8))) }
 
     /// Entries oldest first (file order). No file means no entries; an unreadable file throws.
     public static func load(_ url: URL, cipher: DataCipher?) throws -> [SearchHistoryEntry] {
@@ -224,8 +225,13 @@ public enum SearchHistoryFile {
     /// Adds an entry, then drops the oldest lines beyond `limit`. Throws without writing if the
     /// existing file can't be read or the entry can't be encrypted.
     public static func append(_ e: SearchHistoryEntry, to url: URL, cipher: DataCipher?, limit: Int = defaultLimit) throws {
+        try append([e], to: url, cipher: cipher, limit: limit)
+    }
+
+    /// Adds entries in order, in one write: all of them or (on any error) none.
+    public static func append(_ entries: [SearchHistoryEntry], to url: URL, cipher: DataCipher?, limit: Int = defaultLimit) throws {
         var all = try rawLines(url)
-        all.append(try seal(encodeLine(e), cipher: cipher))
+        for e in entries { all.append(try seal(encodeLine(e), cipher: cipher)) }
         if all.count > limit { all.removeFirst(all.count - limit) }
         try write(all, to: url)
     }
@@ -287,4 +293,38 @@ public enum SearchHistoryFile {
     private static func write(_ lines: [String], to url: URL) throws {
         try OwnerOnly.write(Data((lines.joined(separator: "\n") + "\n").utf8), to: url)
     }
+}
+
+/// Searches that couldn't be saved yet, held in memory (never written anywhere unencrypted) and saved,
+/// in order, with the next write that works. In a build that encrypts, that's what happens while the
+/// Keychain doesn't answer: the key can't be read, so nothing is written, and the searches wait here
+/// until it does. Also covers a history file that can't be read for a moment. At most `capacity` wait
+/// (the oldest go first), and they're lost if Likely quits before a write works.
+///
+/// Not thread-safe: use it from one queue (SearchHistoryStore's).
+public final class PendingSearchHistory {
+    public static let defaultCapacity = 100
+    public let capacity: Int
+    public private(set) var entries: [SearchHistoryEntry] = []
+
+    public init(capacity: Int = defaultCapacity) {
+        self.capacity = capacity
+    }
+
+    public var isEmpty: Bool { entries.isEmpty }
+
+    /// Queues `entry` (if any), then tries to write everything waiting to `url`. On failure the
+    /// entries stay queued and the error is rethrown; on success the queue is empty.
+    public func write(adding entry: SearchHistoryEntry? = nil, to url: URL, cipher: DataCipher?,
+                      limit: Int = SearchHistoryFile.defaultLimit) throws {
+        if let entry {
+            entries.append(entry)
+            if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
+        }
+        guard !entries.isEmpty else { return }
+        try SearchHistoryFile.append(entries, to: url, cipher: cipher, limit: limit)
+        entries = []
+    }
+
+    public func removeAll() { entries = [] }
 }

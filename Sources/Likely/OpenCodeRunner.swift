@@ -7,7 +7,8 @@ import LikelyTools
 /// so it runs under `sandbox-exec` (see AgentSandbox: no writes outside its own data directories, no
 /// exec from writable places, HTTPS only, no local sockets, LaunchServices, pasteboard, Accessibility, Screen Recording or Automation), plus a permission config that hides edit tools and allowlists search commands.
 /// Like Codex it can't take messages mid-turn: feedback stops the current turn and continues the same
-/// session with `opencode run -s <session>`.
+/// session with `opencode run -s <session>`. That needs the session in OpenCode's database (it can't
+/// run without one), so when the picker closes it's deleted with `opencode session delete`.
 final class OpenCodeRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -63,7 +64,7 @@ final class OpenCodeRunner: AgentRunner {
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent(AgentTranscript.fileName)
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         var arguments = ["run", "--format", "json", "-m", model]
@@ -82,9 +83,29 @@ final class OpenCodeRunner: AgentRunner {
 
     func cancel() {
         stopProcess()
+        if let sessionID { deleteSession(sessionID) }
         sessionID = nil
         try? transcript?.close()
         transcript = nil
+    }
+
+    /// `opencode session delete <id>`, in the background, with the same config and sandbox as a run
+    /// (it only writes OpenCode's own data folder).
+    private func deleteSession(_ id: String) {
+        guard let (launcher, arguments, env) = command(["session", "delete", id]), let workDir else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.currentDirectoryURL = workDir   // sessions belong to the project (the work folder)
+            process.executableURL = launcher
+            process.arguments = arguments
+            process.environment = env
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return }
+            process.waitUntilExit()
+            Log.write("opencode", "session delete → \(process.terminationStatus)")
+        }
     }
 
     private func stopProcess() {
@@ -100,10 +121,21 @@ final class OpenCodeRunner: AgentRunner {
     }
 
     private func launch(_ arguments: [String]) {
-        guard let executable, let workDir else { return }
+        guard let (launcher, launchArguments, env) = command(arguments), let workDir else { return }
         buffer = Data()
         turnEnded = false
 
+        let process = Process()
+        process.executableURL = launcher
+        process.arguments = launchArguments
+        process.currentDirectoryURL = workDir
+        process.environment = env
+        startProcess(process, arguments: arguments)
+    }
+
+    /// The sandboxed launch of `opencode <arguments>`: launcher, its arguments, environment.
+    private func command(_ arguments: [String]) -> (URL, [String], [String: String])? {
+        guard let executable, let workDir else { return nil }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var env = ProcessInfo.processInfo.environment
         // Our own (empty) config dir instead of ~/.config/opencode: no MCP servers or plugins from the
@@ -126,16 +158,15 @@ final class OpenCodeRunner: AgentRunner {
             "/private/var/folders",   // $TMPDIR
         ]
 
-        let process = Process()
         // OpenCode keeps tools it downloads (ripgrep) in <data>/bin: runnable, but not writable inside the sandbox.
         let profile = AgentSandbox.confinedProfile(writable: writable, execAllowed: [dataDir + "/bin"])
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments, profile: profile, extraRules: launchOptions.extraSandboxRules,
-                                                             readable: [workDir.path])
-        process.executableURL = launcher
-        process.arguments = launchArguments
-        process.currentDirectoryURL = workDir
-        process.environment = env
+                                                             readable: [workDir.path], agent: .opencode)
+        return (launcher, launchArguments, env)
+    }
 
+    private func startProcess(_ process: Process, arguments: [String]) {
+        guard let executable else { return }
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardInput = FileHandle.nullDevice
@@ -174,7 +205,7 @@ final class OpenCodeRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("opencode", "started \(public: arguments.contains("-s") ? "resume" : "run") model=\(public: model) pid=\(process.processIdentifier)")
+            Log.write("opencode", "started \(public: arguments.contains("-s") ? "resume" : "run") model=\(meta: model) pid=\(process.processIdentifier)")
         } catch {
             Log.write("opencode", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch opencode", costUSD: nil))
@@ -212,7 +243,7 @@ final class OpenCodeRunner: AgentRunner {
             isBusy = false
             let error = event["error"] as? [String: Any] ?? [:]
             let message = ((error["data"] as? [String: Any])?["message"] as? String) ?? error["name"] as? String ?? "opencode failed"
-            Log.write("opencode", "error: \(sensitive: message.prefix(300))")
+            Log.write("opencode", "error kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(300))")
             onTurnFinished?(AgentOutcome(success: false, summary: message, costUSD: nil))
         default:
             break

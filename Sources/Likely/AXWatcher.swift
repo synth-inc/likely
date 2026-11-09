@@ -85,7 +85,7 @@ final class AXWatcher {
 
         var observer: AXObserver?
         guard AXObserverCreate(pid, axCallback, &observer) == .success, let observer else {
-            Log.write("ax", "AXObserverCreate failed for \(public: app.localizedName) (\(pid))")
+            Log.write("ax", "AXObserverCreate failed for \(meta: app.localizedName) (\(pid))")
             return
         }
         let appElement = AXUIElementCreateApplication(pid)
@@ -96,7 +96,7 @@ final class AXWatcher {
             if attempt < 5 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.attach(to: app, attempt: attempt + 1) }
             }
-            Log.write("ax", "\(public: app.localizedName) (\(pid)) not responding, retry \(attempt + 1)/5")
+            Log.write("ax", "\(meta: app.localizedName) (\(pid)) not responding, retry \(attempt + 1)/5")
             return
         }
         var registered = 0
@@ -110,13 +110,13 @@ final class AXWatcher {
             if notReady && attempt < 5 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.attach(to: app, attempt: attempt + 1) }
             } else if verbose {
-                Log.write("ax", "no notifications registered for \(public: app.localizedName) (\(pid))")
+                Log.write("ax", "no notifications registered for \(meta: app.localizedName) (\(pid))")
             }
             return
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
         observers[pid] = observer
-        if verbose { Log.write("ax", "attached \(public: app.localizedName) (\(pid)), \(registered) notifications") }
+        if verbose { Log.write("ax", "attached \(meta: app.localizedName) (\(pid)), \(registered) notifications") }
     }
 
     private func detach(pid: pid_t) {
@@ -130,7 +130,7 @@ final class AXWatcher {
             let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
             // Destroyed elements can't be described anymore.
             let detail: LogMessage = notification == kAXUIElementDestroyedNotification ? "" : " \(AX.describe(element))"
-            Log.write("ax-event", "\(public: appName): \(public: notification)\(detail)")
+            Log.write("ax-event", "\(meta: appName): \(meta: notification)\(detail)")
         }
         onEvent?(pid, notification, element)
     }

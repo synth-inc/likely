@@ -10,6 +10,13 @@ public protocol DataKeyStore: AnyObject {
     func storeKey(_ key: Data) throws
 }
 
+/// Thrown by `DataKeyStore.storeKey` when a key was stored meanwhile (another Likely process, or
+/// another thread of this one, made it first): the caller reads that key instead of using its own.
+public struct DataKeyAlreadyStored: Error, CustomStringConvertible {
+    public init() {}
+    public var description: String { "a data key was stored meanwhile" }
+}
+
 public final class InMemoryKeyStore: DataKeyStore {
     public var key: Data?
     /// Makes `loadKey` throw, like a keychain item this build can't read.
@@ -100,6 +107,13 @@ public final class DataCipher {
         let bytes = fresh.withUnsafeBytes { Data($0) }
         do {
             try store.storeKey(bytes)
+        } catch is DataKeyAlreadyStored {
+            // Someone else made the key first: use theirs, never ours (theirs may already seal data).
+            guard let winner = try? store.loadKey(), winner.count == 32 else {
+                throw CipherError.keyUnavailable("a key was stored meanwhile but can't be read")
+            }
+            cached = SymmetricKey(data: winner)
+            return cached!
         } catch {
             throw CipherError.keyUnavailable("couldn't save a new key: \(error)")
         }

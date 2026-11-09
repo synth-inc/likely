@@ -53,7 +53,7 @@ final class Updater: ObservableObject {
             return
         }
         controller.startUpdater()
-        Log.write("update", "updater started, feed \(public: controller.updater.feedURL?.absoluteString)")
+        Log.write("update", "updater started, feed \(meta: controller.updater.feedURL?.absoluteString)")
     }
 
     func checkForUpdates() {

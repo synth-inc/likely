@@ -34,6 +34,8 @@ final class HermesRunner: AgentRunner {
     private var pendingText = ""
     private var textSinceTool = false
     private var sessionName: String?
+    /// The session's id, from the first `result` (deleted when the picker closes).
+    private var sessionID: String?
     private var executable: String?
     private var model = ""
     private var workDir: URL?
@@ -60,7 +62,7 @@ final class HermesRunner: AgentRunner {
         self.model = model
         self.workDir = workDir
         sessionName = "likely-\(UUID().uuidString.prefix(8).lowercased())"
-        let transcriptURL = workDir.appendingPathComponent(AgentTranscript.fileName)
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         var prompt = prompt
@@ -81,6 +83,8 @@ final class HermesRunner: AgentRunner {
     func cancel() {
         generation += 1
         stopProcess()
+        if let sessionID, let executable { Self.deleteSession(sessionID, executable: executable) }
+        sessionID = nil
         sessionName = nil
         try? transcript?.close()
         transcript = nil
@@ -110,7 +114,7 @@ final class HermesRunner: AgentRunner {
             DispatchQueue.main.async {
                 guard generation == self.generation else { return }
                 if let problem {
-                    Log.write("hermes", "not started: \(public: problem)")
+                    Log.write("hermes", "not started: \(meta: problem)")
                     self.isBusy = false
                     self.onExit?(AgentOutcome(success: false, summary: problem, costUSD: nil))
                     return
@@ -130,7 +134,7 @@ final class HermesRunner: AgentRunner {
         let process = Process()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: Self.baseArguments + arguments,
                                                              profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules,
-                                                             readable: [workDir.path])
+                                                             readable: [workDir.path], agent: .hermes)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -169,7 +173,7 @@ final class HermesRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("hermes", "started session=\(public: sessionName) model=\(public: model) pid=\(process.processIdentifier)")
+            Log.write("hermes", "started session=\(meta: sessionName) model=\(meta: model) pid=\(process.processIdentifier)")
         } catch {
             isBusy = false
             Log.write("hermes", "failed to launch \(path: executable): \(error: error)")
@@ -210,6 +214,7 @@ final class HermesRunner: AgentRunner {
                 onStatus?(status)
             }
         case "result":
+            if let id = event["session_id"] as? String, !id.isEmpty { sessionID = id }
             flushText()
             // `text` repeats the last message; parse it only if it wasn't streamed.
             if !textSinceTool { AgentProtocol.parse(text: event["text"] as? String ?? "", onStatus: onStatus, onFile: reportFile) }
@@ -221,7 +226,7 @@ final class HermesRunner: AgentRunner {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
             } else {
                 let message = (event["error"] as? String) ?? (event["text"] as? String) ?? "hermes failed"
-                Log.write("hermes", "turn failed (\(exitCode)): \(sensitive: message.prefix(300))")
+                Log.write("hermes", "turn failed (\(exitCode)) kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(300))")
                 onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
             }
         default:
@@ -412,6 +417,17 @@ extension HermesRunner {
         Log.write("hermes", "eval: stopped gateway pid=\(pid)")
     }
 
+    /// The session's messages (the queries, what the agent read) stay in the profile's session store
+    /// until deleted; Likely continues a session only while its picker is open. In the background.
+    /// The gateway may still be finishing a turn it was asked to stop (see `stopProcess`), so this is
+    /// best effort.
+    static func deleteSession(_ id: String, executable: String) {
+        guard id.range(of: #"^[A-Za-z0-9_.:-]+$"#, options: .regularExpression) != nil else { return }
+        DispatchQueue.global(qos: .utility).async {
+            run(executable, ["-p", profileName, "sessions", "delete", id, "--yes"])
+        }
+    }
+
     /// At quit: stop the sandboxed gateway Likely started for the `likely` profile (an unsandboxed one
     /// belongs to the user and is left alone). SIGTERM, so it shuts down like `hermes gateway stop`.
     static func stopGateway() {
@@ -447,7 +463,7 @@ extension HermesRunner {
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return -1 }
         process.waitUntilExit()
-        Log.write("hermes", "\(public: arguments.prefix(4).joined(separator: " ")) → \(process.terminationStatus)")
+        Log.write("hermes", "\(meta: arguments.prefix(4).joined(separator: " ")) → \(process.terminationStatus)")
         return process.terminationStatus
     }
 }

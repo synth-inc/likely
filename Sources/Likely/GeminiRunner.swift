@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LikelyStorage
 import LikelyTools
@@ -14,7 +15,10 @@ import LikelyTools
 /// `file` (-C) can write, so they're left out; mdfind and Gemini's list_directory cover them.
 ///
 /// Gemini can't take messages mid-turn, so feedback stops the current turn and continues the same
-/// conversation with `--resume <session_id>` (sessions are stored per working directory).
+/// conversation with `--resume <session_id>` (sessions are stored per working directory). That needs
+/// the session on disk (Gemini has no way to turn it off), so when the picker closes the work
+/// folder's whole session folder (~/.gemini/tmp/<sha256 of the folder>: the chats, with the
+/// screenshot, and logs.json) and shell history are deleted (`deleteSessions`).
 final class GeminiRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -54,7 +58,7 @@ final class GeminiRunner: AgentRunner {
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent(AgentTranscript.fileName)
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         // `@path` attaches the file as model input; it must be inside the workspace (see baseArguments).
@@ -73,9 +77,24 @@ final class GeminiRunner: AgentRunner {
 
     func cancel() {
         stopProcess()
+        if sessionID != nil, let workDir { Self.deleteSessions(workDir: workDir) }
         sessionID = nil
         try? transcript?.close()
         transcript = nil
+    }
+
+    /// Gemini keeps a project's sessions in ~/.gemini/tmp/<sha256 of its path> and its shell history
+    /// in ~/.gemini/history/<same>. The project is Likely's work folder, used by nothing else, so both
+    /// go entirely. Both spellings of the path (Gemini uses the resolved one).
+    static func deleteSessions(workDir: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
+        let gemini = URL(fileURLWithPath: home).appendingPathComponent(".gemini")
+        for path in Set([workDir.path, AgentSandbox.realPath(workDir.path)]) {
+            let hash = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+            for folder in ["tmp", "history"] {
+                let url = gemini.appendingPathComponent(folder).appendingPathComponent(hash)
+                if (try? FileManager.default.removeItem(at: url)) != nil { Log.write("gemini", "deleted its session files for this search") }
+            }
+        }
     }
 
     /// `-e none` skips the user's extensions. The workspace (where read_file/glob may look) is the
@@ -118,7 +137,7 @@ final class GeminiRunner: AgentRunner {
         let profile = launchOptions.toolCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.geminiProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
                                                              profile: profile, extraRules: launchOptions.extraSandboxRules,
-                                                             readable: [workDir.path])
+                                                             readable: [workDir.path], agent: .gemini)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -172,7 +191,7 @@ final class GeminiRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("gemini", "started \(public: arguments.contains("--resume") ? "resume" : "new") model=\(public: model) project=\(sensitive: Self.vertexProject) location=\(public: Self.vertexLocation) pid=\(process.processIdentifier)")
+            Log.write("gemini", "started \(public: arguments.contains("--resume") ? "resume" : "new") model=\(meta: model) project=\(sensitive: Self.vertexProject) location=\(meta: Self.vertexLocation) pid=\(process.processIdentifier)")
         } catch {
             Log.write("gemini", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch gemini", costUSD: nil))
@@ -219,7 +238,7 @@ final class GeminiRunner: AgentRunner {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
             } else {
                 let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
-                Log.write("gemini", "turn failed: \(sensitive: message.prefix(500))")
+                Log.write("gemini", "turn failed kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(500))")
                 onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
             }
         default:
