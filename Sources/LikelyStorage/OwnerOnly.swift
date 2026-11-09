@@ -40,7 +40,9 @@ public enum OwnerOnly {
         }
     }
 
-    /// Writes `data` atomically: a temporary file created 0600 next to `url`, then renamed over it.
+    /// Writes `data` atomically: a temporary file created 0600 next to `url`, flushed to the disk
+    /// (F_FULLFSYNC, so a power loss right after can't leave an empty file behind the rename), then
+    /// renamed over it.
     public static func write(_ data: Data, to url: URL, mode: mode_t = fileMode) throws {
         try createDirectory(url.deletingLastPathComponent())
         let dir = url.deletingLastPathComponent().path
@@ -54,6 +56,7 @@ public enum OwnerOnly {
         }
         fchmod(fd, mode)   // in case the umask took bits off
         try writeAll(fd, data, path: temp)
+        if fcntl(fd, F_FULLFSYNC) != 0 { fsync(fd) }   // F_FULLFSYNC isn't supported by every file system
         guard rename(temp, url.path) == 0 else { throw Failure("Can't replace", url.path) }
         ok = true
     }
@@ -104,6 +107,10 @@ public enum OwnerOnly {
     /// Narrows everything under `root` (and `root` itself) to owner-only: folders 0700, files 0600,
     /// files with any execute bit 0700. Symbolic links aren't followed (and their targets aren't
     /// touched). Returns how many items changed.
+    ///
+    /// `root` itself may be the link SpotlightExclusion makes (Likely → Likely.noindex): that one is
+    /// followed, but only to `<root>.noindex` next to it. A link anywhere else (planted, or the user's
+    /// own) is left alone, so nothing outside Likely's folders is ever chmodded.
     @discardableResult
     public static func repair(_ root: URL) -> Int {
         var changed = 0
@@ -121,8 +128,7 @@ public enum OwnerOnly {
             if current != wanted, chmod(path, wanted) == 0 { changed += 1 }
             return type == S_IFDIR
         }
-        // The root itself may be a link (Likely → Likely.noindex, see SpotlightExclusion): follow that one.
-        let rootPath = root.resolvingSymlinksInPath().path
+        guard let rootPath = repairRoot(root) else { return 0 }
         guard fix(rootPath) else { return changed }
         var stack = [rootPath]
         while let dir = stack.popLast() {
@@ -132,6 +138,25 @@ public enum OwnerOnly {
             }
         }
         return changed
+    }
+
+    /// The folder `repair` works on: `root` itself, or for a link, its target if (and only if) that's
+    /// `<root>.noindex` in the same folder. Nil for any other link.
+    static func repairRoot(_ root: URL) -> String? {
+        let path = root.standardizedFileURL.path
+        var st = stat()
+        guard lstat(path, &st) == 0 else { return nil }
+        guard st.st_mode & S_IFMT == S_IFLNK else { return path }
+        let expected = SpotlightExclusion.realFolder(for: root.standardizedFileURL).path
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        guard let parent = realpath((path as NSString).deletingLastPathComponent, nil) else { return nil }
+        defer { free(parent) }
+        let wanted = String(cString: parent) + "/" + (expected as NSString).lastPathComponent
+        // The link's target must be that folder itself, not a link onward from it.
+        var target = stat()
+        guard String(cString: resolved) == wanted, lstat(wanted, &target) == 0, target.st_mode & S_IFMT == S_IFDIR else { return nil }
+        return wanted
     }
 
     /// Permission bits of the item at `path` (lstat), or nil.

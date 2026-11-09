@@ -479,7 +479,12 @@ final class EvalCaseRun {
     let template: String
     let options: EvalCLI.Options
     let attempt: Int
+    /// The case's folder: its prompt, transcript and results. Agents can't read it.
     let workDir: URL
+    /// What the agent may read (and runs in): `<case>/agent`, holding only the decrypted screenshot
+    /// and the agent's config files. Transcripts stay one level up, out of its reach (Codex's
+    /// sandbox can't deny a file pattern inside a folder it may read).
+    var agentDir: URL { workDir.appendingPathComponent("agent", isDirectory: true) }
 
     private var runner: AgentRunner?
     private var completion: ((EvalCaseResult) -> Void)?
@@ -496,12 +501,12 @@ final class EvalCaseRun {
     private var evalCase: EvalCase { item.evalCase }
     /// The case's screenshot as a file the agent can read. Saved test screenshots are encrypted in
     /// builds with encryption (evals/screenshots/*.png.enc, see EvalScreenshots): those are decrypted into a temporary 0600
-    /// file in this case's own folder (the one folder of Likely's its sandbox may read), deleted when
-    /// the case ends. Plain PNGs (the repo's fixtures) are used as they are.
+    /// file in this case's `agent` folder (the one folder of Likely's its sandbox may read), deleted
+    /// when the case ends. Plain PNGs (the repo's fixtures) are used as they are.
     private lazy var screenshot: URL? = {
         guard let path = evalCase.context?.screenshot.map({ EvalPath.resolve($0, relativeTo: item.base) }) else { return nil }
         do {
-            let file = try EvalScreenshots.materialize(path, in: workDir, cipher: DataProtection.cipher)
+            let file = try EvalScreenshots.materialize(path, in: agentDir, cipher: DataProtection.cipher)
             if file.isTemporary { temporaryScreenshot = file.url }
             return file.url
         } catch {
@@ -567,12 +572,13 @@ final class EvalCaseRun {
         var o = AgentLaunchOptions()
         o.isEval = true
         o.appendTranscript = true
+        o.transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
         o.tools = tools
         if isolated, let folders = searchFolders {
             // All of ~ and /Volumes denied; the case's folders, its work folder and the agents' own
             // config/state allowed back (see EvalIsolation).
             o.extraSandboxRules = EvalIsolation.rules(home: FileManager.default.homeDirectoryForCurrentUser.path,
-                                                      allowed: folders + [workDir.path], agentExecutable: agent.path,
+                                                      allowed: folders + [agentDir.path], agentExecutable: agent.path,
                                                       extraDenied: Settings.extraSearchFolders)
         }
         return o
@@ -587,6 +593,7 @@ final class EvalCaseRun {
         self.completion = completion
         let prompt = firstPrompt()
         try? OwnerOnly.write(prompt, to: workDir.appendingPathComponent("prompt.txt"))
+        try? OwnerOnly.createDirectory(agentDir)
         if wantsIsolation, !agent.canIsolate {
             Log.write("eval", "\(evalCase.id): Codex runs under its own sandbox, so this case is not isolated (prompt only)")
         }
@@ -604,7 +611,7 @@ final class EvalCaseRun {
         timeoutWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + options.timeout, execute: work)
         runner.start(executable: agent.path, model: agent.model, prompt: prompt,
-                     image: agent.takesImages ? screenshot : nil, workDir: workDir)
+                     image: agent.takesImages ? screenshot : nil, workDir: agentDir)
     }
 
     /// The dry-run sink: what LikelyFolder.add would accept, without copying.
@@ -638,7 +645,7 @@ final class EvalCaseRun {
         applyEnvironment()
         if !runner.send(message) {
             runner.start(executable: agent.path, model: agent.model, prompt: lastPrompt + "\n\n" + message,
-                         image: agent.takesImages ? screenshot : nil, workDir: workDir)
+                         image: agent.takesImages ? screenshot : nil, workDir: agentDir)
         }
     }
 

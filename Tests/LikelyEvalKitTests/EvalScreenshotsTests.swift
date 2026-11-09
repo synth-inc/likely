@@ -18,6 +18,42 @@ final class EvalScreenshotsTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    func testEncryptedExtensionIsCaseInsensitive() throws {
+        XCTAssertTrue(EvalScreenshots.isEncrypted("/a/X.PNG.enc"))
+        XCTAssertTrue(EvalScreenshots.isEncrypted("/a/x.Png.Enc"))
+        XCTAssertFalse(EvalScreenshots.isEncrypted("/a/x.png"))
+        // encryptExisting makes X.PNG.enc of X.PNG; it loads and needs decrypting like any other.
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        try png.write(to: shots.appendingPathComponent("X.PNG"))
+        XCTAssertEqual(try EvalScreenshots.encryptExisting(in: shots, caseFiles: [], cipher: cipher), 1)
+        let sealed = shots.appendingPathComponent("X.PNG.enc").path
+        XCTAssertTrue(EvalScreenshots.needsDecrypting(sealed))
+        XCTAssertEqual(try EvalScreenshots.load(sealed, cipher: cipher), png)
+        XCTAssertEqual(try EvalScreenshots.encryptExisting(in: shots, caseFiles: [], cipher: cipher), 0, "not encrypted twice")
+    }
+
+    /// Decrypted copies a killed eval run left behind are deleted at launch, but not a running one's
+    /// (recent), and nothing else.
+    func testLeftoverDecryptedCopiesAreRemoved() throws {
+        let fm = FileManager.default
+        let caseDir = dir.appendingPathComponent("runs/r1/cases/001-a/agent")
+        try fm.createDirectory(at: caseDir, withIntermediateDirectories: true)
+        let old = caseDir.appendingPathComponent("screenshot-0a1b2c3d.png")
+        let recent = caseDir.appendingPathComponent("screenshot-99999999.png")
+        let other = caseDir.appendingPathComponent("screenshot-notes.png")
+        let report = dir.appendingPathComponent("runs/r1/report.html")
+        for url in [old, recent, other, report] { try png.write(to: url) }
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-7200)], ofItemAtPath: old.path)
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-7200)], ofItemAtPath: other.path)
+        XCTAssertEqual(EvalScreenshots.removeTemporaryCopies(under: dir.appendingPathComponent("runs"), now: now), 1)
+        XCTAssertFalse(fm.fileExists(atPath: old.path))
+        XCTAssertTrue(fm.fileExists(atPath: recent.path), "may belong to a run in progress")
+        XCTAssertTrue(fm.fileExists(atPath: other.path))
+        XCTAssertTrue(fm.fileExists(atPath: report.path))
+        XCTAssertEqual(EvalScreenshots.removeTemporaryCopies(under: dir.appendingPathComponent("missing")), 0)
+    }
+
     func testSaveEncryptsAndLoadDecrypts() throws {
         let path = try EvalScreenshots.save(png, id: "my-case", in: shots, cipher: cipher)
         XCTAssertTrue(path.hasSuffix("/my-case.png.enc"))

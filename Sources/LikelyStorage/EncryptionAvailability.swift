@@ -57,33 +57,53 @@ public struct SigningEntitlements: Equatable {
 ///
 /// Encryption needs the data-protection keychain, which needs a `keychain-access-groups`
 /// entitlement, which needs a provisioning profile embedded in the app. Official releases have one;
-/// builds from source don't unless the builder sets one up (docs/BUILDING.md). Without it, data is
-/// kept in plaintext with Likely's other protections (owner-only files, the agent sandbox deny,
-/// Spotlight exclusion). There is deliberately no fallback (a key file next to the data, or the
-/// login keychain's access prompts).
+/// builds from source don't unless the builder sets one up (docs/BUILDING.md). Without it (and only
+/// then), data is kept in plaintext with Likely's other protections (owner-only files, the agent
+/// sandbox deny, Spotlight exclusion). There is deliberately no fallback (a key file next to the
+/// data, or the login keychain's access prompts).
+///
+/// A build that has the entitlement but whose Keychain doesn't answer (`keychainError`) is not "off":
+/// it still encrypts, so nothing meant to be encrypted is ever written in plaintext. History waits in
+/// memory, test screenshots aren't saved, and the Keychain is tried again (DataProtection).
 public enum EncryptionAvailability: Equatable {
     case on(accessGroup: String)
+    /// The entitlement is there but the data-protection keychain didn't answer (with why).
+    case keychainError(accessGroup: String, String)
     case off(Reason)
 
     public enum Reason: Equatable {
         /// No `keychain-access-groups` entitlement: the app was built without a provisioning profile.
         case noProvisioningProfile
-        /// The entitlement is there but the data-protection keychain didn't answer (with why).
-        case keychainUnavailable(String)
     }
 
     public var isOn: Bool { if case .on = self { return true } else { return false } }
 
-    public var accessGroup: String? { if case .on(let group) = self { return group } else { return nil } }
+    /// Whether this build encrypts (on, or on but waiting for the Keychain). Only a build without a
+    /// provisioning profile keeps its data in plaintext.
+    public var encrypts: Bool { accessGroup != nil }
+
+    /// The data key's access group, for a build that encrypts.
+    public var accessGroup: String? {
+        switch self {
+        case .on(let group), .keychainError(let group, _): return group
+        case .off: return nil
+        }
+    }
 
     /// Decides from the entitlements and a read-only keychain probe for that access group. The probe
     /// only runs when there is an access group (tests pass their own and never reach a keychain).
     public static func evaluate(_ entitlements: SigningEntitlements,
                                 probe: (String) -> Result<Void, KeychainKeyStore.KeychainError>) -> EncryptionAvailability {
         guard let group = entitlements.dataKeyAccessGroup else { return .off(.noProvisioningProfile) }
+        return evaluate(accessGroup: group, probe: probe)
+    }
+
+    /// The probe alone, for an access group already known (retrying after a Keychain error).
+    public static func evaluate(accessGroup group: String,
+                                probe: (String) -> Result<Void, KeychainKeyStore.KeychainError>) -> EncryptionAvailability {
         switch probe(group) {
         case .success: return .on(accessGroup: group)
-        case .failure(let error): return .off(.keychainUnavailable(error.description))
+        case .failure(let error): return .keychainError(accessGroup: group, error.description)
         }
     }
 
@@ -92,12 +112,13 @@ public enum EncryptionAvailability: Equatable {
         evaluate(SigningEntitlements.current()) { KeychainKeyStore(accessGroup: $0).probe() }
     }
 
-    /// For Settings: "Encryption: on", or why it's off.
+    /// For Settings: "Encryption: on", or why it's off or not working.
     public var summary: String {
         switch self {
         case .on: return "Encryption: on"
         case .off(.noProvisioningProfile): return "Encryption: off in this build (no provisioning profile)"
-        case .off(.keychainUnavailable(let why)): return "Encryption: off (the Keychain isn't available to this build: \(why))"
+        case .keychainError(_, let why):
+            return "Encryption: on, but the Keychain isn't answering (\(why)). Nothing is saved unencrypted; Likely keeps trying"
         }
     }
 }

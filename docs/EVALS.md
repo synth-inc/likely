@@ -55,7 +55,8 @@ Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-
   it says so too ("tools changed: +rclip"), without passing over the run: see Your tools.
 - `cases/<n>-<id>/prompt.txt` and `cases/<n>-<id>/transcript.jsonl`: the exact first message and the
   agent's raw stream (every turn, relaunches included). `<n>` is the case's position in the suite, so
-  cases that share an id keep separate folders.
+  cases that share an id keep separate folders. The agent runs in `cases/<n>-<id>/agent/`, the only part
+  it may read: the decrypted screenshot and its config files, never the prompt or transcript files.
 - `prompt-template.txt`: the template used (its hash is in the report, to tell prompt versions apart).
 
 The command prints one line per case and a summary, and exits 0 when the run completes (whatever the
@@ -180,7 +181,7 @@ each confirmed pick becomes a case in `cases.jsonl` right away, with no approval
 the app, the window title, the screenshot (if one was taken, saved as `…/evals/screenshots/<id>.png.enc`
 in builds with encryption, see [BUILDING.md](BUILDING.md), or as a 0600 `<id>.png` without; the case
 editor decrypts it in memory for its preview, and an eval run decrypts it into a temporary 0600 file in
-the case's own folder for the agent, deleted when the case ends), and the
+the case's `agent` folder, deleted when the case ends, or at the app's next launch if the run was killed), and the
 file(s) you picked. Captured cases have `"source": "captured"` and the tag `captured`, so they're easy to
 filter, edit or delete in Settings → Evals. Nothing is recorded for cancelled pickers, or when you neither
 typed anything nor had a screenshot. If the pick can't be read, it stays out of your tests: it's logged
@@ -270,7 +271,7 @@ image, a landscape and an app icon, all for a made-up "Jordan Rivera". Its cases
 - the prompt's search folders become the fixture folder, plus a note to search only there;
 - the prompt drops the template's "Elsewhere in ~ is fine too";
 - the agent's sandbox denies reading **all of your home folder** and `/Volumes` (and your extra search
-  folders), then allows back only the fixture folder, the case's work folder, the agent CLIs' own config
+  folders), then allows back only the fixture folder, the case's `agent` folder, the agent CLIs' own config
   and state (`~/.claude`, `~/.claude.json`, `~/.gemini`, `~/.hermes`, `~/.config`, `~/.local`, `~/.cache`,
   toolchains such as `~/.nvm` or `~/.bun`, shell startup files, the login keychain) and the agent's install
   folder. So a fixture run can't read `~/Likely`, `~/Library/Application Support/Likely` (your cases and

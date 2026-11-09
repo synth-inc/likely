@@ -231,6 +231,82 @@ final class SearchHistoryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: encURL.path))
     }
 
+    /// Deduplicated by the line's exact text, not the entry id: two versions of an entry are both
+    /// kept, and repeated lines (decodable or not) are added once.
+    func testConversionDeduplicatesByLineHash() throws {
+        var marked = entry("a")
+        marked.evalCaseID = "case-1"
+        let plain = [SearchHistoryFile.encodeLine(entry("a")), SearchHistoryFile.encodeLine(marked), "garbage",
+                     "garbage", SearchHistoryFile.encodeLine(entry("b"))].joined(separator: "\n") + "\n"
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try plain.write(to: plainURL, atomically: true, encoding: .utf8)
+        try SearchHistoryFile.append(entry("b"), to: encURL, cipher: cipher)   // converted earlier
+        try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher)
+        let contents = try SearchHistoryFile.read(encURL, cipher: cipher)
+        XCTAssertEqual(contents.entries.map(\.id), ["b", "a", "a"])
+        XCTAssertEqual(contents.entries.map(\.evalCaseID), [nil, nil, "case-1"])
+        let lines = try String(contentsOf: encURL, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.count, 4, "b, a, a marked, one garbage line")
+    }
+
+    // MARK: Keychain error (a build that encrypts, but no key right now)
+
+    private func brokenCipher() -> (DataCipher, InMemoryKeyStore) {
+        struct KeychainLocked: Error {}
+        let store = InMemoryKeyStore()
+        store.failure = KeychainLocked()
+        return (DataCipher(store: store), store)
+    }
+
+    /// Nothing is written (encrypted or not) while the key can't be read; searches wait in memory and
+    /// are saved, in order and encrypted, by the first write that works.
+    func testSearchesWaitInMemoryWhileTheKeychainDoesntAnswer() throws {
+        let (broken, store) = brokenCipher()
+        let pending = PendingSearchHistory()
+        XCTAssertThrowsError(try pending.write(adding: entry("first", queries: ["my tax form"]), to: encURL, cipher: broken)) {
+            guard case .keyUnavailable = $0 as? DataCipher.CipherError else { return XCTFail("\($0)") }
+        }
+        XCTAssertThrowsError(try pending.write(adding: entry("second"), to: encURL, cipher: broken))
+        XCTAssertEqual(pending.entries.map(\.id), ["first", "second"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: encURL.path), "nothing written")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plainURL.path), "never in plaintext")
+
+        store.failure = nil   // the Keychain answers again
+        try pending.write(adding: entry("third"), to: encURL, cipher: broken)
+        XCTAssertTrue(pending.isEmpty)
+        XCTAssertEqual(try SearchHistoryFile.load(encURL, cipher: broken).map(\.id), ["first", "second", "third"])
+        XCTAssertFalse(try String(contentsOf: encURL, encoding: .utf8).contains("tax"), "encrypted")
+        // A flush with nothing waiting writes nothing.
+        let before = try Data(contentsOf: encURL)
+        try pending.write(to: encURL, cipher: broken)
+        XCTAssertEqual(try Data(contentsOf: encURL), before)
+    }
+
+    /// The encrypted file is reported honestly while the key can't be read: kept, not empty, not
+    /// "another build's".
+    func testEncryptedHistoryReadsAsUnavailableWhileTheKeychainDoesntAnswer() throws {
+        let store = InMemoryKeyStore()
+        let working = DataCipher(store: store)
+        try SearchHistoryFile.append(entry("a"), to: encURL, cipher: working)
+        let before = try Data(contentsOf: encURL)
+        let (broken, _) = brokenCipher()
+        let contents = try SearchHistoryFile.read(encURL, cipher: broken)
+        XCTAssertEqual(contents.entries.count, 0)
+        XCTAssertEqual(contents.unreadable, 1)
+        guard case .keyUnavailable? = contents.problem else { return XCTFail("\(String(describing: contents.problem))") }
+        XCTAssertNil(try SearchHistoryFile.update(id: "a", in: encURL, cipher: broken) { $0.evalCaseID = "x" })
+        XCTAssertEqual(try Data(contentsOf: encURL), before, "left as it is")
+    }
+
+    func testPendingSearchesAreCapped() throws {
+        let (broken, _) = brokenCipher()
+        let pending = PendingSearchHistory(capacity: 2)
+        for id in ["a", "b", "c"] { _ = try? pending.write(adding: entry(id), to: encURL, cipher: broken) }
+        XCTAssertEqual(pending.entries.map(\.id), ["b", "c"], "the oldest go first")
+        pending.removeAll()
+        XCTAssertTrue(pending.isEmpty)
+    }
+
     func testNoPlaintextMeansNoConversionAndNoFiles() throws {
         XCTAssertEqual(try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher), 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: encURL.path))

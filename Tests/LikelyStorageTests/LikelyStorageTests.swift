@@ -119,6 +119,32 @@ final class OwnerOnlyTests: TempDirTestCase {
         OwnerOnly.repair(dir.appendingPathComponent("Likely"))
         XCTAssertEqual(mode(real), 0o700)
     }
+
+    /// A `Likely` link anywhere but `Likely.noindex` next to it (planted, or the user's own) isn't
+    /// followed: nothing outside Likely's folders is chmodded.
+    func testRepairDoesntFollowALinkedRootElsewhere() throws {
+        let fm = FileManager.default
+        let elsewhere = dir.appendingPathComponent("Documents")
+        try fm.createDirectory(at: elsewhere, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        fm.createFile(atPath: elsewhere.appendingPathComponent("notes.txt").path, contents: Data(), attributes: [.posixPermissions: 0o644])
+        let support = dir.appendingPathComponent("Support")
+        try fm.createDirectory(at: support, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(atPath: support.appendingPathComponent("Likely").path, withDestinationPath: elsewhere.path)
+        XCTAssertEqual(OwnerOnly.repair(support.appendingPathComponent("Likely")), 0)
+        XCTAssertEqual(mode(elsewhere), 0o755)
+        XCTAssertEqual(mode(elsewhere.appendingPathComponent("notes.txt")), 0o644)
+
+        // Named like the target but in another folder, or a link onward from the right name: also not followed.
+        let other = dir.appendingPathComponent("Other/Likely.noindex")
+        try fm.createDirectory(at: other, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        try fm.createSymbolicLink(atPath: dir.appendingPathComponent("Likely").path, withDestinationPath: other.path)
+        XCTAssertEqual(OwnerOnly.repair(dir.appendingPathComponent("Likely")), 0)
+        XCTAssertEqual(mode(other), 0o755)
+        try fm.createSymbolicLink(atPath: support.appendingPathComponent("Logs.noindex").path, withDestinationPath: elsewhere.path)
+        try fm.createSymbolicLink(atPath: support.appendingPathComponent("Logs").path, withDestinationPath: "Logs.noindex")
+        XCTAssertEqual(OwnerOnly.repair(support.appendingPathComponent("Logs")), 0)
+        XCTAssertEqual(mode(elsewhere), 0o755)
+    }
 }
 
 final class DataCipherTests: XCTestCase {
@@ -195,6 +221,24 @@ final class DataCipherTests: XCTestCase {
         XCTAssertEqual(try DataCipher(store: InMemoryKeyStore(key: Data(repeating: 1, count: 32))).openLine(line), "x")
     }
 
+    /// Two processes make the key at once: the one whose add fails with a duplicate uses the other's.
+    func testDuplicateKeyOnCreateUsesTheStoredOne() throws {
+        final class RacingStore: DataKeyStore {
+            let winner = Data(repeating: 7, count: 32)
+            var stored: Data?
+            func loadKey() throws -> Data? { stored }
+            func storeKey(_ key: Data) throws {
+                stored = winner   // someone else got there first
+                throw DataKeyAlreadyStored()
+            }
+        }
+        let store = RacingStore()
+        let cipher = DataCipher(store: store)
+        let line = try cipher.sealLine("x")
+        XCTAssertEqual(try DataCipher(store: InMemoryKeyStore(key: store.winner)).openLine(line), "x", "sealed with the winner's key")
+        XCTAssertEqual(try cipher.openLine(line), "x")
+    }
+
     func testWrongSizeKeyIsRefused() {
         let cipher = DataCipher(store: InMemoryKeyStore(key: Data(repeating: 1, count: 16)))
         XCTAssertThrowsError(try cipher.sealLine("x"))
@@ -222,11 +266,50 @@ final class SpotlightExclusionTests: TempDirTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Logs/Likely.noindex/sub").path))
     }
 
-    func testLeavesConflictsAndForeignLinksAlone() throws {
+    /// An earlier launch was split (a log line recreated Logs/Likely before the link was made): both are
+    /// real folders. Everything ends up in the .noindex one, nothing is overwritten, and the link is made.
+    func testMergesASplitFolder() throws {
+        let fm = FileManager.default
+        let folder = dir.appendingPathComponent("Likely")
+        let real = dir.appendingPathComponent("Likely.noindex")
+        try OwnerOnly.write("old\n", to: real.appendingPathComponent("likely.log"))
+        try OwnerOnly.write("{\"a\":1}", to: real.appendingPathComponent("tools.json"))
+        try OwnerOnly.write("x", to: real.appendingPathComponent("evals/cases.jsonl"))
+        try OwnerOnly.write("new\n", to: folder.appendingPathComponent("likely.log"))
+        try OwnerOnly.write("{\"b\":2}", to: folder.appendingPathComponent("tools.json"))
+        try OwnerOnly.write("y", to: folder.appendingPathComponent("evals/drafts.jsonl"))
+        try OwnerOnly.write("z", to: folder.appendingPathComponent("History/history.enc.jsonl"))
+        _ = try OwnerOnly.createExclusive(folder.appendingPathComponent(".metadata_never_index"))
+
+        XCTAssertEqual(try SpotlightExclusion.exclude(folder), .merged)
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: folder.path), "Likely.noindex")
+        XCTAssertEqual(try String(contentsOf: real.appendingPathComponent("likely.log"), encoding: .utf8), "old\nnew\n", "logs appended")
+        XCTAssertEqual(try String(contentsOf: real.appendingPathComponent("tools.json"), encoding: .utf8), "{\"a\":1}")
+        XCTAssertEqual(try String(contentsOf: real.appendingPathComponent("tools.json.merged-1"), encoding: .utf8), "{\"b\":2}", "kept, not overwritten")
+        XCTAssertEqual(try String(contentsOf: real.appendingPathComponent("evals/cases.jsonl"), encoding: .utf8), "x")
+        XCTAssertEqual(try String(contentsOf: real.appendingPathComponent("evals/drafts.jsonl"), encoding: .utf8), "y")
+        XCTAssertEqual(try String(contentsOf: real.appendingPathComponent("History/history.enc.jsonl"), encoding: .utf8), "z")
+        XCTAssertEqual(try SpotlightExclusion.exclude(folder), .alreadyExcluded)
+    }
+
+    /// The link's name was taken between the check and symlink(2) ("already exists"): a real folder
+    /// there is merged rather than left split.
+    func testFolderCreatedWhileLinkingIsMerged() throws {
+        let folder = dir.appendingPathComponent("Logs/Likely")
+        let real = dir.appendingPathComponent("Logs/Likely.noindex")
+        // As if exclude had just made the target and a log write then created the folder.
+        try OwnerOnly.write("early\n", to: folder.appendingPathComponent("likely.log"))
+        try OwnerOnly.createDirectory(real)
+        XCTAssertEqual(try SpotlightExclusion.exclude(folder), .merged)
+        XCTAssertEqual(try String(contentsOf: real.appendingPathComponent("likely.log"), encoding: .utf8), "early\n")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: folder.path), "Likely.noindex")
+    }
+
+    func testLeavesForeignLinksAlone() throws {
         let folder = dir.appendingPathComponent("Likely")
         try OwnerOnly.createDirectory(folder)
-        try OwnerOnly.createDirectory(dir.appendingPathComponent("Likely.noindex"))
-        guard case .skipped = try SpotlightExclusion.exclude(folder) else { return XCTFail() }
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("Likely.noindex").path, contents: Data())
+        guard case .skipped = try SpotlightExclusion.exclude(folder) else { return XCTFail("a file named like the target") }
         var isDir: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir) && isDir.boolValue)
 
@@ -271,13 +354,24 @@ final class EncryptionAvailabilityTests: XCTestCase {
         XCTAssertEqual(EncryptionAvailability.evaluate(e) { _ in .success(()) }, .on(accessGroup: "ZZZZZ99999.com.example.likely"))
     }
 
-    func testProbeFailureMeansOff() {
+    /// With the entitlement, a Keychain that doesn't answer is an error state, never "off": the build
+    /// still encrypts (keeps its access group), so nothing is written in plaintext.
+    func testProbeFailureIsAnErrorNotOff() {
         let e = SigningEntitlements(teamIdentifier: "ABCDE12345", keychainAccessGroups: ["ABCDE12345.inc.synth.likely"])
-        let state = EncryptionAvailability.evaluate(e) { _ in .failure(KeychainKeyStore.KeychainError(status: errSecMissingEntitlement)) }
-        guard case .off(.keychainUnavailable(let why)) = state else { return XCTFail("\(state)") }
-        XCTAssertTrue(why.contains("-34018"), why)
+        let state = EncryptionAvailability.evaluate(e) { _ in .failure(KeychainKeyStore.KeychainError(status: errSecInteractionNotAllowed)) }
+        guard case .keychainError(let group, let why) = state else { return XCTFail("\(state)") }
+        XCTAssertEqual(group, "ABCDE12345.inc.synth.likely")
+        XCTAssertTrue(why.contains("-25308"), why)
         XCTAssertFalse(state.isOn)
-        XCTAssertNil(state.accessGroup)
+        XCTAssertTrue(state.encrypts)
+        XCTAssertEqual(state.accessGroup, "ABCDE12345.inc.synth.likely")
+        XCTAssertTrue(state.summary.contains("isn't answering"), state.summary)
+        XCTAssertTrue(state.summary.contains("Nothing is saved unencrypted"), state.summary)
+        // Retrying with the known group: back on once the probe works.
+        XCTAssertEqual(EncryptionAvailability.evaluate(accessGroup: group) { _ in .success(()) }, .on(accessGroup: group))
+        // Only a build without the entitlement keeps plaintext.
+        XCTAssertFalse(EncryptionAvailability.off(.noProvisioningProfile).encrypts)
+        XCTAssertTrue(EncryptionAvailability.on(accessGroup: group).encrypts)
     }
 
     func testOffSummaryNamesTheProfile() {
