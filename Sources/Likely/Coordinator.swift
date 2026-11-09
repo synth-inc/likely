@@ -109,11 +109,11 @@ final class Coordinator {
         hud.model.onGetLikely = { [weak self] in self?.onGetLikely?() }
         hud.model.onSaveAsTest = { [weak self] in self?.requestSaveAsTest() }
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
-        // No click-time snapshots at all unless the user opted into screenshots.
-        snapshotter.isSuspended = { [weak self] in
-            self?.active != nil || !Settings.sendScreenshot || !CGPreflightScreenCaptureAccess()
-                || self?.isLicensed() != true
+        // No click-time snapshots at all unless the user opted into screenshots (off by default).
+        snapshotter.isOff = { [weak self] in
+            !Settings.sendScreenshot || !CGPreflightScreenCaptureAccess() || self?.isLicensed() != true
         }
+        snapshotter.isSuspended = { [weak self] in self?.active != nil }
     }
 
     /// Screenshots left from earlier runs (a crash, or the fixed `context.png` of older versions).
@@ -864,12 +864,12 @@ enum Settings {
         set { UserDefaults.standard.set(newValue, forKey: "extraSearchFolders") }
     }
     /// Send a screenshot of the window behind the picker along with a search (needs Screen Recording).
-    /// Replaces "autoSuggest" (suggest as soon as a picker opens, which used the screenshot), so anyone
-    /// who turned that off keeps screenshots off.
+    /// Off unless the user turns it on. Replaces "autoSuggest" (suggest as soon as a picker opens, which
+    /// used the screenshot): an explicit earlier choice there carries over; with neither set, it's off.
     static var sendScreenshot: Bool {
         get {
             UserDefaults.standard.object(forKey: "sendScreenshot") as? Bool
-                ?? UserDefaults.standard.object(forKey: "autoSuggest") as? Bool ?? true
+                ?? UserDefaults.standard.object(forKey: "autoSuggest") as? Bool ?? false
         }
         set { UserDefaults.standard.set(newValue, forKey: "sendScreenshot") }
     }

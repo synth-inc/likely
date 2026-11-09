@@ -143,7 +143,7 @@ struct LikelyOnboardingView: View {
                     // Optional, as in Onit's QuickEdit: explained in a "(See how)" sheet.
                     OnboardingPermissionRow(
                         icon: "camera.viewfinder", title: "Screenshots", badge: "Optional",
-                        description: "Likely can send your agent a screenshot of the app you're uploading from along with what you type, so a few words are enough. It may improve results, but we know it's a scary permission, so it's up to you.",
+                        description: "Likely can send your agent a screenshot of the app you're uploading from along with what you type, so a few words are enough. It may improve results, but we know it's a scary permission, so it's up to you. Screenshots stay off until you also turn on \"Send a screenshot with searches\" in Settings.",
                         isGranted: state.screenRecording, shouldPulse: false,
                         note: "Already allowed it?",
                         secondaryTitle: "Quit & Reopen",
@@ -653,7 +653,7 @@ struct ScreenshotExplainerSheet: View {
                 example(withAccess: true)
             }
 
-            EditableText("To see past the picker, Likely keeps the window you clicked in memory. A screenshot is only saved and sent, to the agent you chose, when you search from a file picker. You can turn it off in Settings.")
+            EditableText("Screenshots are off until you turn on \"Send a screenshot with searches\" in Settings. Then, to see past the picker, Likely keeps one screenshot of the front window in memory, refreshed when you click or press a ⌘-shortcut. It's only saved and sent, to the agent you chose, when you search from a file picker.")
                 .font(.system(size: 12))
                 .foregroundColor(Color(NSColor.secondaryLabelColor))
                 .multilineTextAlignment(.center)

@@ -3,7 +3,7 @@
 Menu bar app that notices when a macOS file picker opens and fills `~/Likely` with the files you probably need.
 When the picker opens, the folder instantly gets your most recently added files (see below). When you
 describe what you want in the bar above the picker, Likely asks your coding agent (Claude Code by default; with
-the optional Screenshots permission and Settings → Send a screenshot with searches, it also sees the window
+the optional Screenshots permission and Settings → Send a screenshot with searches (off by default), it also sees the window
 behind the picker) and clones its candidates into
 `~/Likely` in place of the recent files. A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
 The copies stay until the next picker opens (or 10 minutes after you close one), so apps that read the file later still find it.
@@ -60,7 +60,8 @@ Then commit and deploy the appcast in onit-server (the script prints the command
 - **Screenshot** (`WindowCapture`): once open, the picker is drawn into the app's window, so the app
   snapshots the front window on every click / ⌘-shortcut (in memory) and keeps the one from just before the picker.
   It's written to disk (`run/context-<run>.png`, removed when the picker closes) and sent only when you search.
-  Settings → Send a screenshot with searches turns all of it off.
+  Settings → Send a screenshot with searches (off by default) controls all of it: when it's off, no
+  snapshots are taken, not even in memory.
 - **Recent files** (`RecentFiles`, `LikelyFolder.showRecent`): a synchronous `MDQuery` sorted by
   `kMDItemDateAdded` (last hour, then day, then 30 days), falling back to the top level of Desktop /
   Downloads / Documents; runs on its own queue, then clones on the Likely folder's copy queue. Copies are

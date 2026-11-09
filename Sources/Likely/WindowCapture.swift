@@ -119,6 +119,10 @@ enum WindowCapture {
 /// picker that click opened. Off when "Send a screenshot with searches" is.
 final class PrePickerSnapshotter {
     private(set) var latest: WindowCapture.Snapshot?
+    /// Screenshots are off (the setting, no permission, no license): nothing is taken and the kept
+    /// snapshot is dropped.
+    var isOff: () -> Bool = { true }
+    /// Paused for now (a picker is open): nothing new is taken, and the kept snapshot stays.
     var isSuspended: () -> Bool = { false }
 
     private var monitor: Any?
@@ -155,6 +159,7 @@ final class PrePickerSnapshotter {
     }
 
     private func refresh() {
+        if isOff() { latest = nil; return }
         guard !isSuspended(), !inFlight, Date().timeIntervalSince(lastStart) > 0.3,
               let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
@@ -163,7 +168,7 @@ final class PrePickerSnapshotter {
         let pid = app.processIdentifier
         Task { @MainActor [weak self] in
             defer { self?.inFlight = false }
-            if let snapshot = try? await WindowCapture.snapshot(pid: pid) {
+            if let snapshot = try? await WindowCapture.snapshot(pid: pid), self?.isOff() == false {
                 self?.latest = snapshot
             }
         }

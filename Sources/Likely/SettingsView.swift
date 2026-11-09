@@ -90,8 +90,8 @@ private struct GeneralSettings: View {
     @AppStorage(LogDetailsSwitch.defaultsKey) private var logDetailsUntil: Double = 0
     @AppStorage("showRecentFiles") private var showRecentFiles = true
     @AppStorage("recentFileCount") private var recentFileCount = 3
-    /// Settings.sendScreenshot (migrated from "autoSuggest" at launch).
-    @AppStorage("sendScreenshot") private var sendScreenshot = true
+    /// Settings.sendScreenshot (migrated from "autoSuggest" at launch). Off unless the user turns it on.
+    @AppStorage("sendScreenshot") private var sendScreenshot = false
     private var screenshotsAllowed: Bool { CGPreflightScreenCaptureAccess() }
     @State private var folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
     @State private var pinned = SidebarFavorites.contains(LikelyFolder.url)
@@ -166,8 +166,8 @@ private struct GeneralSettings: View {
                 Text(!screenshotsAllowed
                      ? "Needs the optional Screenshots permission (Permissions tab). Without it, your agent gets what you type, the app name and the window title."
                      : sendScreenshot
-                     ? "Your agent also gets a screenshot of the window behind the picker. It's taken when you search, never just because a picker opened."
-                     : "Your agent gets only what you type, the app name and the window title. No screenshots are taken.")
+                     ? "Your agent also gets a screenshot of the window behind the picker. To see past the picker, Likely keeps one screenshot of the front window in memory, refreshed when you click or press a ⌘-shortcut. It's saved and sent only when you search."
+                     : "Off: your agent gets only what you type, the app name and the window title. No screenshots are taken, not even in memory.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if Updater.isEnabled { UpdatesSection() }
