@@ -41,8 +41,18 @@ final class ToolStore: ObservableObject {
         startWatching()
     }
 
-    /// Enabled, valid and approved: the tools the agent gets.
-    var activeTools: [CustomTool] { ToolApproval.usable(tools, approvals: approvals) }
+    /// Enabled, valid, approved, and every private data area it needs turned on (Settings →
+    /// Permissions): the tools the agent gets. A tool whose areas are still off isn't used, since its
+    /// commands would fail in the sandbox (and the user hasn't agreed to open them).
+    var activeTools: [CustomTool] {
+        ToolApproval.usable(tools, approvals: approvals).filter { PrivateDataAccess.unmetNeeds(of: $0).isEmpty }
+    }
+
+    /// Areas `tool` needs that are still off.
+    func unmetNeeds(of tool: CustomTool) -> [PrivateDataArea] { PrivateDataAccess.unmetNeeds(of: tool) }
+
+    /// A Private data toggle changed: views showing tools redraw.
+    func privateDataChanged() { objectWillChange.send() }
 
     /// Enabled, valid tools changed outside Likely and not yet approved.
     var pending: [ToolApproval.Pending] { ToolApproval.pending(tools, approvals: approvals) }

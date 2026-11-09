@@ -62,9 +62,12 @@ public enum AgentSandbox {
     /// Codex's equivalent of the data rules: a `permissions.<profile>.filesystem` table (TOML) where
     /// Likely's folders are "none" and the run's work folder is "read" (the more specific path wins;
     /// verified with `codex sandbox`, codex-cli 0.153).
+    /// Private data areas the user hasn't opened (`blockedAreas`, see PrivateDataArea) are "none" too.
     public static func codexFilesystem(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                                       readable: [String]) -> String {
+                                       readable: [String],
+                                       blockedAreas: [PrivateDataArea] = PrivateDataAccess.blocked()) -> String {
         let entries = dataDeniedPaths(home: home).map { "\(tomlString($0)) = \"none\"" }
+            + PrivateDataAccess.codexPaths(blocked: blockedAreas, home: home).map { "\(tomlString($0)) = \"none\"" }
             + readable.map { "\(tomlString(realPath($0))) = \"read\"" }
         return "{ " + entries.joined(separator: ", ") + " }"
     }
@@ -129,11 +132,22 @@ public enum AgentSandbox {
     /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
     /// `extraRules` (evals only, see EvalIsolation) come after the profile, so they win over it.
     /// Every profile ends with `protectionRules`, so no agent can read Likely's data (other than
-    /// `readable`, the run's work folder) or change Likely's data or settings.
+    /// `readable`, the run's work folder) or change Likely's data or settings, and none can read the
+    /// private data areas the user hasn't opened (`blockedAreas`, see PrivateDataArea).
     public static func wrap(executable: String, arguments: [String], profile: String, extraRules: String = "",
-                            readable: [String] = []) -> (URL, [String]) {
+                            readable: [String] = [], blockedAreas: [PrivateDataArea] = PrivateDataAccess.blocked()) -> (URL, [String]) {
         (URL(fileURLWithPath: "/usr/bin/sandbox-exec"),
-         ["-p", profile + (extraRules.isEmpty ? "" : "\n" + extraRules) + "\n" + protectionRules(readable: readable), executable] + arguments)
+         ["-p", compose(profile: profile, extraRules: extraRules, readable: readable, blockedAreas: blockedAreas), executable] + arguments)
+    }
+
+    /// The full profile `wrap` passes to sandbox-exec.
+    public static func compose(profile: String, extraRules: String = "", readable: [String] = [],
+                               blockedAreas: [PrivateDataArea],
+                               home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
+        let privateData = PrivateDataAccess.sandboxRules(blocked: blockedAreas, home: home)
+        return profile + (extraRules.isEmpty ? "" : "\n" + extraRules)
+            + (privateData.isEmpty ? "" : "\n" + privateData)
+            + "\n" + protectionRules(home: home, readable: readable)
     }
 
     // MARK: Likely's own files

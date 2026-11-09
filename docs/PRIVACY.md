@@ -69,6 +69,10 @@ Spotlight still skips folders whose name ends in `.noindex`, so on launch Likely
 `<name>.noindex` and leaves a link with the old name; every path above keeps working. (The marker file is
 written as well, for macOS versions that honor it.)
 
+**Other apps' private data.** The agents are also kept out of macOS's protected stores (Photos libraries,
+Mail, Messages, Contacts & Calendars, Safari, other apps' containers) unless you turn one on in Settings →
+Permissions → Private data, or allow it for a tool that needs it. See [TOOLS.md](TOOLS.md#private-data-needs).
+
 ### Why tools.json and cases.jsonl stay plaintext
 
 You edit both, often with your own coding agent ("add an rclip tool to Likely", "fix this test case").

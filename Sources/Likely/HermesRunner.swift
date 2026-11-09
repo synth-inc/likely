@@ -354,7 +354,25 @@ extension HermesRunner {
             return "Your Hermes gateway is serving the \(profileName) profile; restart it with: hermes gateway restart"
         }
         if options.isEval, let problem = prepareEvalGateway(executable: executable, rules: gatewayRules(options, workDir: workDir)) { return problem }
+        if !options.isEval { restartGatewayIfAreasChanged() }
         return nil
+    }
+
+    /// The private data areas the app's gateway was started with (its sandbox is fixed at start).
+    private static var appGatewayAreas: [PrivateDataArea]?
+
+    /// A Private data toggle changed since the gateway started (or it's left from an earlier session,
+    /// rules unknown): stop it, so the next client starts one with the current rules.
+    private static func restartGatewayIfAreasChanged() {
+        evalGatewayLock.lock()
+        defer { evalGatewayLock.unlock() }
+        let areas = PrivateDataAccess.blocked()
+        defer { appGatewayAreas = areas }
+        guard appGatewayAreas != areas, let pid = gatewayPID(profileDir), pid > 1, kill(pid, 0) == 0, isSandboxed(pid) else { return }
+        Log.write("hermes", "restarting gateway pid=\(pid) for the current private data settings")
+        kill(pid, SIGTERM)
+        let deadline = Date().addingTimeInterval(10)
+        while kill(pid, 0) == 0, Date() < deadline { usleep(100_000) }
     }
 
     // MARK: Evals
@@ -363,6 +381,7 @@ extension HermesRunner {
     /// case has its own, holding its screenshot), so a gateway is only reused by the same case.
     static func gatewayRules(_ options: AgentLaunchOptions, workDir: URL) -> String {
         options.extraSandboxRules + "\n; readable " + workDir.path
+            + "\n; blocked " + PrivateDataAccess.blocked().map(\.rawValue).joined(separator: ",")
     }
 
     /// The gateway inherits the sandbox of the client that started it, extra eval rules included, and

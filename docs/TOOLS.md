@@ -20,8 +20,9 @@ the file is missing, there are no extra tools; if it isn't valid JSON, Likely lo
 coding agent, a script, an editor) and the commands or instructions of an enabled tool change, that tool
 isn't used until you click **Approve** in Settings → Tools. The tab shows which tools changed and a short
 diff of their commands; the menu bar icon gets a dot and its menu shows "Approve Tool Changes…" (plus a
-notification, if Likely is allowed to post them). Likely stores a SHA-256 of each approved tool's commands
-and instructions in its preferences, which no agent can write.
+notification, if Likely is allowed to post them). Likely stores a SHA-256 of each approved tool's commands,
+instructions and `needs` in its preferences, which no agent can write. So a tool planted or edited outside
+Likely can't quietly ask for your Mail: a changed `needs` waits for approval like a new command.
 
 ## Schema
 
@@ -49,6 +50,36 @@ and instructions in its preferences, which no agent can write.
 | `commands` | [string] | Command prefixes the agent may run (a single string is accepted too). |
 | `instructions` | string | Added to the agent's prompt: when to use the tool, the exact command line, what it prints. |
 | `setup` | string | Optional. How it was installed and how to maintain it. Not sent to the agent. |
+| `needs` | [string] | Optional. Private data areas the tool reads (see below): `photos`, `mail`, `messages`, `contacts`, `safari`, `app-data`. |
+
+## Private data (`needs`)
+
+Search agents are kept out of macOS's protected stores by default (Settings → Permissions → Private
+data, all off): Photos libraries (`~/Library/Photos`, `~/Pictures/Photos Library.photoslibrary` and any
+`*.photoslibrary`), Mail, Messages, Contacts & Calendars (and Reminders), Safari, and other apps'
+containers (`~/Library/Containers`, `~/Library/Group Containers`). Otherwise a search for a tax form that
+walks through ~ ends with macOS asking whether "Likely" may access your Photos.
+
+A tool that reads one of them declares it:
+
+```json
+{
+  "id": "osxphotos",
+  "name": "Photos library (osxphotos)",
+  "enabled": true,
+  "commands": ["osxphotos query --json"],
+  "instructions": "When the user wants a photo from their Photos library, run `osxphotos query --json --description \"<words>\"` …",
+  "setup": "pipx install osxphotos (or brew install osxphotos).",
+  "needs": ["photos"]
+}
+```
+
+- Turning on a tool whose areas are off asks "Photos library (osxphotos) needs access to your Photos.
+  Allow?". Allow turns the area on and triggers macOS's own permission alert in one step.
+- Until every area it needs is on, the tool isn't used: its row says which area is off, with an
+  **Allow…** button.
+- An unknown id in `needs` makes the tool invalid (it's disabled, and the row says why).
+- `needs` is part of what you approve (see Approval).
 
 A bare array of tools (without the `{"tools": …}` wrapper) is also accepted. Entries that can't be read
 (not an object, no name) are skipped and listed in the Tools tab; the rest still load.

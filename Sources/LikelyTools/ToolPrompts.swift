@@ -33,6 +33,26 @@ public enum ToolPrompts {
         """,
         setup: "brew install rclip (or pipx install rclip). Build the index, and re-run it to pick up new images: cd ~ && rclip -t 1 --exclude-dir Library --exclude-dir node_modules --exclude-dir .git photo")
 
+    /// A tool that reads a private data area: searching the Photos library with osxphotos.
+    public static let photosLibraryExample = CustomTool(
+        id: "osxphotos",
+        name: "Photos library (osxphotos)",
+        enabled: true,
+        commands: ["osxphotos query --json"],
+        instructions: """
+        When the user wants a photo from their Photos library, run `osxphotos query --json --description "<words>"` \
+        (or `--keyword`, `--person`, `--from-date 2026-01-01`). It prints JSON records; use each record's "path".
+        """,
+        setup: "pipx install osxphotos (or brew install osxphotos).",
+        needs: ["photos"])
+
+    /// One entry as it appears in tools.json.
+    public static func json(_ tool: CustomTool) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: (try? encoder.encode(tool)) ?? Data(), as: UTF8.self)
+    }
+
     public static var exampleJSON: String {
         let data = (try? ToolsFile(tools: [example]).encoded()) ?? Data()
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -78,6 +98,11 @@ public enum ToolPrompts {
         - instructions: added to the search agent's prompt. Say when to use the tool, the exact command line to run \
         and what the output looks like, in a few sentences.
         - setup (optional): how the tool was installed and how to maintain it (e.g. re-indexing). Not shown to the search agent.
+        - needs (optional): private data the tool reads, which search agents are otherwise kept out of: \
+        \(PrivateDataArea.allCases.map { "\"\($0.rawValue)\" (\($0.title))" }.joined(separator: ", ")). For example, \
+        a Photos library tool:
+        \(json(photosLibraryExample))
+        Likely asks me before the tool can read there (and macOS asks too); until I allow it, the tool stays off.
 
         Rules (Likely checks them and disables a tool that breaks one):
         - The search agent runs these commands unattended, without asking me, so allow only read-only commands: \
@@ -89,8 +114,8 @@ public enum ToolPrompts {
         - None of these as the first word: \(ToolValidator.blockedFirstWords.joined(separator: ", "))
         - No empty commands.
 
-        Likely notices changes to tools.json, but a new or changed tool isn't used until I approve it: tell me to \
-        click Approve in Likely → Settings → Tools. That tab also shows each tool's status and why one was disabled.
+        Likely notices changes to tools.json, but a new or changed tool (including its needs) isn't used until I \
+        approve it: tell me to click Approve in Likely → Settings → Tools. That tab also shows each tool's status and why one was disabled.
 
         Before adding the tool:
         1. Install it (Homebrew or pipx preferred) and do any one-time setup it needs, such as building an index.
