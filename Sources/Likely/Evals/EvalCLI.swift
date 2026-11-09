@@ -1,3 +1,5 @@
+// Dev builds only (./build.sh, LIKELY_DEV): release builds have no eval mode at all.
+#if LIKELY_DEV
 import AppKit
 import CryptoKit
 import LikelyEvalKit
@@ -30,9 +32,11 @@ enum EvalCLI {
       --no-isolate        don't sandbox cases that set searchFolders (see EVALS.md)
       --dry-run           print the prompts that would be sent; run nothing
       --verbose           also print Likely's log lines
-      --allow-eval        required in release builds (dev builds: not needed); or LIKELY_ALLOW_EVAL=1
 
-    Exit status: 0 when the run completed (whatever the pass rate), 2 on a usage/setup error.
+    Eval mode exists only in dev builds (./build.sh).
+
+    Exit status: 0 when the run completed (whatever the pass rate), 1 if results couldn't be written,
+    2 on a usage/setup error, 130/143 when stopped by SIGINT/SIGTERM (partial results are written).
     """
 
     static func isRequested(_ arguments: [String]) -> Bool { arguments.contains("--eval") }
@@ -50,9 +54,6 @@ enum EvalCLI {
         if options.help {
             print(usage)
             exit(0)
-        }
-        guard isAllowed(options) else {
-            fail("Eval mode is a developer tool. Dev builds (./build.sh) allow it; release builds need --allow-eval or LIKELY_ALLOW_EVAL=1.")
         }
         Log.echoToStderr = options.verbose
         Log.write("eval", "eval mode: \(arguments.dropFirst().joined(separator: " "))")
@@ -89,6 +90,16 @@ enum EvalCLI {
         }
         let model = options.model ?? AgentModels.selected(for: agentID)
 
+        let wantsIsolation = options.isolate && cases.contains { $0.evalCase.searchFolders != nil }
+        if wantsIsolation, kind.id == "codex" {
+            printErr("warning: Codex runs inside its own sandbox, which can't be nested, so these cases are NOT isolated: "
+                     + "Codex can read any of your files (only the prompt asks it to stay in the test folder). "
+                     + "The run is recorded as not isolated.")
+        }
+        if wantsIsolation, kind.id == "hermes", options.jobs > 1 {
+            fail("Hermes serves every case through one gateway, which runs inside the sandbox of the case that started it. Isolated Hermes runs need --jobs 1 (or --no-isolate).")
+        }
+
         if options.dryRun {
             for item in cases {
                 let run = EvalCaseRun(item: item, agent: EvalCaseRun.Agent(kind: kind, path: "-", model: model), template: template,
@@ -110,18 +121,24 @@ enum EvalCLI {
         let session = EvalSession(suite: suite, cases: cases, agent: agent, template: template, options: options)
         // Held for the life of the process (a local could be released early by the optimizer).
         current = session
+        handleSignals(session)
         DispatchQueue.main.async { session.start() }
         // Agent runners deliver output on the main queue; keep the run loop alive until the session exits.
         RunLoop.main.add(Port(), forMode: .default)
         while true { RunLoop.main.run(mode: .default, before: .distantFuture) }
     }
 
-    private static func isAllowed(_ options: Options) -> Bool {
-        #if LIKELY_DEV
-        return true
-        #else
-        return options.allowEval || ProcessInfo.processInfo.environment["LIKELY_ALLOW_EVAL"] == "1"
-        #endif
+    private static var signalSources: [DispatchSourceSignal] = []
+
+    /// Ctrl-C, or Stop in Settings (SIGTERM): stop the agents and write what finished.
+    private static func handleSignals(_ session: EvalSession) {
+        for sig in [SIGINT, SIGTERM] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler { session.interrupt(signal: sig) }
+            source.resume()
+            signalSources.append(source)
+        }
     }
 
     private static func locate(_ agentID: String) -> String? {
@@ -159,7 +176,6 @@ enum EvalCLI {
         var isolate = true
         var dryRun = false
         var verbose = false
-        var allowEval = false
         var help = false
 
         struct ParseError: Error, CustomStringConvertible { let description: String }
@@ -199,7 +215,6 @@ enum EvalCLI {
                 case "--isolate": o.isolate = true
                 case "--dry-run": o.dryRun = true
                 case "--verbose": o.verbose = true
-                case "--allow-eval": o.allowEval = true
                 case "--help", "-h": o.help = true
                 default:
                     // Xcode/launchd may add -NSDocumentRevisionsDebugMode etc.; ignore those.
@@ -297,10 +312,13 @@ final class EvalSession {
     let options: EvalCLI.Options
     let runDir: URL
     private let startedAt = Date()
-    private var queue: [(SuiteCase, Int)] = []
+    /// (index in `cases`, case, attempt)
+    private var queue: [(Int, SuiteCase, Int)] = []
     private var running: [EvalCaseRun] = []
-    private var results: [EvalCaseResult] = []
+    /// With the case's index, so the report keeps suite order (ids needn't be unique).
+    private var results: [(index: Int, result: EvalCaseResult)] = []
     private var total = 0
+    private var interruptedBy: Int32?
 
     init(suite: Suite, cases: [SuiteCase], agent: EvalCaseRun.Agent, template: String, options: EvalCLI.Options) {
         self.suite = suite
@@ -316,7 +334,7 @@ final class EvalSession {
             let model = agent.model.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: " ", with: "_")
             runDir = EvalStorage.runsURL.appendingPathComponent("\(f.string(from: startedAt))-\(agent.kind.id)-\(model)", isDirectory: true)
         }
-        for c in cases { for attempt in 1...options.repeatCount { queue.append((c, attempt)) } }
+        for (i, c) in cases.enumerated() { for attempt in 1...options.repeatCount { queue.append((i, c, attempt)) } }
         total = queue.count
     }
 
@@ -333,9 +351,9 @@ final class EvalSession {
     }
 
     private func fill() {
-        while running.count < options.jobs, !queue.isEmpty {
-            let (item, attempt) = queue.removeFirst()
-            let folder = item.evalCase.id.replacingOccurrences(of: "/", with: "_") + (options.repeatCount > 1 ? "-\(attempt)" : "")
+        while interruptedBy == nil, running.count < options.jobs, !queue.isEmpty {
+            let (index, item, attempt) = queue.removeFirst()
+            let folder = EvalStorage.caseFolderName(index: index, id: item.evalCase.id, attempt: attempt, repeated: options.repeatCount > 1)
             let workDir = runDir.appendingPathComponent("cases/\(folder)", isDirectory: true)
             try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
             let run = EvalCaseRun(item: item, agent: agent, template: template, options: options, attempt: attempt, workDir: workDir)
@@ -343,18 +361,33 @@ final class EvalSession {
             run.start { [weak self, weak run] result in
                 guard let self else { return }
                 self.running.removeAll { $0 === run }
-                self.finished(result, relativeTo: workDir)
+                self.finished(result, index: index, relativeTo: workDir)
             }
         }
-        if running.isEmpty && queue.isEmpty { finish() }
+        if running.isEmpty && (queue.isEmpty || interruptedBy != nil) { finish() }
     }
 
-    private func finished(_ raw: EvalCaseResult, relativeTo workDir: URL) {
+    /// SIGINT/SIGTERM: cancel the running cases (their agents are stopped), skip the rest, and write
+    /// partial results. A second signal, or 10 s without the cases settling, exits at once.
+    func interrupt(signal: Int32) {
+        if interruptedBy != nil { exit(128 + signal) }
+        interruptedBy = signal
+        EvalCLI.printErr("\nStopping: cancelling \(running.count) running case\(running.count == 1 ? "" : "s"), skipping \(queue.count); writing partial results…")
+        queue.removeAll()
+        if running.isEmpty { return finish() }
+        for run in running { run.cancel() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            HermesRunner.stopEvalGateway()
+            exit(128 + signal)
+        }
+    }
+
+    private func finished(_ raw: EvalCaseResult, index: Int, relativeTo workDir: URL) {
         var result = raw
         let rel = workDir.path.replacingOccurrences(of: runDir.path + "/", with: "")
         if result.transcriptPath != nil { result.transcriptPath = rel + "/transcript.jsonl" }
         if result.promptPath != nil { result.promptPath = rel + "/prompt.txt" }
-        results.append(result)
+        results.append((index, result))
         let mark = !result.score.scorable ? "?" : result.pass ? "PASS" : "FAIL"
         var line = "[\(results.count)/\(total)] \(mark) \(result.id)"
         if options.repeatCount > 1 { line += " #\(result.attempt)" }
@@ -368,17 +401,20 @@ final class EvalSession {
 
     private func finish() {
         let iso = ISO8601DateFormatter()
-        // Keep case order stable (parallel runs finish out of order).
-        let order = Dictionary(uniqueKeysWithValues: cases.enumerated().map { ($1.evalCase.id, $0) })
-        results.sort { (order[$0.id] ?? 0, $0.attempt) < (order[$1.id] ?? 0, $1.attempt) }
+        HermesRunner.stopEvalGateway()
+        // Keep suite order stable (parallel runs finish out of order). By index: ids can repeat.
+        let ordered = results.sorted { ($0.index, $0.result.attempt) < ($1.index, $1.result.attempt) }.map(\.result)
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
         let hash = SHA256.hash(data: Data(template.utf8)).map { String(format: "%02x", $0) }.joined().prefix(8)
         let run = EvalRun(suite: suite.name, suiteFiles: suite.files.map(\.path), agent: agent.kind.id, model: agent.model,
                           startedAt: iso.string(from: startedAt), finishedAt: iso.string(from: Date()), k: options.k,
                           timeoutSeconds: options.timeout, tags: options.tags.sorted(),
-                          isolated: options.isolate && cases.contains { $0.evalCase.searchFolders != nil },
-                          promptHash: String(hash), likelyVersion: version, cases: results)
+                          isolated: options.isolate && agent.canIsolate && cases.contains { $0.evalCase.searchFolders != nil },
+                          promptHash: String(hash), likelyVersion: version, cases: ordered,
+                          caseFilter: options.caseIDs.isEmpty ? nil : options.caseIDs.sorted(),
+                          interrupted: interruptedBy == nil ? nil : true)
         let previous = EvalRun.previous(of: run, in: runDir.deletingLastPathComponent(), excluding: runDir)
+        var status: Int32 = interruptedBy.map { 128 + $0 } ?? 0
         do {
             try run.write(to: runDir.appendingPathComponent("results.json"))
             try template.write(to: runDir.appendingPathComponent("prompt-template.txt"), atomically: true, encoding: .utf8)
@@ -391,9 +427,10 @@ final class EvalSession {
             print("Report: \(report.path)")
         } catch {
             EvalCLI.printErr("Couldn't write results: \(error)")
+            status = 1
         }
         fflush(stdout)
-        exit(0)
+        exit(status)
     }
 }
 
@@ -409,6 +446,8 @@ final class EvalCaseRun {
         let model: String
         /// Everything except Claude Code gets the screenshot attached (as in Coordinator).
         var takesImages: Bool { kind.id != "claude" }
+        /// Codex runs under its own sandbox, which can't be nested: no isolation rules for it.
+        var canIsolate: Bool { kind.id != "codex" }
     }
 
     let item: SuiteCase
@@ -435,7 +474,10 @@ final class EvalCaseRun {
         evalCase.context?.screenshot.map { URL(fileURLWithPath: EvalPath.resolve($0, relativeTo: item.base)) }
     }
     private var searchFolders: [String]? { evalCase.searchFolders?.map { EvalPath.resolve($0, relativeTo: item.base) } }
-    private var isolated: Bool { options.isolate && searchFolders != nil }
+    /// The case asks for isolation: the prompt points at its folders only.
+    private var wantsIsolation: Bool { options.isolate && searchFolders != nil }
+    /// … and the sandbox enforces it (not for Codex).
+    private var isolated: Bool { wantsIsolation && agent.canIsolate }
 
     init(item: SuiteCase, agent: Agent, template: String, options: EvalCLI.Options, attempt: Int, workDir: URL) {
         self.item = item
@@ -454,40 +496,54 @@ final class EvalCaseRun {
                                                                buttonTitle: context?.button, screenshot: screenshot),
                                          imageAttached: agent.takesImages, template: template)
         var prompt = base
-        if isolated, let folders = searchFolders {
+        if wantsIsolation, let folders = searchFolders {
+            // The default template invites searching the rest of ~; a test run must not.
+            prompt = prompt.replacingOccurrences(of: " Elsewhere in ~ is fine too.", with: "")
+                .replacingOccurrences(of: "Elsewhere in ~ is fine too.", with: "")
             prompt += "\n\n(Test run: the user's files for this task are only in "
                 + folders.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: ", ")
-                + ". Search there only. Spotlight/mdfind is unavailable here; use ls, find and grep.)"
+                + ". Search there only." + (isolated ? " Spotlight/mdfind is unavailable here; use ls, find and grep." : "") + ")"
         }
         lastPrompt = prompt
         let typed = evalCase.query.first.map { $0.isEmpty ? [] : [$0] } ?? []
         return PromptBuilder.withTyped(prompt, typed: typed, autoMode: screenshot != nil)
     }
 
-    /// Search folders and sandbox rules are process-wide; set them for this case before each launch.
+    /// Search folders are process-wide (read synchronously while building the prompt and launching);
+    /// set them for this case before each launch.
     private func applyEnvironment() {
         SearchFolder.evalOverride = searchFolders
-        guard isolated, let folders = searchFolders else {
-            AgentSandbox.extraRules = ""
-            return
+    }
+
+    /// This case's launch settings, handed to its own runner (never shared between cases).
+    private var launchOptions: AgentLaunchOptions {
+        var o = AgentLaunchOptions()
+        o.isEval = true
+        o.appendTranscript = true
+        if isolated, let folders = searchFolders {
+            // All of ~ and /Volumes denied; the case's folders, its work folder and the agents' own
+            // config/state allowed back (see EvalIsolation).
+            o.extraSandboxRules = EvalIsolation.rules(home: FileManager.default.homeDirectoryForCurrentUser.path,
+                                                      allowed: folders + [workDir.path], agentExecutable: agent.path,
+                                                      extraDenied: Settings.extraSearchFolders)
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let denied = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Library/Mobile Documents",
-                      "Library/CloudStorage", "Library/Mail", "Library/Messages", "Library/Containers", "Library/Group Containers"]
-            .map { "\(home)/\($0)" } + Settings.extraSearchFolders
-        let allowed = folders + [workDir.path]
-        AgentSandbox.extraRules = AgentSandbox.isolationRules(denied: denied.map(AgentSandbox.realPath),
-                                                              allowed: allowed.map(AgentSandbox.realPath))
+        return o
+    }
+
+    /// Stops the agent and records the case as cancelled (SIGINT/SIGTERM).
+    func cancel() {
+        finish(status: "cancelled", error: "stopped before it finished")
     }
 
     func start(completion: @escaping (EvalCaseResult) -> Void) {
         self.completion = completion
         let prompt = firstPrompt()
         try? prompt.write(to: workDir.appendingPathComponent("prompt.txt"), atomically: true, encoding: .utf8)
-        if isolated, agent.kind.id == "codex" {
-            Log.write("eval", "\(evalCase.id): Codex runs under its own sandbox, so isolation is prompt-only")
+        if wantsIsolation, !agent.canIsolate {
+            Log.write("eval", "\(evalCase.id): Codex runs under its own sandbox, so this case is not isolated (prompt only)")
         }
         let runner = AgentModels.makeRunner(for: agent.kind.id)
+        runner.launchOptions = launchOptions
         self.runner = runner
         runner.onFile = { [weak self] path in self?.file(path) }
         runner.onTurnFinished = { [weak self] outcome in self?.turnFinished(outcome) }
@@ -600,3 +656,4 @@ final class EvalCaseRun {
         return cost
     }
 }
+#endif

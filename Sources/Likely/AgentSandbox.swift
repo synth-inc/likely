@@ -91,24 +91,9 @@ enum AgentSandbox {
         return String(cString: resolved)
     }
 
-    /// Evals only (`--eval` with isolation): rules appended to every profile, e.g. to keep a fixture
-    /// run out of the user's own files. Empty in the app.
-    static var extraRules = ""
-
     /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
-    static func wrap(executable: String, arguments: [String], profile: String) -> (URL, [String]) {
+    /// `extraRules` (evals only, see EvalIsolation) are appended last, so they win over the profile.
+    static func wrap(executable: String, arguments: [String], profile: String, extraRules: String = "") -> (URL, [String]) {
         (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile + (extraRules.isEmpty ? "" : "\n" + extraRules), executable] + arguments)
-    }
-
-    /// Rules for an isolated eval run: no reading the user's document folders (except `allowed`),
-    /// and no Spotlight (its index would list personal files by name).
-    static func isolationRules(denied: [String], allowed: [String]) -> String {
-        let deny = denied.map { "(subpath \(quoted($0)))" }.joined(separator: " ")
-        let allow = allowed.map { "(subpath \(quoted($0)))" }.joined(separator: " ")
-        return """
-        (deny file-read* \(deny))
-        \(allowed.isEmpty ? "" : "(allow file-read* \(allow))")
-        (deny mach-lookup (global-name "com.apple.metadata.mds") (global-name "com.apple.metadata.mds.legacy"))
-        """
     }
 }
