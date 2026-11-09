@@ -8,6 +8,8 @@ word-level changes. Every changed element must have a reason in review_reasons.p
     python3 scripts/build-review.py [--base origin/site-privacy-terms]
 """
 import argparse
+import sys as _sys
+_sys.dont_write_bytecode = True
 import difflib
 import html
 import json
