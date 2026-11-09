@@ -1,4 +1,5 @@
 import Foundation
+import LikelyTools
 
 /// A coding agent run headless for one picker. Implementations parse the agent's streamed output into
 /// `STATUS:` progress, `FILE:` candidates and turn results, and accept follow-up feedback.
@@ -32,6 +33,9 @@ struct AgentLaunchOptions {
     var appendTranscript = false
     /// Launched by `--eval`: Hermes then never reuses a gateway it didn't start with these rules.
     var isEval = false
+    /// The user's tools this launch may use (allowlist and sandbox profile). nil: the ones the app
+    /// uses (ToolStore's enabled, approved tools). Evals set it per case; [] means none.
+    var tools: [CustomTool]?
 }
 
 /// The raw JSON stream each runner saves to <workDir>/last-run.jsonl.
@@ -98,6 +102,10 @@ extension String {
 /// Unlike the other runners it isn't wrapped in AgentSandbox: Codex runs every command under its own
 /// Seatbelt policy (deny-by-default, no Apple Events, WindowServer or AX services), and macOS doesn't
 /// allow a sandboxed process to apply another sandbox, so an outer one would break Codex's.
+///
+/// Codex has no per-command allowlist: in `exec` mode it runs whatever command the model asks for,
+/// inside that read-only sandbox (no writes, no network). So the user's tools (ToolStore) need no
+/// permission here; they reach Codex through the prompt only.
 final class CodexRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -186,9 +194,7 @@ final class CodexRunner: AgentRunner {
         process.currentDirectoryURL = workDir
         process.arguments = arguments
         var env = ProcessInfo.processInfo.environment
-        let dir = (executable as NSString).deletingLastPathComponent   // npm installs need `node` beside them
-        env["PATH"] = [dir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
-            .joined(separator: ":")
+        env["PATH"] = AgentPath.value(agentExecutable: executable, inherited: env["PATH"])
         process.environment = env
 
         let stdout = Pipe()

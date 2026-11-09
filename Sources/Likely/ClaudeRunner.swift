@@ -1,4 +1,5 @@
 import Foundation
+import LikelyTools
 
 /// Runs `claude -p` headless with read-only tools and parses its stream-json output into
 /// status updates and candidate file paths. Claude never writes anything; the app does the copying.
@@ -24,6 +25,11 @@ final class ClaudeRunner: AgentRunner {
         "Bash(ls:*)", "Bash(mdfind:*)", "Bash(mdls:*)", "Bash(head:*)", "Bash(stat:*)", "Bash(grep:*)",
     ]
 
+    /// The built-in tools plus `Bash(<prefix>:*)` for each command of the user's tools (see ToolStore).
+    static func allowedTools(extra commands: [String]) -> [String] {
+        ToolPermissions.merged(allowedTools, ToolPermissions.claude(commands))
+    }
+
     private var process: Process?
     private var buffer = Data()
     private var input: FileHandle?
@@ -41,6 +47,7 @@ final class ClaudeRunner: AgentRunner {
     func start(claudePath: String, model: String, prompt: String, workDir: URL) {
         cancel()
         buffer = Data()
+        let userCommands = launchOptions.toolCommands
 
         let process = Process()
         process.currentDirectoryURL = workDir
@@ -57,19 +64,21 @@ final class ClaudeRunner: AgentRunner {
             "--add-dir", FileManager.default.homeDirectoryForCurrentUser.path,
         ] + SearchFolder.outsideHome.flatMap { ["--add-dir", $0] } + [
             "--allowedTools",
-        ] + Self.allowedTools
+        ] + Self.allowedTools(extra: userCommands)
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
+        // With user tools enabled, also no writes outside Claude's own state: the validator can't prove
+        // a tool read-only, the sandbox can.
+        let profile = userCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.claudeProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
-                                                             profile: AgentSandbox.privacyOnlyProfile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
         process.executableURL = launcher
         process.arguments = launchArguments
 
         var env = ProcessInfo.processInfo.environment
         // Use the claude.ai login rather than whatever API key a parent shell exported.
         env.removeValue(forKey: "ANTHROPIC_API_KEY")
-        let claudeDir = (claudePath as NSString).deletingLastPathComponent
-        env["PATH"] = [claudeDir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
-            .joined(separator: ":")
+        if !userCommands.isEmpty { env["DISABLE_AUTOUPDATER"] = "1" }   // its install folder isn't writable then
+        env["PATH"] = AgentPath.value(agentExecutable: claudePath, inherited: env["PATH"])
         process.environment = env
 
         let stdin = Pipe()

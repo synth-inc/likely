@@ -37,6 +37,9 @@ public struct EvalCaseResult: Codable {
     public var totalSeconds: Double
     public var costUSD: Double?
     public var toolCalls: Int?
+    /// Whether the agent had the user's tools (tools.json) for this case; see EvalRun.tools.
+    /// Absent in older results.
+    public var usedTools: Bool?
     /// Relative to the run folder.
     public var transcriptPath: String?
     public var promptPath: String?
@@ -44,7 +47,7 @@ public struct EvalCaseResult: Codable {
     public init(id: String, query: [String], tags: [String], expectKind: Expectation.Kind, expected: [String], attempt: Int,
                 status: String, error: String?, suggestions: [String], turnSuggestions: [[String]], refused: [EvalRefusal],
                 score: EvalScore, turns: Int, firstFileSeconds: Double?, totalSeconds: Double, costUSD: Double?,
-                toolCalls: Int?, transcriptPath: String?, promptPath: String?) {
+                toolCalls: Int?, transcriptPath: String?, promptPath: String?, usedTools: Bool? = nil) {
         self.id = id
         self.query = query
         self.tags = tags
@@ -62,6 +65,7 @@ public struct EvalCaseResult: Codable {
         self.totalSeconds = totalSeconds
         self.costUSD = costUSD
         self.toolCalls = toolCalls
+        self.usedTools = usedTools
         self.transcriptPath = transcriptPath
         self.promptPath = promptPath
     }
@@ -131,6 +135,9 @@ public struct EvalRun: Codable {
     public var interrupted: Bool?
     /// SHA-256 prefix of the prompt template, to tell prompt versions apart.
     public var promptHash: String
+    /// The user's tools the agent got in this run (none if no case used them); cases with
+    /// `usedTools: false` ran without them. Absent in older results.
+    public var tools: EvalToolSet?
     public var likelyVersion: String
     public var cases: [EvalCaseResult]
     public var summary: EvalSummary
@@ -138,8 +145,9 @@ public struct EvalRun: Codable {
 
     public init(suite: String, suiteFiles: [String], agent: String, model: String, startedAt: String, finishedAt: String,
                 k: Int, timeoutSeconds: Double, tags: [String], isolated: Bool, promptHash: String, likelyVersion: String,
-                cases: [EvalCaseResult], caseFilter: [String]? = nil, interrupted: Bool? = nil) {
+                cases: [EvalCaseResult], caseFilter: [String]? = nil, interrupted: Bool? = nil, tools: EvalToolSet? = nil) {
         self.suite = suite
+        self.tools = tools
         self.caseFilter = caseFilter
         self.interrupted = interrupted
         self.suiteFiles = suiteFiles
@@ -183,6 +191,15 @@ public struct EvalRun: Codable {
             out.append((other.caseFilter ?? []).isEmpty ? "no case filter" : "cases \(other.caseFilter!.joined(separator: ","))")
         }
         return out
+    }
+
+    /// How the user's tools changed since `previous` ("+rclip", "-notes", "~photos" for edited), so a
+    /// comparison says when the tools, not the prompt or model, may explain a difference. Deliberately
+    /// not a `mismatches` entry: comparing against the run before a tool was added is the point.
+    /// Empty when either run didn't record its tools.
+    public func toolChanges(since previous: EvalRun) -> [String] {
+        guard let tools, let before = previous.tools else { return [] }
+        return tools.changes(since: before)
     }
 
     /// The newest earlier run of the same suite in `runsDirectory`, with its folder. Prefers one

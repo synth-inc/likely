@@ -1,4 +1,5 @@
 import Foundation
+import LikelyTools
 
 /// Runs Google's Gemini CLI: `gemini -p … -o stream-json`, authenticated through Vertex AI with the
 /// user's gcloud application-default credentials (project/location passed as env vars, nothing written
@@ -20,13 +21,15 @@ final class GeminiRunner: AgentRunner {
     var onExit: ((AgentOutcome) -> Void)?
     var launchOptions = AgentLaunchOptions()
 
+    /// Plus the commands of the user's tools (see ToolStore), as `run_shell_command(<prefix>)`.
     static let allowedCommands = ["mdfind", "mdls", "ls", "grep", "head", "stat"]
 
     /// Only read_file, list_directory and the shell are registered: glob/search_file_content and the
     /// codebase_investigator subagent crawl the whole home workspace and can stall for minutes;
     /// memory, web, skills and hooks aren't wanted. Write tools aren't available headless anyway.
+    static let coreTools = ["read_file", "list_directory", "run_shell_command"]
     private static let settings = Data("""
-        {"tools": {"core": ["read_file", "list_directory", "run_shell_command"], "enableHooks": false, "sandbox": false},
+        {"tools": {"core": [\(coreTools.map { "\"\($0)\"" }.joined(separator: ", "))], "enableHooks": false, "sandbox": false},
          "hooksConfig": {"enabled": false}, "skills": {"enabled": false},
          "agents": {"overrides": {"codebase_investigator": {"enabled": false}, "cli_help": {"enabled": false},
                                   "generalist": {"enabled": false}}}}
@@ -86,7 +89,7 @@ final class GeminiRunner: AgentRunner {
             "--approval-mode", "default",
             "--include-directories", directories.joined(separator: ","),
             // `=` form: the flag takes an array and would otherwise swallow the following arguments.
-            "--allowed-tools=" + Self.allowedCommands.map { "run_shell_command(\($0))" }.joined(separator: ","),
+            ToolPermissions.geminiAllowedToolsArgument(builtIn: Self.allowedCommands, extra: launchOptions.toolCommands),
         ]
     }
 
@@ -110,16 +113,16 @@ final class GeminiRunner: AgentRunner {
 
         let process = Process()
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
+        // With user tools enabled, also no writes outside ~/.gemini and temp folders.
+        let profile = launchOptions.toolCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.geminiProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
-                                                             profile: AgentSandbox.privacyOnlyProfile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
         process.standardInput = FileHandle.nullDevice   // -p appends stdin; don't let it wait on ours
         var env = ProcessInfo.processInfo.environment
-        let dir = (executable as NSString).deletingLastPathComponent   // npm installs need `node` beside them
-        env["PATH"] = [dir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
-            .joined(separator: ":")
+        env["PATH"] = AgentPath.value(agentExecutable: executable, inherited: env["PATH"])
         // Vertex AI with gcloud application-default credentials, rather than any API key in the environment.
         env.removeValue(forKey: "GEMINI_API_KEY")
         env.removeValue(forKey: "GOOGLE_API_KEY")

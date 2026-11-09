@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import LikelyEvalKit
+import LikelyTools
 
 /// Detects pickers opening and closing. On open, the Likely folder gets the most recently added files;
 /// when the user types in the bar, it runs the (screenshot +) description → agent → ~/Likely search.
@@ -33,7 +34,6 @@ final class Coordinator {
     enum State { case idle, searching, done }
 
     var onStateChange: ((State, String) -> Void)?
-    var paused = false
     /// Whether Likely may search. Without a license, pickers still get the bar, but in its unpaid state:
     /// no agent, no copies, no jumping to the Likely folder.
     var isLicensed: () -> Bool = { true }
@@ -99,7 +99,7 @@ final class Coordinator {
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         // No click-time snapshots at all unless the user opted into screenshots.
         snapshotter.isSuspended = { [weak self] in
-            self?.paused == true || self?.active != nil || !Settings.sendScreenshot || !CGPreflightScreenCaptureAccess()
+            self?.active != nil || !Settings.sendScreenshot || !CGPreflightScreenCaptureAccess()
                 || self?.isLicensed() != true
         }
     }
@@ -182,7 +182,7 @@ final class Coordinator {
             pickerClosed(reason: "AXUIElementDestroyed")
             return
         }
-        guard Self.windowEvents.contains(notification), !paused else { return }
+        guard Self.windowEvents.contains(notification) else { return }
 
         var window = element
         if AX.string(element, kAXRoleAttribute) == kAXApplicationRole {
@@ -220,7 +220,7 @@ final class Coordinator {
     }
 
     private func handlePanelServiceWindow(_ window: WindowInfo) {
-        guard !paused, window.bounds.width > 300, window.bounds.height > 200,
+        guard window.bounds.width > 300, window.bounds.height > 200,
               let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
         if let active, active.pid == app.processIdentifier {
@@ -537,6 +537,7 @@ final class Coordinator {
             return
         }
         prepareRunner(for: agent)
+        ToolStore.shared.reloadIfChanged()   // in case tools.json was edited and the watcher hasn't fired yet
         // Turned off while the capture ran: no screenshot.
         let capture = Settings.sendScreenshot ? capture : nil
         let base = Self.prompt(picker: picker, capture: capture, imageAttached: agent.takesImages)
@@ -654,6 +655,9 @@ enum PromptBuilder {
         /// Filled into `{{userName}}`. The app passes NSFullUserName() (if allowed in Settings); evals
         /// pass the case's persona or nil, never the real user's name.
         var userName: String?
+        /// The user's tools for the prompt's tools section. nil: the app's (ToolStore); evals pass
+        /// the case's set ([] for none).
+        var tools: [CustomTool]? = nil
     }
 
     /// The first message: the prompt template filled in for this picker.
@@ -668,7 +672,11 @@ enum PromptBuilder {
         }
             ?? "No screenshot is available; work from the app name, window title and what the user says."
         let name = c.userName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return PromptTemplate.render(template, values: [
+        // The tools section goes where {{tools}} is, or at the end of templates that don't have it.
+        let tools = c.tools.map(ToolPrompts.section(for:)) ?? ToolStore.shared.promptSection
+        var filled = template
+        if !tools.isEmpty && !filled.contains("{{tools}}") { filled += "\n\n{{tools}}" }
+        return PromptTemplate.render(filled, values: [
             "context": context,
             "userName": name.isEmpty ? "" : "The user is \(name).",
             "screenshot": screenshot,
@@ -676,8 +684,10 @@ enum PromptBuilder {
             "windowTitle": c.windowTitle ?? "",
             "likelyFolder": LikelyFolder.url.path,
             "searchFolders": SearchFolder.promptDescription,
+            "tools": tools,
         ])
         .replacingOccurrences(of: " \n", with: "\n")  // "{{context}} {{userName}}" without a name
+        .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// What the user typed before the agent started: their description (searches only start once
@@ -708,6 +718,7 @@ enum PromptTemplate {
         ("windowTitle", "Title of the window behind the picker"),
         ("likelyFolder", "Path of your Likely folder"),
         ("searchFolders", "Folders to search (built-in, cloud, and ones you added)"),
+        ("tools", "Your extra tools (Tools tab); added at the end if the template doesn't place it"),
     ]
 
     static let `default` = """

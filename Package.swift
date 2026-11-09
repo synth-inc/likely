@@ -19,12 +19,17 @@ let package = Package(
         // Eval case format, scoring and reports (Foundation only, unit-tested). See docs/EVALS.md.
         .target(name: "LikelyEvalKit", path: "Sources/LikelyEvalKit"),
         .testTarget(name: "LikelyEvalKitTests", dependencies: ["LikelyEvalKit"], path: "Tests/LikelyEvalKitTests"),
+        // User-added agent tools (tools.json): model, validation, permission mapping, prompts. Foundation
+        // only, unit-tested. See docs/TOOLS.md. Uses LikelyEvalKit for the search history's location
+        // (AgentSandbox denies it to agents).
+        .target(name: "LikelyTools", dependencies: ["LikelyEvalKit"], path: "Sources/LikelyTools"),
+        .testTarget(name: "LikelyToolsTests", dependencies: ["LikelyTools"], path: "Tests/LikelyToolsTests"),
         // Foundation-only rules for picking recent files (batches, files apps write in the background),
         // split out so they can be unit tested.
         .target(name: "RecentFilesCore", path: "Sources/RecentFilesCore"),
         .executableTarget(
             name: "Likely",
-            dependencies: ["OnboardingKit", "LikelyEvalKit", "RecentFilesCore",
+            dependencies: ["OnboardingKit", "LikelyEvalKit", "LikelyTools", "RecentFilesCore",
                            .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Likely",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),

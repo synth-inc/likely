@@ -1,4 +1,5 @@
 import AppKit
+import LikelyTools
 
 /// Manages ~/Likely: APFS clones of candidate files, plus a " …status…" file whose name is the
 /// current progress message (the leading space sorts it above everything else in Finder and file

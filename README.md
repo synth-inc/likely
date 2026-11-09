@@ -64,6 +64,10 @@ Then commit and deploy the appcast in onit-server (the script prints the command
 - **Claude** (`ClaudeRunner`): `claude -p --output-format stream-json` with read-only tools
   (Read/Glob/Grep, `mdfind`, `ls`, …). Claude prints `STATUS:` / `FILE:` lines; the app does the copying
   (APFS clones), so Claude never writes anything.
+- **Tools** (`ToolStore`, `Sources/LikelyTools`): extra command-line tools you give the agent (e.g. image
+  search with rclip), kept in `~/Library/Application Support/Likely/tools.json` and edited in Settings →
+  Tools or by a coding agent. Their commands are added to each agent's allowlist and their instructions to
+  the prompt. See [docs/TOOLS.md](docs/TOOLS.md).
 
 ## Evals
 
