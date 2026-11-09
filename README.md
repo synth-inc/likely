@@ -38,18 +38,20 @@ terminal's Accessibility / Screen Recording grants and logs to stderr.
 
 ## Releases & updates
 
-Likely updates itself with [Sparkle](https://sparkle-project.org). The feed is
-`public/likely/appcast.xml` on onit-server (`SUFeedURL` in Info.plist); updates are signed with an
-EdDSA key kept in the release machine's login Keychain (account `likely`).
+Likely updates itself with [Sparkle](https://sparkle-project.org). The feed is `docs/appcast.xml` in
+this repo, served by GitHub Pages at https://synth-inc.github.io/likely/appcast.xml (`SUFeedURL` in
+Info.plist), so updates don't depend on the license server. Updates are signed with an EdDSA key kept in
+the release machine's login Keychain (account `likely`).
 
 ```sh
 scripts/bump-version.sh patch && git commit -am "Bump version"
 # LIKELY_PROFILE must point at the Developer ID provisioning profile (docs/BUILDING.md)
 scripts/release.sh --dry-run   # build, Developer ID sign, Likely.dmg, notarize, appcast → build/release
-scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Likely.dmg, write the appcast
+scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Likely.dmg, and commit + push docs/appcast.xml
 ```
 
-Then commit and deploy the appcast in onit-server (the script prints the commands).
+Likely 0.1.0 still checks the old feed on onit-server. Until those installs have updated, run the release with
+`LEGACY_FEED_DIR=<onit-server checkout>` so the appcast is written there too, then deploy onit-server.
 
 ## How it works
 
