@@ -18,7 +18,8 @@
 #   - LIKELY_PROFILE: the "Likely Developer ID" provisioning profile (Developer ID, App ID
 #     TYC9PKBMB6.inc.synth.likely, made with that certificate). It's embedded in the app and gives it
 #     the keychain access group that turns encryption on (docs/BUILDING.md). Checked before building:
-#     App ID = bundle id, same team as SIGN_ID, macOS, not expired (warns within 60 days).
+#     App ID = bundle id, same team as SIGN_ID, macOS, at least a year left (fails otherwise unless
+#     LIKELY_ALLOW_SHORT_PROFILE=1; warns with less than two years left).
 #   - Notarization credentials, same as the other Synth apps' build_and_notarize.sh:
 #     NOTARY_KEY_PATH / NOTARY_KEY_ID / NOTARY_ISSUER_ID (App Store Connect API key), or
 #     NOTARY_PROFILE=<notarytool keychain profile>.

@@ -8,7 +8,11 @@ docs/BUILDING.md.
                           [--identity ID] [--team T] [--developer-id]
 
 Checks, failing with a message on any problem:
-  - the profile is for macOS (Platform OSX) and not expired (warns when it expires within 60 days);
+  - the profile is for macOS (Platform OSX) and not expired;
+  - with --developer-id (releases), it has at least a year left: a shipped app whose embedded profile
+    has expired may stop launching, and users keep old versions for a long time. Set
+    LIKELY_ALLOW_SHORT_PROFILE=1 to build anyway. It warns when less than two years are left (and for
+    development profiles, which Apple issues for a year, within 60 days);
   - its App ID is exactly <team>.<bundle id> (an explicit App ID);
   - its team matches --team (LIKELY_TEAM_ID) when given, and the signing identity's team;
   - the signing identity's certificate is one the profile lists (otherwise macOS refuses to launch
@@ -29,6 +33,7 @@ import base64
 import datetime
 import fnmatch
 import hashlib
+import os
 import plistlib
 import re
 import subprocess
@@ -37,7 +42,10 @@ import sys
 APP_ID_KEY = "com.apple.application-identifier"
 TEAM_KEY = "com.apple.developer.team-identifier"
 GROUPS_KEY = "keychain-access-groups"
-WARN_DAYS = 60
+WARN_DAYS = 60                 # development profiles
+RELEASE_MIN_DAYS = 365         # Developer ID profiles: fail with less left...
+RELEASE_WARN_DAYS = 2 * 365    # ...and warn with less than this left
+ALLOW_SHORT_ENV = "LIKELY_ALLOW_SHORT_PROFILE"
 
 
 def fail(message):
@@ -47,6 +55,23 @@ def fail(message):
 
 def warn(message):
     print(f"provisioning: warning: {message}", file=sys.stderr)
+
+
+def check_expiry(name, expires, now, release, allow_short):
+    """Fails or warns about how long the profile has left (see the module docstring)."""
+    left = expires - now
+    days = left.days
+    renew = "renew it (docs/BUILDING.md, \"Renewing the profile\")"
+    if release and left < datetime.timedelta(days=RELEASE_MIN_DAYS):
+        message = (f"profile '{name}' expires on {expires:%Y-%m-%d}, in {days} days. A release embeds it, and the app "
+                   f"may stop launching once it expires: {renew}.")
+        if not allow_short:
+            fail(message + f" To build anyway, set {ALLOW_SHORT_ENV}=1.")
+        warn(message + f" Building anyway ({ALLOW_SHORT_ENV}=1).")
+    elif release and left < datetime.timedelta(days=RELEASE_WARN_DAYS):
+        warn(f"profile '{name}' expires on {expires:%Y-%m-%d}, in {days} days: {renew} within the next year")
+    elif not release and left < datetime.timedelta(days=WARN_DAYS):
+        warn(f"profile '{name}' expires on {expires:%Y-%m-%d}, in {days} days: {renew} soon")
 
 
 def run(args):
@@ -142,8 +167,7 @@ def main():
     now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)  # plistlib dates are naive UTC
     if expires <= now:
         fail(f"profile '{name}' expired on {expires:%Y-%m-%d}")
-    if expires - now < datetime.timedelta(days=WARN_DAYS):
-        warn(f"profile '{name}' expires on {expires:%Y-%m-%d}, in {(expires - now).days} days: renew it soon")
+    check_expiry(name, expires, now, release=a.developer_id, allow_short=os.environ.get(ALLOW_SHORT_ENV) == "1")
 
     teams = profile.get("TeamIdentifier", [])
     if len(teams) != 1:

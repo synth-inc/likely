@@ -64,7 +64,7 @@ You need a paid Apple Developer Program membership (profiles can't be made with 
 
    `build.sh` checks the profile before building the app:
    - it's for macOS;
-   - it isn't expired (and warns within 60 days of expiry);
+   - it isn't expired (and warns within 60 days of expiry; see Renewing the profile for releases);
    - its App ID is exactly `<team>.<LIKELY_BUNDLE_ID>`;
    - its team is `LIKELY_TEAM_ID` and the signing identity's team;
    - it includes the signing identity's certificate;
@@ -134,5 +134,29 @@ generated entitlements, the hardened runtime and a secure timestamp. After signi
 
 A release can't be built without a profile.
 
-Renew the profile before it expires. `build.sh` warns 60 days ahead. An app whose embedded profile
-has expired may stop launching. Download the renewed profile to the same path.
+### Renewing the profile
+
+A release embeds the profile, and an app whose embedded profile has expired may stop launching.
+People keep running old versions for a long time, so a release
+must have plenty left: with `--developer-id` (`scripts/release.sh`), `scripts/provisioning.py`
+- fails when the profile has less than 365 days left (set `LIKELY_ALLOW_SHORT_PROFILE=1` to build
+  anyway, for example for an urgent fix while the renewal is in progress);
+- warns when it has less than two years left.
+
+Developer ID profiles are issued for up to 18 years, so this rarely comes up. The current "Likely
+Developer ID" profile expires in 2044. To renew:
+1. In [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/profiles/list),
+   open the profile and click **Edit**, then **Save** (or make a new Developer ID profile for the App ID
+   `TYC9PKBMB6.inc.synth.likely`). Choose the Developer ID Application certificate releases are signed
+   with. If that certificate itself expires sooner, renew it first: a profile can't outlive it.
+2. Download it to the same path as `LIKELY_PROFILE` (or point `LIKELY_PROFILE` at the new file).
+3. Run `scripts/provisioning.py --profile "$LIKELY_PROFILE" --bundle-id inc.synth.likely --template Likely.entitlements --out /tmp/e.plist --developer-id`
+   and check the expiry date it prints.
+4. Ship a release with it. Versions already out keep the profile they embedded, so renew well before
+   the old one expires, to give people time to update.
+
+Same team and access group: the renewed profile keeps the keychain access group, so the new build
+reads the same key and nothing needs migrating.
+
+Development profiles are issued for a year. `build.sh` warns 60 days before one expires; renew it
+the same way (step 1 for an App Development profile, step 2).

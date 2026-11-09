@@ -13,7 +13,8 @@ import LikelyStorage
 public enum EvalScreenshots {
     public static let encryptedExtension = "enc"
 
-    public static func isEncrypted(_ path: String) -> Bool { path.hasSuffix(".png.enc") }
+    /// `.png.enc` in any case (`X.PNG.enc` is what `encryptExisting` makes of `X.PNG`).
+    public static func isEncrypted(_ path: String) -> Bool { path.lowercased().hasSuffix(".png.enc") }
 
     /// Encrypts `png` to `<folder>/<id>.png.enc`, or without a cipher writes `<folder>/<id>.png`
     /// (replacing any file there). Returns its path.
@@ -58,6 +59,29 @@ public enum EvalScreenshots {
         let url = workDir.appendingPathComponent("screenshot-\(UUID().uuidString.prefix(8)).png")
         try OwnerOnly.write(try load(path, cipher: cipher), to: url)
         return (url, true)
+    }
+
+    /// The temporary copies `materialize` names `screenshot-<8 hex>.png`.
+    static func isTemporaryCopy(_ name: String) -> Bool {
+        name.range(of: #"^screenshot-[0-9A-Fa-f]{8}\.png$"#, options: .regularExpression) != nil
+    }
+
+    /// Deletes decrypted copies (`materialize`) that an eval run left behind when it was killed before
+    /// its case ended: every `screenshot-<id>.png` under `runs` older than `minimumAge` (so a run
+    /// in progress in another process keeps its own). Returns how many were deleted.
+    @discardableResult
+    public static func removeTemporaryCopies(under runs: URL = EvalStorage.runsURL, minimumAge: TimeInterval = 3600,
+                                             now: Date = Date()) -> Int {
+        let fm = FileManager.default
+        guard let walker = fm.enumerator(at: runs, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .isSymbolicLinkKey]) else { return 0 }
+        var removed = 0
+        for case let url as URL in walker where isTemporaryCopy(url.lastPathComponent) {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  now.timeIntervalSince(values.contentModificationDate ?? now) >= minimumAge else { continue }
+            if (try? fm.removeItem(at: url)) != nil { removed += 1 }
+        }
+        return removed
     }
 
     /// Encrypts every plain `.png` in `folder` to `.png.enc` and deletes the original, then points

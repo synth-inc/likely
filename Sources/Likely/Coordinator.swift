@@ -89,6 +89,8 @@ final class Coordinator {
             .appendingPathComponent("Library/Application Support/Likely", isDirectory: true)
         try? OwnerOnly.createDirectory(supportDirectory.appendingPathComponent("run"))
         Self.removeScreenshots(in: supportDirectory.appendingPathComponent("run"))
+        // Older versions kept the agent's transcript in the work folder, which agents may read.
+        try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent("run/last-run.jsonl"))
         Settings.migrate()
         folder = LikelyFolder(supportDirectory: supportDirectory)
 

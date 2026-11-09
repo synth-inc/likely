@@ -22,7 +22,11 @@ public enum SpotlightExclusion {
         case alreadyExcluded
         /// The folder was moved and linked (or created that way).
         case excluded
-        /// Left alone, with the reason (a link somewhere else, or both names taken).
+        /// Both names were real folders (an earlier launch was split: something recreated the folder
+        /// before the link was made): the folder's contents were merged into the `.noindex` one,
+        /// and it was replaced by the link.
+        case merged
+        /// Left alone, with the reason (a link somewhere else, or not a folder).
         case skipped(String)
     }
 
@@ -33,6 +37,10 @@ public enum SpotlightExclusion {
 
     @discardableResult
     public static func exclude(_ folder: URL) throws -> Outcome {
+        try exclude(folder, attempts: 3)
+    }
+
+    private static func exclude(_ folder: URL, attempts: Int) throws -> Outcome {
         let fm = FileManager.default
         let path = folder.standardizedFileURL.path
         let target = realFolder(for: folder)
@@ -50,7 +58,15 @@ public enum SpotlightExclusion {
                 writeMarker(in: target)
                 return .alreadyExcluded
             case S_IFDIR:
-                if fm.fileExists(atPath: target.path) { return .skipped("both \(path) and \(target.path) exist") }
+                var targetStat = stat()
+                if lstat(target.path, &targetStat) == 0 {
+                    guard targetStat.st_mode & S_IFMT == S_IFDIR else { return .skipped("\(target.path) isn't a folder") }
+                    // Split by an earlier launch: put everything in the .noindex folder, then link.
+                    try merge(path, into: target.path)
+                    guard symlink(linkText, path) == 0 else { throw OwnerOnly.Failure("Merged \(path) into \(target.path) but can't link", path) }
+                    writeMarker(in: target)
+                    return .merged
+                }
                 guard rename(path, target.path) == 0 else { throw OwnerOnly.Failure("Can't rename", path) }
                 if symlink(linkText, path) != 0 {
                     let code = errno
@@ -65,10 +81,49 @@ public enum SpotlightExclusion {
             }
         } else {
             try OwnerOnly.createDirectory(target)
-            if symlink(linkText, path) != 0 && errno != EEXIST { throw OwnerOnly.Failure("Can't link", path) }
+            if symlink(linkText, path) != 0 {
+                let code = errno
+                // Something made `path` meanwhile: our link (another Likely), or a real folder (a write
+                // that raced this one). Look again: a link is checked, a folder merged.
+                guard code == EEXIST, attempts > 1 else { throw OwnerOnly.Failure("Can't link", path, errno: code) }
+                return try exclude(folder, attempts: attempts - 1)
+            }
         }
         writeMarker(in: target)
         return .excluded
+    }
+
+    /// Moves everything in `source` into the existing folder `destination`, then removes `source`.
+    /// Nothing is overwritten: a folder in both is merged the same way, a `.log` file in both is
+    /// appended to the other, and any other name in both is kept as `<name>.merged-<n>`.
+    static func merge(_ source: String, into destination: String) throws {
+        for name in try FileManager.default.contentsOfDirectory(atPath: source) {
+            let from = source + "/" + name
+            let to = destination + "/" + name
+            var a = stat(), b = stat()
+            guard lstat(from, &a) == 0 else { continue }
+            if lstat(to, &b) != 0 {
+                guard rename(from, to) == 0 else { throw OwnerOnly.Failure("Can't move", from) }
+                continue
+            }
+            let fromType = a.st_mode & S_IFMT, toType = b.st_mode & S_IFMT
+            if fromType == S_IFDIR, toType == S_IFDIR {
+                try merge(from, into: to)
+            } else if name == marker {
+                unlink(from)
+            } else if fromType == S_IFREG, toType == S_IFREG, name.hasSuffix(".log") {
+                let handle = try OwnerOnly.openForWriting(URL(fileURLWithPath: to), truncate: false)
+                handle.write(try Data(contentsOf: URL(fileURLWithPath: from)))
+                try handle.close()
+                unlink(from)
+            } else {
+                var n = 1
+                var other = to + ".merged-\(n)"
+                while lstat(other, &b) == 0 { n += 1; other = to + ".merged-\(n)" }
+                guard rename(from, other) == 0 else { throw OwnerOnly.Failure("Can't move", from) }
+            }
+        }
+        guard rmdir(source) == 0 else { throw OwnerOnly.Failure("Can't remove", source) }
     }
 
     private static func writeMarker(in folder: URL) {
