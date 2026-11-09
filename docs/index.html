@@ -53,7 +53,7 @@
       <img class="hero-logo" src="assets/logo-512.png" width="88" height="88" alt="">
       <p class="badge"><span class="badge-dot" aria-hidden="true"></span><span data-copy-id="hero.badge">Open source, for macOS</span></p>
       <h1 data-copy-id="hero.title">Why doesn’t macOS <i class="title-accent">already</i> do this?</h1>
-      <p class="subtitle" data-copy-id="hero.subtitle">Every file picker opens with the files you just added. For anything else, describe it, and <b>Likely</b> finds it.</p>
+      <p class="subtitle" data-copy-id="hero.subtitle">Describe what you’re looking for in plain English. <b>Likely</b> finds it and puts it in your file picker.</b> finds it.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg">
           <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -103,10 +103,10 @@
     <section id="how" class="wrap section" aria-labelledby="how-h">
       <h2 id="how-h" data-copy-id="how.headline">Anytime you open a file picker...</h2>
       <ul class="panel bullets">
-        <li data-copy-id="how.b1">Your newest files are already there, in a Likely folder pinned to the sidebar. Most of the time, that’s the one.</li>
-        <li data-copy-id="how.b2">Looking for something else? Type it in plain English: “my 2025 W-2”, “the logo with the transparent background”.</li>
-        <li data-copy-id="how.b3">Your coding agent searches your Mac and puts the best matches in the Likely folder.</li>
-        <li data-copy-id="how.b4">Not it? Say so, and it keeps looking.</li>
+        <li data-copy-id="how.b1">Recent files are automatically added to your Likely folder.</li>
+        <li data-copy-id="how.b2">Looking for something else? Type it in plain English and Likely kicks off an agent to find it.</li>
+        <li data-copy-id="how.b3">The agent searches your Mac and puts the best matches in the Likely folder.</li>
+        <li data-copy-id="how.b4">Not quite right? Give another instruction, and it keeps looking.</li>
       </ul>
       <div class="agents">
         <span class="agents-label" data-copy-id="how.agents.label">Runs on the agent you already have:</span>
@@ -119,41 +119,7 @@
     </section>
 
 
-    <!-- 5. PRIVATE BY DEFAULT (short; details in "What leaves your Mac" below and privacy.html) -->
-    <section id="private" class="wrap section" aria-labelledby="private-h">
-      <h2 id="private-h" data-copy-id="private.title">Private by default</h2>
-      <ul class="panel bullets">
-        <li data-copy-id="private.b1">Your files never leave your Mac. Likely copies them locally.</li>
-        <li data-copy-id="private.b2">Searches go to the AI you choose, under your own account. Likely doesn’t run an AI.</li>
-        <li data-copy-id="private.b3">No analytics, no tracking.</li>
-        <!-- ACCURACY: "stay out of Photos, Mail and Messages unless you allow it" ships with PR #11
-             (private-data-access), which isn't merged yet. On main, agents are read-only but not kept
-             out of those stores. Merge #11 before publishing this line, or cut the second half. -->
-        <li data-copy-id="private.b4">Agents can search and read, never change anything, and stay out of Photos, Mail and Messages unless you allow it.</li>
-      </ul>
-      <p class="section-more" data-copy-id="private.more"><a href="#leaves">See exactly what leaves your Mac →</a></p>
-    </section>
 
-    <!-- 6. MAKE LIKELY SMARTER (tools + evals; details in docs/TOOLS.md) -->
-    <section id="smarter" class="wrap section" aria-labelledby="smarter-h">
-      <h2 id="smarter-h" data-copy-id="smarter.title">Make Likely smarter</h2>
-      <p class="section-sub" data-copy-id="smarter.subtitle">Teach your agent a new trick in three steps. Say, finding photos by what’s in them.</p>
-      <ol class="steps">
-        <li class="panel step">
-          <h3 data-copy-id="smarter.s1.title">Add a tool</h3>
-          <p data-copy-id="smarter.s1.body">Copy the setup prompt from Settings → Tools and paste it into your coding agent with what you want: “index my photos so ‘my headshot’ works.” It installs a photo search tool (rclip) and adds it to Likely.</p>
-        </li>
-        <li class="panel step">
-          <h3 data-copy-id="smarter.s2.title">Tell the agent when to use it</h3>
-          <p data-copy-id="smarter.s2.body">Each tool comes with a few lines of instructions, like “when the user wants a photo of something, run rclip.” Likely adds them to every search.</p>
-        </li>
-        <li class="panel step">
-          <h3 data-copy-id="smarter.s3.title">Test it with evals</h3>
-          <p data-copy-id="smarter.s3.body">Turn real searches like “my headshot” into test cases and run them on your own files, to see whether the tool finds the right photo. Evals are in builds from source.</p>
-        </li>
-      </ol>
-      <p class="section-more" data-copy-id="smarter.more">How tools work: <a href="https://github.com/synth-inc/likely/blob/main/docs/TOOLS.md">docs/TOOLS.md</a> on GitHub.</p>
-    </section>
 
     <!-- 7. WHAT LEAVES YOUR MAC (plain-language version of the table in privacy.html) -->
     <section id="leaves" class="wrap section" aria-labelledby="leaves-h">
@@ -253,14 +219,26 @@
           <p data-copy-id="faq.files.a">No. Your agent can search and read. It can’t edit, move or delete anything. Likely never modifies your files.</p>
         </details>
         <details>
+          <summary><span data-copy-id="faq.agent.q">Can the agent snoop around my Mac?</span></summary>
+          <p data-copy-id="faq.agent.a">It can search and read files to find what you asked for, nothing more. It can’t change or delete anything, and it can’t read Likely’s own data, like your search history or logs. It’s kept out of Photos, Mail, Messages, Contacts, Notes and Safari unless you allow them in Settings → Permissions.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.provider.q">What goes to the AI provider?</span></summary>
+          <p data-copy-id="faq.provider.a">Your request, the app and window you’re in, a screenshot if screenshots are on, and the contents of any file the agent opens to check it. It goes to the agent you chose, under your account with that provider. Likely never sends your searches or files to us.</p>
+        </details>
+        <details>
           <summary><span data-copy-id="faq.screenshots.q">Are screenshots required? Where do they go?</span></summary>
           <!-- DEFAULT: "Send a screenshot with searches" is on by default once Screen Recording is granted
              (SettingsView.swift, sendScreenshot = true). If the default changes to off, update this answer. -->
           <p data-copy-id="faq.screenshots.a">No. A screenshot of the window behind the picker is sent only when you search, and only to the agent you chose. You can turn them off in Settings, and they’re never sent if you don’t grant Screen Recording.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.send.q">Does Likely send my files anywhere?</span></summary>
-          <p data-copy-id="faq.send.a">No. If your agent opens a file to check it, its contents go to your AI provider as part of that search, the same as if you’d asked it in Terminal.</p>
+          <summary><span data-copy-id="faq.history.q">Does Likely keep a record of my searches?</span></summary>
+          <p data-copy-id="faq.history.a">Only in Search history, which you can turn off or clear in Settings. In our downloadable app it’s encrypted with a key kept in your Mac’s Keychain, so other apps can’t read it. If you build Likely yourself, encryption stays off until you set up signing.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.log.q">What’s in Likely’s log?</span></summary>
+          <p data-copy-id="faq.log.a">Only what’s needed to fix bugs: which app opened a picker, how long a search took, whether it worked. Your searches, window titles and file names show up as short codes, not text. To send us a detailed log with a bug report, turn on “Log details for troubleshooting”. It switches itself off after 24 hours.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.folder.q">What’s in the Likely folder?</span></summary>
