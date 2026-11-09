@@ -232,37 +232,66 @@ public enum EvalCaseFile {
         return String(decoding: (try? encoder.encode(c)) ?? Data(), as: UTF8.self)
     }
 
-    /// Rewrites the whole file (atomically). Comment lines at the top are kept.
-    public static func save(_ cases: [EvalCase], to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        var header: [String] = []
-        if let existing = try? String(contentsOf: url, encoding: .utf8) {
-            for line in existing.components(separatedBy: .newlines) {
-                let t = line.trimmingCharacters(in: .whitespaces)
-                if t.hasPrefix("#") || t.hasPrefix("//") { header.append(line) } else if !t.isEmpty { break }
-            }
-        }
-        let body = (header + cases.map(encodeLine)).joined(separator: "\n") + "\n"
-        try body.write(to: url, atomically: true, encoding: .utf8)
+    public struct WriteError: Error, CustomStringConvertible {
+        public let description: String
+        public init(_ description: String) { self.description = description }
     }
 
-    public static func append(_ c: EvalCase, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let line = Data((encodeLine(c) + "\n").utf8)
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            handle.seekToEndOfFile()
-            // Make sure the previous line ended with a newline.
-            if handle.offsetInFile > 0 {
-                let reader = try FileHandle(forReadingFrom: url)
-                defer { try? reader.close() }
-                try reader.seek(toOffset: handle.offsetInFile - 1)
-                if reader.readData(ofLength: 1) != Data([0x0A]) { handle.write(Data([0x0A])) }
+    /// Replaces the first case whose id is `id` with `replacement` (or removes it when `replacement`
+    /// is nil), keeping every other line exactly as it was: comments anywhere in the file, blank
+    /// lines, and lines this version can't parse. If no line has that id, `replacement` is appended.
+    /// Writes atomically.
+    public static func replace(id: String, with replacement: EvalCase?, in url: URL) throws {
+        let fm = FileManager.default
+        let text = fm.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : ""
+        let updated = replacing(id: id, with: replacement, in: text)
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try updated.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// The text of a cases file with one case replaced or removed (see `replace(id:with:in:)`).
+    public static func replacing(id: String, with replacement: EvalCase?, in text: String) -> String {
+        var lines = text.components(separatedBy: "\n")
+        // A trailing newline leaves an empty last element; keep it out of the edit and add it back.
+        if lines.last == "" { lines.removeLast() }
+        var done = false
+        var out: [String] = []
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if !done, !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix("//"),
+               let c = try? JSONDecoder().decode(EvalCase.self, from: Data(line.utf8)), c.id == id {
+                done = true
+                if let replacement { out.append(encodeLine(replacement)) }
+                continue
             }
-            handle.write(line)
-        } else {
-            try line.write(to: url)
+            out.append(raw)
         }
+        if !done, let replacement { out.append(encodeLine(replacement)) }
+        return out.isEmpty ? "" : out.joined(separator: "\n") + "\n"
+    }
+
+    /// Adds one case at the end of the file. The file is created only if it doesn't exist; an
+    /// existing file is never truncated.
+    public static func append(_ c: EvalCase, to url: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: url.path) {
+            // Fails (rather than truncating) if another writer created it in the meantime.
+            let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+            if fd >= 0 { close(fd) } else if errno != EEXIST { throw WriteError("Can't create \(url.path): \(String(cString: strerror(errno)))") }
+        }
+        let handle = try FileHandle(forUpdating: url)
+        defer { try? handle.close() }
+        let end = try handle.seekToEnd()
+        var data = Data()
+        // Make sure the previous line ended with a newline.
+        if end > 0 {
+            try handle.seek(toOffset: end - 1)
+            if try handle.read(upToCount: 1) != Data([0x0A]) { data.append(0x0A) }
+            try handle.seekToEnd()
+        }
+        data.append(Data((encodeLine(c) + "\n").utf8))
+        try handle.write(contentsOf: data)
     }
 
     /// An id not used by `existing`: `base`, `base-2`, `base-3`, …
@@ -289,6 +318,12 @@ public enum EvalStorage {
     public static var runsURL: URL { root.appendingPathComponent("runs", isDirectory: true) }
     /// Screenshots referenced by captured cases (copied here so they outlive the debug view).
     public static var screenshotsURL: URL { root.appendingPathComponent("screenshots", isDirectory: true) }
+    /// A case's folder in a run: `<index>-<slug>` (1-based index in the suite, so cases that share an
+    /// id don't overwrite each other's files), plus `-<attempt>` when cases are repeated.
+    public static func caseFolderName(index: Int, id: String, attempt: Int, repeated: Bool) -> String {
+        String(format: "%03d-", index + 1) + EvalCase.slug(id, fallback: "case") + (repeated ? "-\(attempt)" : "")
+    }
+
     /// Path of the newest run's report, written after every run.
     public static var lastRunURL: URL { root.appendingPathComponent("last-run.txt") }
 

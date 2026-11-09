@@ -19,7 +19,7 @@ public struct EvalCaseResult: Codable {
     public var expected: [String]
     /// 1-based, when a case is run several times (--repeat).
     public var attempt: Int
-    /// "ok", "timeout", "error", or "unscored" (no expected files).
+    /// "ok", "timeout", "error", "cancelled" (run stopped), or "unscored" (no expected files).
     public var status: String
     public var error: String?
     /// The final turn's suggestions (what the user would be looking at), best first. Scored.
@@ -28,7 +28,9 @@ public struct EvalCaseResult: Codable {
     public var turnSuggestions: [[String]]
     public var refused: [EvalRefusal]
     public var score: EvalScore
-    public var pass: Bool { score.pass }
+    /// Only a case that ran to the end ("ok") can pass: a timeout or error with good partial
+    /// suggestions still fails.
+    public var pass: Bool { status == "ok" && score.pass }
     public var turns: Int
     /// Seconds from start to the first FILE line Likely would have shown.
     public var firstFileSeconds: Double?
@@ -91,7 +93,7 @@ public struct EvalSummary: Codable {
         let tools = results.compactMap(\.toolCalls)
         return EvalSummary(
             cases: results.count, scored: scored.count, passed: scored.filter(\.pass).count,
-            passRate: rate(\.pass), hitAt1: rate(\.hitAt1), hitAt3: rate(\.hitAt3), hitAtK: rate(\.hitAtK),
+            passRate: Double(scored.filter(\.pass).count) / n, hitAt1: rate(\.hitAt1), hitAt3: rate(\.hitAt3), hitAtK: rate(\.hitAtK),
             meanRecall: scored.map(\.score.recall).reduce(0, +) / n,
             meanPrecision: precisions.isEmpty ? nil : precisions.reduce(0, +) / Double(precisions.count),
             medianFirstFileSeconds: median(results.compactMap(\.firstFileSeconds)),
@@ -123,6 +125,10 @@ public struct EvalRun: Codable {
     public var timeoutSeconds: Double
     public var tags: [String]
     public var isolated: Bool
+    /// `--case` filter (sorted), if any. Absent in older results.
+    public var caseFilter: [String]?
+    /// True when the run was stopped (SIGTERM/SIGINT) before every case finished.
+    public var interrupted: Bool?
     /// SHA-256 prefix of the prompt template, to tell prompt versions apart.
     public var promptHash: String
     public var likelyVersion: String
@@ -132,8 +138,10 @@ public struct EvalRun: Codable {
 
     public init(suite: String, suiteFiles: [String], agent: String, model: String, startedAt: String, finishedAt: String,
                 k: Int, timeoutSeconds: Double, tags: [String], isolated: Bool, promptHash: String, likelyVersion: String,
-                cases: [EvalCaseResult]) {
+                cases: [EvalCaseResult], caseFilter: [String]? = nil, interrupted: Bool? = nil) {
         self.suite = suite
+        self.caseFilter = caseFilter
+        self.interrupted = interrupted
         self.suiteFiles = suiteFiles
         self.agent = agent
         self.model = model
@@ -163,16 +171,36 @@ public struct EvalRun: Codable {
         try encoder.encode(self).write(to: url, options: .atomic)
     }
 
-    /// The newest earlier run of the same suite (and tag filter) in `runsDirectory`, with its folder.
+    /// What differs between two runs' settings that makes their scores hard to compare
+    /// (agent, model, k, tags or case filter). Empty when they're comparable.
+    public func mismatches(with other: EvalRun) -> [String] {
+        var out: [String] = []
+        if other.agent != agent { out.append("agent \(other.agent)") }
+        if other.model != model { out.append("model \(other.model)") }
+        if other.k != k { out.append("k=\(other.k)") }
+        if other.tags != tags { out.append(other.tags.isEmpty ? "no tag filter" : "tags \(other.tags.joined(separator: ","))") }
+        if (other.caseFilter ?? []) != (caseFilter ?? []) {
+            out.append((other.caseFilter ?? []).isEmpty ? "no case filter" : "cases \(other.caseFilter!.joined(separator: ","))")
+        }
+        return out
+    }
+
+    /// The newest earlier run of the same suite in `runsDirectory`, with its folder. Prefers one
+    /// with the same agent, model, k, tags and case filter; otherwise the newest of the same suite
+    /// (check `mismatches(with:)` to label it).
     public static func previous(of run: EvalRun, in runsDirectory: URL, excluding current: URL?) -> (EvalRun, URL)? {
         let fm = FileManager.default
         guard let dirs = try? fm.contentsOfDirectory(at: runsDirectory, includingPropertiesForKeys: nil) else { return nil }
         var best: (EvalRun, URL)?
+        var bestMatching: (EvalRun, URL)?
         for dir in dirs where dir.standardizedFileURL != current?.standardizedFileURL {
-            guard let other = load(dir.appendingPathComponent("results.json")), other.suite == run.suite, other.tags == run.tags,
+            guard let other = load(dir.appendingPathComponent("results.json")), other.suite == run.suite,
                   other.startedAt < run.startedAt else { continue }
             if best == nil || other.startedAt > best!.0.startedAt { best = (other, dir) }
+            if run.mismatches(with: other).isEmpty, bestMatching == nil || other.startedAt > bestMatching!.0.startedAt {
+                bestMatching = (other, dir)
+            }
         }
-        return best
+        return bestMatching ?? best
     }
 }
