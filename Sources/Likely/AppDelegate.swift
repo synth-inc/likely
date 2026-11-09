@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = Coordinator()
     private var debugWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var testWindow: NSWindow?
     private var trustTimer: Timer?
     private var started = false
 
@@ -31,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // pickers, in an unpaid state that leads to the license page.
         coordinator.isLicensed = { License.isActive }
         coordinator.onGetLikely = { [weak self] in self?.showLicense() }
+        coordinator.onMakeTest = { [weak self] run in self?.showTestEditor(for: run) }
 
         AgentDetector.shared.scan()
         // Setup (ending with the license page) has to be finished before Likely starts watching.
@@ -197,6 +199,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         debugWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The eval test editor in its own small window, prefilled from a run.
+    func showTestEditor(for run: DebugRun) {
+        testWindow?.close()
+        EvalCaseStore.shared.reload()
+        let request = EditorRequest.from(run: run)
+        let window = NSWindow(contentViewController: NSHostingController(rootView: EvalCaseEditor(request: request) { [weak self] in
+            self?.testWindow?.close()
+        }))
+        window.title = "Save Search as Test"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        testWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     @objc private func showSettings() {

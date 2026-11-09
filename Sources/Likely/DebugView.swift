@@ -1,4 +1,5 @@
 import AppKit
+import LikelyEvalKit
 import SwiftUI
 
 /// Record of one picker → claude run, for the debug window.
@@ -19,6 +20,12 @@ final class DebugRun: ObservableObject, Identifiable {
     @Published var recentFiles: [String] = []
     @Published var outcome: String?
     @Published var closedReason: String?
+    /// For "Make this a test": what the user typed, the window behind the picker, and the file(s)
+    /// they picked in the end (when Accessibility could read them).
+    @Published var queries: [String] = []
+    @Published var windowTitle: String?
+    @Published var buttonTitle: String?
+    @Published var pickedPaths: [String] = []
 
     init(appName: String, detectedVia: String) {
         self.appName = appName
@@ -90,14 +97,20 @@ struct DebugView: View {
 
 private struct RunDetail: View {
     @ObservedObject var run: DebugRun
+    @State private var testEditor: EditorRequest?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(run.appName) — \(run.date.formatted(date: .abbreviated, time: .standard))").font(.title3.bold())
-                    Text("Detected via \(run.detectedVia)\(run.model.map { " · model \($0)" } ?? "")")
-                        .font(.callout).foregroundStyle(.secondary)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(run.appName) — \(run.date.formatted(date: .abbreviated, time: .standard))").font(.title3.bold())
+                        Text("Detected via \(run.detectedVia)\(run.model.map { " · model \($0)" } ?? "")")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Make This a Test…") { testEditor = makeTest() }
+                        .help("Save this run's query and context as an eval case, with the file(s) you wanted")
                 }
 
                 section("Screenshot sent to Claude", detail: run.captureMode) {
@@ -183,6 +196,12 @@ private struct RunDetail: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sheet(item: $testEditor) { request in EvalCaseEditor(request: request) { testEditor = nil } }
+    }
+
+    private func makeTest() -> EditorRequest {
+        EvalCaseStore.shared.reload()
+        return EditorRequest.from(run: run)
     }
 
     private func section<Content: View>(_ title: String, detail: String? = nil, @ViewBuilder content: () -> Content) -> some View {

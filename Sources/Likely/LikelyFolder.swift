@@ -68,6 +68,8 @@ final class LikelyFolder {
     private let manifestURL: URL
     private var added: [URL] = []
     private var sources = Set<String>()
+    /// Copy path → source path, for mapping a picked copy back to the original (evals).
+    private var sourceByCopy: [String: String] = [:]
     /// The recent-file clones and their "…Recent…" header (separate from the agent's suggestions,
     /// which replace them once a search starts).
     private var recent: [URL] = []
@@ -253,24 +255,15 @@ final class LikelyFolder {
     func add(path: String, completion: @escaping (Bool) -> Void) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard Self.exists else { return completion(false) }
-        let source = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        let screened = Self.screen(path: path)
+        let source = screened.source
         let likelyURL = Self.url
-        guard !sources.contains(source.path), !pending.contains(source.path),
-              !source.path.hasPrefix(likelyURL.path + "/") else { return completion(false) }
-        // Never suggest Likely's own files (e.g. the screenshot an agent was shown).
-        guard !source.path.hasPrefix(Self.supportPath) else {
-            Log.write("likely", "skip Likely's own file \(source.path)")
+        guard !sources.contains(source.path), !pending.contains(source.path) else { return completion(false) }
+        if let reason = screened.refusal {
+            if reason != "in the Likely folder" { Log.write("likely", "skip \(source.path) (\(reason))") }
             return completion(false)
         }
-        // Credentials, keychains, dotfiles, system files: never staged where any picker can grab them.
-        // Checked on the real path too (Foundation's resolution drops /private, realpath keeps it), and
-        // again on the path of what actually gets opened (see `Copier`).
         let home = fm.homeDirectoryForCurrentUser.path
-        if let reason = SensitivePaths.refusalReason(for: source.path, home: home)
-            ?? SensitivePaths.refusalReason(for: AgentSandbox.realPath(source.path), home: home) {
-            Log.write("likely", "skip sensitive \(source.path) (\(reason))")
-            return completion(false)
-        }
 
         pending.insert(source.path)
         let ticket = epoch
@@ -286,6 +279,7 @@ final class LikelyFolder {
                 if self.epoch == ticket { self.pending.remove(source.path) }
                 guard let made, kept, self.unstage(made, recent: false) else { return completion(false) }
                 self.sources.insert(source.path)
+                self.sourceByCopy[made.url.path] = source.path
                 self.added.append(made.url)
                 self.saveManifest()
                 completion(true)
@@ -296,12 +290,68 @@ final class LikelyFolder {
     /// Source paths of the current suggestions, e.g. to tell Claude what the user rejected.
     var suggestedSources: [String] { Array(sources) }
 
+    /// The path a FILE: line stands for (symlinks resolved), and why Likely wouldn't show it, if it
+    /// wouldn't. Shared with the eval runner, which records suggestions without copying anything.
+    /// (What actually gets copied is checked again when it's opened; see `Copier`.)
+    /// The real path an agent meant when its spelling differs only in look-alike characters.
+    /// macOS puts a narrow no-break space (U+202F) before AM/PM in screenshot names, and agents
+    /// write it back as a plain space; other names carry no-break spaces or decomposed accents.
+    /// Each missing component is matched against its folder's entries with those differences
+    /// evened out. Returns `path` unchanged if it exists or nothing matches.
+    static func existingPath(for path: String) -> String {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) { return path }
+        func key(_ name: String) -> String {
+            let spaced = name.unicodeScalars.map { CharacterSet.whitespaces.contains($0) ? " " : String($0) }.joined()
+            return spaced.precomposedStringWithCanonicalMapping.lowercased()
+        }
+        var resolved = "/"
+        for component in (path as NSString).pathComponents.dropFirst() {
+            let direct = (resolved as NSString).appendingPathComponent(component)
+            if fm.fileExists(atPath: direct) { resolved = direct; continue }
+            let wanted = key(component)
+            guard let match = (try? fm.contentsOfDirectory(atPath: resolved))?.first(where: { key($0) == wanted }) else { return path }
+            resolved = (resolved as NSString).appendingPathComponent(match)
+        }
+        Log.write("likely", "matched \(path) to \(resolved)")
+        return resolved
+    }
+
+    static func screen(path: String) -> (source: URL, refusal: String?) {
+        let source = URL(fileURLWithPath: existingPath(for: (path as NSString).expandingTildeInPath)).resolvingSymlinksInPath()
+        if source.path.hasPrefix(url.path + "/") { return (source, "in the Likely folder") }
+        // Never suggest Likely's own files (e.g. the screenshot an agent was shown).
+        if source.path.hasPrefix(supportPath) { return (source, "Likely's own file") }
+        // Credentials, keychains, dotfiles, system files: never staged where any picker can grab them.
+        // Checked on the real path too (Foundation's resolution drops /private, realpath keeps it), and
+        // again on the path of what actually gets opened (see `Copier`).
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if let reason = SensitivePaths.refusalReason(for: source.path, home: home)
+            ?? SensitivePaths.refusalReason(for: AgentSandbox.realPath(source.path), home: home) {
+            return (source, "sensitive: \(reason)")
+        }
+        return (source, nil)
+    }
+
+    /// Where a file picked from the Likely folder came from: copies (and files inside copied
+    /// folders) map back to their source. Nil if `picked` isn't one of the current copies.
+    func sourcePath(forPicked picked: URL) -> String? {
+        let path = picked.resolvingSymlinksInPath().path
+        for (copy, source) in sourceByCopy {
+            let resolvedCopy = URL(fileURLWithPath: copy).resolvingSymlinksInPath().path
+            if path == resolvedCopy { return source }
+            if path.hasPrefix(resolvedCopy + "/") { return source + path.dropFirst(resolvedCopy.count) }
+        }
+        return nil
+    }
+
     /// Removes the suggested copies but keeps the status file (and the recent files).
     func clearSuggestions() {
         dropInFlightCopies(includingRecent: false)
         for url in added { try? fm.removeItem(at: url) }
         added.removeAll()
         sources.removeAll()
+        sourceByCopy.removeAll()
         saveManifest()
     }
 
@@ -311,6 +361,7 @@ final class LikelyFolder {
         removeStatusFiles(includingRecentHeader: true)
         added.removeAll()
         sources.removeAll()
+        sourceByCopy.removeAll()
         recent.removeAll()
         statusURL = nil
         releasedAt = nil

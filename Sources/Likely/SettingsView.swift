@@ -19,6 +19,10 @@ struct SettingsView: View {
             AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }
             PromptSettings().tabItem { Label("Prompt", systemImage: "text.alignleft") }
             PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }
+            HistorySettings().tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+            #if LIKELY_DEV
+            EvalsSettings().tabItem { Label("Evals", systemImage: "checklist") }
+            #endif
             if MenuBarGlyph.isDebugEnabled {
                 DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }
             }
@@ -329,6 +333,7 @@ private struct AgentSettings: View {
 
 private struct PromptSettings: View {
     @State private var text = Settings.promptTemplate
+    @AppStorage("includeUserName") private var includeUserName = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -353,6 +358,9 @@ private struct PromptSettings: View {
                 Text("Keep the STATUS: and FILE: lines in the protocol section; Likely relies on them.")
                     .font(.caption).foregroundStyle(.orange).padding(.top, 2)
             }
+            Toggle("Include my name in searches", isOn: $includeUserName)
+            Text("Sends your full name (\(NSFullUserName())) as {{userName}} so the agent can recognize your own documents. Prompts without {{userName}} never include it.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }

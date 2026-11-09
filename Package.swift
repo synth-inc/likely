@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "OnboardingKit", targets: ["OnboardingKit"]),
+        .library(name: "LikelyEvalKit", targets: ["LikelyEvalKit"]),
     ],
     dependencies: [
         // Auto-updates. build.sh embeds Sparkle.framework in Likely.app/Contents/Frameworks.
@@ -15,12 +16,16 @@ let package = Package(
         // Reusable onboarding UI + permission helpers (from DockLock / Onit). Meant to move to its own
         // package once a second app adopts it.
         .target(name: "OnboardingKit", path: "Sources/OnboardingKit"),
+        // Eval case format, scoring and reports (Foundation only, unit-tested). See docs/EVALS.md.
+        .target(name: "LikelyEvalKit", path: "Sources/LikelyEvalKit"),
+        .testTarget(name: "LikelyEvalKitTests", dependencies: ["LikelyEvalKit"], path: "Tests/LikelyEvalKitTests"),
         // Foundation-only rules for picking recent files (batches, files apps write in the background),
         // split out so they can be unit tested.
         .target(name: "RecentFilesCore", path: "Sources/RecentFilesCore"),
         .executableTarget(
             name: "Likely",
-            dependencies: ["OnboardingKit", "RecentFilesCore", .product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["OnboardingKit", "LikelyEvalKit", "RecentFilesCore",
+                           .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Likely",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "RecentFilesCoreTests", dependencies: ["RecentFilesCore"], path: "Tests/RecentFilesCoreTests"),
