@@ -83,3 +83,7 @@ Logs: `~/Library/Logs/Likely/likely.log` (menu → Verbose AX Logging logs every
 
 Likely is free software under the [GNU General Public License v3.0](LICENSE). The paid builds fund development;
 if you'd rather build it yourself, `LIKELY_FREE=1 ./build.sh` skips the license step.
+
+The paid license and services are covered by the [Terms of Service](https://synth-inc.github.io/likely/terms.html)
+([source](docs/terms.html)); what Likely sends and where is in the
+[Privacy Policy](https://synth-inc.github.io/likely/privacy.html) ([source](docs/privacy.html)).

@@ -117,6 +117,40 @@ h1 em { font-style: normal; color: var(--text-2); }
 .agents-label { color: var(--text-2); margin-right: 4px; }
 .chip { padding: 4px 11px; border-radius: 100px; background: var(--fill); font-weight: 500; }
 
+/* Make Likely smarter: three numbered steps */
+.steps { list-style: none; margin: 32px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; counter-reset: step; }
+.step { padding: 24px; counter-increment: step; }
+.step::before {
+  content: counter(step); display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; margin-bottom: 14px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
+}
+.step h3 { font-size: 15px; }
+.step p + p { margin-top: 8px; }
+.section-more { text-align: center; margin-top: 20px; font-size: 14px; color: var(--text-2); }
+@media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
+
+/* What leaves your Mac */
+.leaves { max-width: 760px; margin: 0 auto; padding: 8px 24px; overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-table th, .data-table td { text-align: left; vertical-align: top; padding: 14px 12px 14px 0; }
+.data-table thead th { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.data-table tbody tr { border-top: 1px dotted var(--divider); }
+.data-table tbody th { font-weight: 600; color: var(--text); width: 26%; }
+.data-table td { color: var(--text-2); }
+.data-table td:last-child { width: 24%; padding-right: 0; }
+.data-table ul { margin: 0; padding-left: 18px; }
+.data-table li + li { margin-top: 3px; }
+.leaves-note { max-width: 680px; margin: 22px auto 0; text-align: center; font-size: 15px; color: var(--text); }
+.leaves-more { max-width: 680px; margin: 10px auto 0; text-align: center; font-size: 14px; color: var(--text-2); }
+@media (max-width: 560px) {
+  .data-table thead { display: none; }
+  .data-table tr, .data-table th, .data-table td { display: block; width: auto !important; }
+  .data-table tbody th { padding-bottom: 4px; }
+  .data-table td { padding: 4px 0; }
+  .data-table tbody tr { padding: 10px 0; }
+}
+
 /* 6. Pricing */
 .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .plan { display: flex; flex-direction: column; gap: 10px; padding: 24px; }
@@ -147,6 +181,33 @@ h1 em { font-style: normal; color: var(--text-2); }
   display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px; padding: 28px 24px;
   font-size: 13px; color: var(--text-2);
 }
+
+.foot a { color: var(--text-2); }
+.foot a:hover { color: var(--text); }
+
+/* Privacy policy and terms (privacy.html, terms.html) */
+.draft-banner {
+  margin: 0 auto 32px; padding: 12px 16px; border-radius: 12px;
+  background: rgba(255, 159, 10, 0.14); box-shadow: inset 0 0 0 1px rgba(255, 159, 10, 0.45);
+  font-size: 14px; color: var(--text);
+}
+.legal { max-width: 720px; padding-top: 24px; }
+.legal h1 { font-size: clamp(32px, 5vw, 44px); margin-bottom: 10px; }
+.legal .meta { color: var(--text-2); font-size: 14px; margin-bottom: 8px; }
+.legal .placeholder { background: rgba(255, 159, 10, 0.18); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+.legal .lede { font-size: 17px; color: var(--text-2); margin: 20px 0 8px; line-height: 1.55; }
+.legal h2 { text-align: left; font-size: 21px; margin: 44px 0 12px; scroll-margin-top: 20px; }
+.legal h3 { margin: 22px 0 6px; }
+.legal p, .legal li { font-size: 15px; line-height: 1.65; }
+.legal p + p { margin-top: 12px; }
+.legal ul, .legal ol { padding-left: 22px; margin: 12px 0; }
+.legal li + li { margin-top: 6px; }
+.legal code { font: 13.5px var(--mono); background: var(--fill); padding: 1px 5px; border-radius: 5px; }
+.legal .caps { font-size: 14px; letter-spacing: .01em; }
+.legal .toc { background: var(--fill); border-radius: 16px; padding: 16px 20px 16px 40px; margin: 28px 0 0; columns: 2; column-gap: 32px; }
+.legal .toc li { font-size: 14px; margin: 0 0 4px; break-inside: avoid; }
+.legal .data-table { margin: 16px 0; }
+@media (max-width: 560px) { .legal .toc { columns: 1; } }
 
 /* Copy-editing mode (?edit) */
 .copy-editing [data-copy-id] { outline: 1px dashed var(--divider); outline-offset: 2px; border-radius: 3px; cursor: text; }
