@@ -8,17 +8,43 @@ import Foundation
 /// - Codex and Hermes have no per-command allowlist: Codex runs any command inside its read-only
 ///   sandbox, Hermes inside Likely's write-denying sandbox. Tools reach them through the prompt only.
 public enum ToolPermissions {
+    /// Defense in depth: only prefixes that pass the validator ever reach an agent's permission syntax,
+    /// even if a caller forgot to filter.
+    public static func valid(_ prefixes: [String]) -> [String] {
+        prefixes.map { $0.trimmingCharacters(in: .whitespaces) }.filter { ToolValidator.problem(with: $0) == nil }
+    }
+
     public static func claude(_ prefixes: [String]) -> [String] {
-        prefixes.map { "Bash(\($0):*)" }
+        valid(prefixes).map { "Bash(\($0):*)" }
     }
 
     public static func gemini(_ prefixes: [String]) -> [String] {
-        prefixes.map { "run_shell_command(\($0))" }
+        valid(prefixes).map { "run_shell_command(\($0))" }
+    }
+
+    /// The whole `--allowed-tools=…` argument for Gemini CLI. It's split on commas, which is why no
+    /// prefix may contain one.
+    public static func geminiAllowedToolsArgument(builtIn: [String], extra: [String]) -> String {
+        let entries = merged(builtIn.map { "run_shell_command(\($0))" }, gemini(extra))
+        return "--allowed-tools=" + entries.joined(separator: ",")
     }
 
     /// The bare command and the command with arguments (OpenCode globs match the whole command line).
     public static func openCode(_ prefixes: [String]) -> [(pattern: String, action: String)] {
-        prefixes.flatMap { [($0, "allow"), ("\($0) *", "allow")] }
+        valid(prefixes).flatMap { [($0, "allow"), ("\($0) *", "allow")] }
+    }
+
+    /// OpenCode's whole OPENCODE_PERMISSION value. The last matching rule wins: deny everything, allow
+    /// the file tools and built-in commands, then the user's commands, then the built-in denials (so
+    /// those still win over a user prefix).
+    public static func openCodePermission(fileTools: [String], bashAllowed: [String], bashDenied: [String],
+                                          extra: [String]) -> String {
+        let allow = [(pattern: "*", action: "deny")] + bashAllowed.map { (pattern: $0, action: "allow") }
+        let builtIn = Set(allow.map(\.pattern))
+        let user = openCode(extra).filter { !builtIn.contains($0.pattern) }
+        let deny = bashDenied.map { (pattern: $0, action: "deny") }
+        let bash = orderedJSONObject((allow + user + deny).map { ($0.pattern, .string($0.action)) })
+        return orderedJSONObject((["*"] + fileTools).map { ($0, .string($0 == "*" ? "deny" : "allow")) } + [("bash", .raw(bash))])
     }
 
     /// `items` followed by those `extra` items it doesn't already have, in order.
@@ -52,11 +78,11 @@ public enum ToolPermissions {
 
     /// How each agent applies tool commands, for Settings and the docs.
     public static let agentNotes: [String: String] = [
-        "claude": "Claude Code: each command is added to --allowedTools as Bash(<command>:*).",
-        "gemini": "Gemini CLI: each command is added to --allowed-tools as run_shell_command(<command>).",
+        "claude": "Claude Code: each command is added to --allowedTools as Bash(<command>:*). With tools on, Claude runs in a sandbox that blocks writes outside its own state.",
+        "gemini": "Gemini CLI: each command is added to --allowed-tools as run_shell_command(<command>). With tools on, Gemini runs in a sandbox that blocks writes outside ~/.gemini.",
         "opencode": "OpenCode: each command is allowed in its bash permissions (\"<command>\" and \"<command> *\"), inside Likely's write-blocking sandbox.",
-        "codex": "Codex has no per-command allowlist: it can run any command, inside its read-only sandbox (no writes, no network). Tools reach it through the prompt.",
-        "hermes": "Hermes has no per-command allowlist: it can run any command, inside Likely's write-blocking sandbox. Tools reach it through the prompt.",
+        "codex": "Codex can't limit commands; it relies on its read-only sandbox (no writes, no network). Tools reach it through the prompt.",
+        "hermes": "Hermes can't limit commands; it relies on Likely's write-blocking sandbox. Tools reach it through the prompt.",
     ]
 }
 

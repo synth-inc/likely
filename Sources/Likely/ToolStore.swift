@@ -16,6 +16,13 @@ final class ToolStore: ObservableObject {
     @Published private(set) var loadError: String?
     /// Entries skipped or fixed up while reading.
     @Published private(set) var issues: [String] = []
+    /// What the user approved, by tool id (UserDefaults; agents can't write Likely's preferences).
+    @Published private(set) var approvals: ToolApproval.Approvals = ToolStore.loadApprovals()
+
+    /// Posted (main thread) when tools start waiting for approval; AppDelegate badges the menu bar.
+    static let approvalNeeded = Notification.Name("ToolStore.approvalNeeded")
+    private static let approvalsKey = "approvedTools"
+    private var announcedPending: [String] = []
 
     private struct Signature: Equatable {
         let modified: Date?
@@ -33,12 +40,50 @@ final class ToolStore: ObservableObject {
         startWatching()
     }
 
-    var activeTools: [CustomTool] { tools.filter(\.isActive) }
+    /// Enabled, valid and approved: the tools the agent gets.
+    var activeTools: [CustomTool] { ToolApproval.usable(tools, approvals: approvals) }
+
+    /// Enabled, valid tools changed outside Likely and not yet approved.
+    var pending: [ToolApproval.Pending] { ToolApproval.pending(tools, approvals: approvals) }
 
     /// Command prefixes of the enabled, valid tools, without duplicates.
     var activeCommands: [String] { ToolPermissions.merged([], activeTools.flatMap(\.cleanedCommands)) }
 
-    var promptSection: String { ToolPrompts.section(for: tools) }
+    var promptSection: String { ToolPrompts.section(for: activeTools) }
+
+    // MARK: Approval
+
+    private static func loadApprovals() -> ToolApproval.Approvals {
+        guard let data = UserDefaults.standard.data(forKey: approvalsKey),
+              let approvals = try? JSONDecoder().decode(ToolApproval.Approvals.self, from: data) else { return [:] }
+        return approvals
+    }
+
+    /// `check: false` when the tools are about to be rewritten (the reload checks then).
+    private func storeApprovals(_ approvals: ToolApproval.Approvals, check: Bool = true) {
+        self.approvals = approvals
+        UserDefaults.standard.set(try? JSONEncoder().encode(approvals), forKey: Self.approvalsKey)
+        if check { checkPending() }
+    }
+
+    /// The user clicked Approve: everything pending now runs.
+    func approvePending() {
+        var approvals = self.approvals
+        for item in pending { approvals[item.tool.id] = ToolApproval.record(for: item.tool) }
+        Log.write("tools", "approved: \(pending.map(\.tool.name).joined(separator: ", "))")
+        storeApprovals(approvals)
+    }
+
+    /// Logs and announces a new set of pending tools once.
+    private func checkPending() {
+        let keys = pending.map { "\($0.tool.id):\(ToolApproval.fingerprint(of: $0.tool))" }
+        guard keys != announcedPending else { return }
+        announcedPending = keys
+        if !keys.isEmpty {
+            Log.write("tools", "changed outside Likely, waiting for approval: \(pending.map(\.tool.name).joined(separator: ", "))")
+        }
+        NotificationCenter.default.post(name: Self.approvalNeeded, object: nil)
+    }
 
     // MARK: Reading
 
@@ -56,6 +101,7 @@ final class ToolStore: ObservableObject {
         guard current != nil else {
             if !tools.isEmpty || loadError != nil { Log.write("tools", "tools.json removed; no extra tools") }
             apply(ToolsFile(), error: nil)
+            checkPending()
             return
         }
         do {
@@ -67,6 +113,7 @@ final class ToolStore: ObservableObject {
             for tool in file.tools where tool.enabled && !tool.isActive {
                 Log.write("tools", "\(tool.name) disabled: \(tool.problems.joined(separator: "; "))")
             }
+            checkPending()
         } catch {
             let message = (error as? ToolsFile.DecodeError)?.description ?? "Couldn't read tools.json: \(error.localizedDescription)"
             Log.write("tools", "\(message); using built-in commands only")
@@ -87,6 +134,10 @@ final class ToolStore: ObservableObject {
         var tool = tool
         tool.commands = tool.commands.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if !tool.problems.isEmpty { tool.enabled = false }
+        // Edits made here are the user's own: approved as saved.
+        var approvals = self.approvals
+        approvals[tool.id] = ToolApproval.record(for: tool)
+        storeApprovals(approvals, check: false)
         var list = tools
         if let index = list.firstIndex(where: { $0.id == tool.id }) { list[index] = tool } else { list.append(tool) }
         write(list)
@@ -99,6 +150,9 @@ final class ToolStore: ObservableObject {
     }
 
     func delete(id: String) {
+        var approvals = self.approvals
+        approvals[id] = nil
+        storeApprovals(approvals, check: false)
         write(tools.filter { $0.id != id })
     }
 
@@ -134,6 +188,7 @@ final class ToolStore: ObservableObject {
             Log.write("tools", "couldn't write tools.json: \(error)")
         }
         reloadIfChanged()
+        checkPending()
         armFileSource()
     }
 

@@ -2,10 +2,12 @@ import AppKit
 import ApplicationServices
 import OnboardingKit
 import SwiftUI
+import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
+    private let improveItem = NSMenuItem(title: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "")
 
     private let coordinator = Coordinator()
     private var debugWindow: NSWindow?
@@ -18,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The login-shell part of the lookup runs in the background (it can take seconds).
         ClaudeLocator.resolve { Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")") }
         buildStatusItem()
+        toolApprovalChanged()   // loads tools.json; anything changed while Likely was closed shows up now
         if Updater.isEnabled { MainActor.assumeIsolated { Updater.shared.start() } }
 
         coordinator.verbose = Settings.verbose
@@ -109,11 +112,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.setIcon(self.iconState)
         }
 
+        NotificationCenter.default.addObserver(forName: ToolStore.approvalNeeded, object: nil, queue: .main) { [weak self] _ in
+            self?.toolApprovalChanged()
+        }
+
         let menu = NSMenu()
         stateItem.isEnabled = false
         menu.addItem(stateItem)
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "").target = self
+        improveItem.target = self
+        menu.addItem(improveItem)
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
         if Updater.isEnabled {
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
@@ -144,8 +152,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .searching: symbol = "sparkle.magnifyingglass"
         case .done: symbol = "checkmark.circle"
         }
-        statusItem.button?.image = MenuBarGlyph.image(badge: state == .searching ? .dot : .none,
+        let approvalNeeded = !ToolStore.shared.pending.isEmpty
+        statusItem.button?.image = MenuBarGlyph.image(badge: state == .searching || approvalNeeded ? .dot : .none,
                                                       dimmed: Settings.onboarded && !License.isActive, fallbackSymbol: symbol)
+    }
+
+    /// tools.json changed outside Likely: badge the menu bar, retitle the Tools item, and post a
+    /// notification if Likely is allowed to (it never asks for that permission just for this).
+    private func toolApprovalChanged() {
+        let pending = ToolStore.shared.pending
+        improveItem.title = pending.isEmpty ? "Improve Results…" : "Approve Tool Changes…"
+        setIcon(iconState)
+        guard !pending.isEmpty, Bundle.main.bundleURL.pathExtension == "app" else { return }
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Approve tool changes"
+            content.body = "tools.json changed outside Likely: \(pending.map(\.tool.name).joined(separator: ", ")). Open Settings → Tools to review."
+            center.add(UNNotificationRequest(identifier: "tool-approval", content: content, trigger: nil))
+        }
     }
 
     @objc private func nextGlyph() { MenuBarGlyph.cycle(by: 1) }

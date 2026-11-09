@@ -88,8 +88,7 @@ final class GeminiRunner: AgentRunner {
             "--approval-mode", "default",
             "--include-directories", directories.joined(separator: ","),
             // `=` form: the flag takes an array and would otherwise swallow the following arguments.
-            "--allowed-tools=" + ToolPermissions.gemini(ToolPermissions.merged(Self.allowedCommands, ToolStore.shared.activeCommands))
-                .joined(separator: ","),
+            ToolPermissions.geminiAllowedToolsArgument(builtIn: Self.allowedCommands, extra: ToolStore.shared.activeCommands),
         ]
     }
 
@@ -113,8 +112,9 @@ final class GeminiRunner: AgentRunner {
 
         let process = Process()
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
-                                                             profile: AgentSandbox.privacyOnlyProfile)
+        // With user tools enabled, also no writes outside ~/.gemini and temp folders.
+        let profile = ToolStore.shared.activeCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.geminiProfile()
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments, profile: profile)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir

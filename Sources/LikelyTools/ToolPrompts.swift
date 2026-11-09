@@ -73,27 +73,31 @@ public enum ToolPrompts {
         - enabled: true or false.
         - commands: command prefixes the search agent may run. Each one is matched against the start of the command \
         line, so "rclip -n" allows `rclip -n -t 20 "a red car"` but not `rclip "a red car"`. Include fixed flags that \
-        keep the tool read-only. If the tool works on the current folder, add "cd" too; the agent then runs `cd ~ && <tool> …`.
+        keep the tool read-only. If the tool searches the current folder, add "cd" too; the agent then runs \
+        `cd ~ && <tool> …`. Only do that for tools that don't read config or plugins from the working directory.
         - instructions: added to the search agent's prompt. Say when to use the tool, the exact command line to run \
         and what the output looks like, in a few sentences.
         - setup (optional): how the tool was installed and how to maintain it (e.g. re-indexing). Not shown to the search agent.
 
         Rules (Likely checks them and disables a tool that breaks one):
         - The search agent runs these commands unattended, without asking me, so allow only read-only commands: \
-        nothing that changes, moves or deletes files, sends data anywhere, or runs other programs.
-        - No shell metacharacters or quotes in a command: \(ToolValidator.forbiddenCharactersDescription)
+        nothing that changes, moves or deletes files, sends data anywhere, or runs other programs. These checks catch \
+        mistakes; what actually keeps the search read-only is the sandbox Likely runs the agent in, so a tool that \
+        needs to write (a cache, an index) fails during a search. Do that work in the setup step instead.
+        - Commands may only contain \(ToolValidator.allowedCharactersDescription). No quotes, commas, wildcards \
+        or shell operators.
         - None of these as the first word: \(ToolValidator.blockedFirstWords.joined(separator: ", "))
         - No empty commands.
 
-        Likely notices changes to tools.json and uses them from the next search; no restart needed. Its Settings → \
-        Tools tab shows each tool's status and why one was disabled.
+        Likely notices changes to tools.json, but a new or changed tool isn't used until I approve it: tell me to \
+        click Approve in Likely → Settings → Tools. That tab also shows each tool's status and why one was disabled.
 
         Before adding the tool:
         1. Install it (Homebrew or pipx preferred) and do any one-time setup it needs, such as building an index.
         2. Run the exact command from your instructions in Terminal and check that it prints useful results. The \
         search agent's PATH is \(path), so the tool must be found in one of those.
-        3. Add the entry, check that the file is valid JSON (e.g. `python3 -m json.tool ~/"Library/Application Support/Likely/tools.json"`), and tell me \
-        what you added.
+        3. Add the entry, check that the file is valid JSON (e.g. `python3 -m json.tool ~/"Library/Application Support/Likely/tools.json"`), tell me \
+        what you added, and remind me to approve it in Likely → Settings → Tools.
 
         What I want: \(request)
         """

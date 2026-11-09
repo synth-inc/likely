@@ -406,6 +406,12 @@ private struct ToolsSettings: View {
 
     var body: some View {
         Form {
+            if !store.pending.isEmpty {
+                Section {
+                    ApprovalBanner(pending: store.pending, approve: store.approvePending)
+                }
+            }
+
             if case .configured = photoState {} else {
                 Section {
                     PhotoSearchRow(installed: rclipInstalled, setUp: { settingUpPhotos = true },
@@ -427,6 +433,8 @@ private struct ToolsSettings: View {
                 }
                 ForEach(store.tools) { tool in
                     ToolRow(tool: tool, results: testResults[tool.id],
+                            waitingForApproval: store.pending.contains { $0.tool.id == tool.id },
+                            agentNote: ["codex", "hermes"].contains(agentID) && tool.isActive ? ToolPermissions.agentNotes[agentID] : nil,
                             edit: { editing = ToolDraft(tool, isNew: false) },
                             test: { testResults[tool.id] = ToolCheck.run(tool.cleanedCommands, agentID: agentID) },
                             delete: { deleting = tool })
@@ -445,7 +453,7 @@ private struct ToolsSettings: View {
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("Your agent runs these commands on its own, without asking you. Only add commands that read; never ones that change, move or delete files.",
+                    Label("Your agent runs these commands on its own, without asking you. Only add commands that read. Likely's checks catch mistakes; the real guarantee is the sandbox it runs the agent in, which blocks writes outside the agent's own state while tools are on.",
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                     if let note = ToolPermissions.agentNotes[agentID] {
@@ -539,6 +547,8 @@ private struct ToolsSettings: View {
 private struct ToolRow: View {
     let tool: CustomTool
     let results: [ToolCheck]?
+    let waitingForApproval: Bool
+    let agentNote: String?
     let edit: () -> Void
     let test: () -> Void
     let delete: () -> Void
@@ -566,7 +576,10 @@ private struct ToolRow: View {
             if !problems.isEmpty {
                 Text("Disabled: " + problems.joined(separator: ". "))
                     .font(.caption).foregroundStyle(.orange)
+            } else if waitingForApproval {
+                Text("Not used until you approve the change above").font(.caption).foregroundStyle(.orange)
             }
+            if let agentNote { Text(agentNote).font(.caption).foregroundStyle(.secondary) }
             if let results { ToolCheckList(results: results) }
         }
         .padding(.vertical, 2)
@@ -774,5 +787,38 @@ private struct PhotoSearchSetupSheet: View {
         }
         .padding(20)
         .frame(width: 540)
+    }
+}
+
+/// tools.json changed outside Likely: the changed tools wait for the user.
+private struct ApprovalBanner: View {
+    let pending: [ToolApproval.Pending]
+    let approve: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("tools.json changed outside Likely: \(pending.map(\.tool.name).joined(separator: ", ")). Review and approve.",
+                  systemImage: "exclamationmark.shield.fill")
+                .foregroundStyle(.orange)
+            ForEach(pending) { item in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.isNew ? "\(item.tool.name) (new)" : item.tool.name).font(.caption.bold())
+                    ForEach(item.summary, id: \.self) { line in
+                        Text(line).font(.caption.monospaced())
+                            .foregroundStyle(line.hasPrefix("+") ? Color.green : line.hasPrefix("-") ? Color.red : Color.secondary)
+                    }
+                    if item.instructionsChanged, !item.tool.instructions.isEmpty {
+                        Text("Instructions: " + item.tool.instructions.prefix(240) + (item.tool.instructions.count > 240 ? "…" : ""))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(4)
+                    }
+                }
+            }
+            HStack {
+                Text("Until you approve, these tools aren't used.").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Approve", action: approve)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }

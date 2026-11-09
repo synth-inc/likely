@@ -5,7 +5,7 @@ public struct CustomTool: Codable, Identifiable, Equatable, Hashable {
     public var id: String
     public var name: String
     public var enabled: Bool
-    /// Command prefixes the agent may run, e.g. `exiftool` or `rclip -n`.
+    /// Command prefixes the agent may run, e.g. `rclip -n`.
     public var commands: [String]
     /// Added to the agent's prompt: when and how to use the tool.
     public var instructions: String

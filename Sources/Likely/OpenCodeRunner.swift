@@ -35,15 +35,24 @@ final class OpenCodeRunner: AgentRunner {
     static let fileTools = ["read", "glob", "grep", "list", "external_directory"]
     static let bashAllowed = ["ls", "ls *", "mdfind *", "mdls *", "find *", "grep *", "head *", "tail *", "stat *", "wc *", "echo *"]
 
+    static let bashDenied = ["find *-exec*", "find *-ok*", "find *-delete*", "find *-fprint*", "find *-fls*"]
+
+    /// OpenCode reads (and on first run creates) <config>/opencode/opencode.jsonc. Likely writes it before
+    /// every launch and the sandbox keeps it read-only (it's under Likely's protected folder), so nothing
+    /// the agent runs can plant a config for the next run.
+    private static func resetConfig(_ configHome: String) {
+        let dir = URL(fileURLWithPath: configHome).appendingPathComponent("opencode")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let files = ["opencode.jsonc": #"{"$schema": "https://opencode.ai/config.json"}"#,
+                     ".gitignore": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore\n"]
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where files[name] == nil {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+        }
+        for (name, text) in files { try? Data(text.utf8).write(to: dir.appendingPathComponent(name)) }
+    }
+
     static func permission(extra commands: [String]) -> String {
-        let allow: [(pattern: String, action: String)] = [("*", "deny")] + bashAllowed.map { ($0, "allow") }
-        let deny = ["find *-exec*", "find *-ok*", "find *-delete*", "find *-fprint*", "find *-fls*"].map { (pattern: $0, action: "deny") }
-        let builtIn = Set(allow.map(\.pattern))
-        let extra = ToolPermissions.openCode(commands).filter { !builtIn.contains($0.pattern) }
-        let bash = ToolPermissions.orderedJSONObject((allow + extra + deny).map { ($0.pattern, .string($0.action)) })
-        return ToolPermissions.orderedJSONObject(
-            (["*"] + fileTools).map { ($0, .string($0 == "*" ? "deny" : "allow")) }
-                + [("bash", .raw(bash))])
+        ToolPermissions.openCodePermission(fileTools: fileTools, bashAllowed: bashAllowed, bashDenied: bashDenied, extra: commands)
     }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
@@ -100,6 +109,7 @@ final class OpenCodeRunner: AgentRunner {
         // user's config. Credentials live in the data dir (~/.local/share/opencode) and still apply.
         let configHome = workDir.appendingPathComponent("opencode-config").path
         env["XDG_CONFIG_HOME"] = configHome
+        Self.resetConfig(configHome)
         env["OPENCODE_PERMISSION"] = Self.permission(extra: ToolStore.shared.activeCommands)
         for flag in ["OPENCODE_PURE", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE",
                      "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_LSP_DOWNLOAD"] {
@@ -112,7 +122,6 @@ final class OpenCodeRunner: AgentRunner {
             dataDir,
             env["XDG_STATE_HOME"].map { $0 + "/opencode" } ?? home + "/.local/state/opencode",
             env["XDG_CACHE_HOME"].map { $0 + "/opencode" } ?? home + "/.cache/opencode",
-            configHome,
             "/private/var/folders",   // $TMPDIR
         ]
 

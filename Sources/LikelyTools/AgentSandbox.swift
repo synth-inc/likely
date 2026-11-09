@@ -18,14 +18,14 @@ import Foundation
 /// - No asking TCC directly either.
 /// Verified with a probe: under these rules AX reads of Finder fail (-25204), `screencapture` can't
 /// create an image, and AXIsProcessTrusted/CGPreflightScreenCaptureAccess report false.
-enum AgentSandbox {
-    static let blockedExecutables = [
+public enum AgentSandbox {
+    public static let blockedExecutables = [
         "/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/shortcuts", "/usr/bin/automator",
         "/usr/sbin/screencapture", "/usr/bin/screencapture", "/usr/bin/osacompile", "/usr/bin/tccutil",
         "/usr/bin/pbcopy", "/usr/bin/pbpaste",
     ]
 
-    static let privacyRules = """
+    public static let privacyRules = """
     (deny appleevent-send)
     (deny mach-lookup
         (global-name "com.apple.windowserver.active") (global-name "com.apple.windowserver")
@@ -39,11 +39,12 @@ enum AgentSandbox {
     (deny process-exec \(blockedExecutables.map { "(literal \(quoted($0)))" }.joined(separator: " ")))
     """
 
-    /// For agents with their own write controls (Claude Code, Gemini CLI): everything allowed except
-    /// the privacy-sensitive services above.
-    static let privacyOnlyProfile = "(version 1)\n(allow default)\n" + privacyRules
+    /// For agents with their own write controls (Claude Code, Gemini CLI) while no user tools are
+    /// enabled: everything allowed except the privacy-sensitive services above.
+    public static let privacyOnlyProfile = "(version 1)\n(allow default)\n" + privacyRules
 
-    /// For agents Likely has to confine itself (OpenCode, Hermes):
+    /// For agents Likely has to confine itself (OpenCode, Hermes, and Claude Code / Gemini CLI once the
+    /// user has enabled tools, whose commands Likely can't prove read-only):
     /// - writes only to `writable` (plus the usual /dev nodes);
     /// - nothing can be executed from a writable location (no planting a binary or copying a system
     ///   tool to /tmp and running it), except `execAllowed` folders, which are also made read-only;
@@ -54,7 +55,7 @@ enum AgentSandbox {
     ///   ssh-agent, no other local daemons).
     /// - localhost only with `allowLocalhost` (Hermes: its client talks to its own gateway over a
     ///   loopback WebSocket on a random port, so the port can't be pinned).
-    static func confinedProfile(writable: [String], writableRegexes: [String] = [], execAllowed: [String] = [],
+    public static func confinedProfile(writable: [String], writableRegexes: [String] = [], execAllowed: [String] = [],
                                 unixSockets: [String] = [], unixSocketRegexes: [String] = [],
                                 allowLocalhost: Bool = false) -> String {
         let writableRules = writable.map { "(subpath \(quoted($0)))" } + writableRegexes.map { "(regex \(quoted($0)))" }
@@ -80,19 +81,65 @@ enum AgentSandbox {
         return profile + privacyRules
     }
 
-    static func quoted(_ path: String) -> String {
+    public static func quoted(_ path: String) -> String {
         "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     /// Seatbelt matches real paths (/private/var, not /var); Foundation's symlink resolution strips /private.
-    static func realPath(_ path: String) -> String {
+    public static func realPath(_ path: String) -> String {
         guard let resolved = realpath(path, nil) else { return path }
         defer { free(resolved) }
         return String(cString: resolved)
     }
 
     /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
-    static func wrap(executable: String, arguments: [String], profile: String) -> (URL, [String]) {
-        (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile, executable] + arguments)
+    /// Every profile ends with `protectionRules`, so no agent can change Likely's own data or settings.
+    public static func wrap(executable: String, arguments: [String], profile: String) -> (URL, [String]) {
+        (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile + "\n" + protectionRules(), executable] + arguments)
+    }
+
+    // MARK: Likely's own files
+
+    public static let bundleID = "inc.synth.likely"
+
+    /// No writes to ~/Library/Application Support/Likely (tools.json, the agents' working folder, which
+    /// holds config some agents read on the next run) or Likely's preferences, neither as a file nor
+    /// through cfprefsd (`defaults write`). Last in the profile, so no earlier allow can override it.
+    public static func protectionRules(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                                       bundleID: String = bundleID) -> String {
+        let realHome = realPath(home)
+        let support = realHome + "/Library/Application Support/Likely"
+        let prefs = "^" + NSRegularExpression.escapedPattern(for: realHome + "/Library/Preferences/")
+            + "(ByHost/)?" + NSRegularExpression.escapedPattern(for: bundleID) + #"(\..*)?\.plist"#
+        return """
+        (deny file-write* (subpath \(quoted(support))) (regex \(quoted(prefs))))
+        (deny user-preference-write (preference-domain \(quoted(bundleID))))
+        """
+    }
+
+    // MARK: Claude Code and Gemini CLI with user tools
+
+    /// The per-user temp/cache folder (/private/var/folders/…/T → its parent, holding T and C).
+    public static var userTempFolder: String {
+        (realPath(FileManager.default.temporaryDirectory.path) as NSString).deletingLastPathComponent
+    }
+
+    /// Claude Code once the user has enabled tools: writes only to its own state (~/.claude,
+    /// ~/.claude.json and its backups/locks, its caches) and temp folders; HTTPS only.
+    public static func claudeProfile(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                                     tempFolder: String = userTempFolder) -> String {
+        let realHome = realPath(home)
+        return confinedProfile(
+            writable: [realHome + "/.claude", realHome + "/Library/Caches/claude-cli-nodejs", realHome + "/.cache/claude",
+                       realHome + "/.local/state/claude", tempFolder, "/private/tmp"],
+            writableRegexes: ["^" + NSRegularExpression.escapedPattern(for: realHome + "/.claude.json")])
+    }
+
+    /// Gemini CLI once the user has enabled tools: writes only to ~/.gemini (sessions, ids) and temp
+    /// folders; HTTPS only.
+    public static func geminiProfile(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                                     tempFolder: String = userTempFolder) -> String {
+        let realHome = realPath(home)
+        return confinedProfile(writable: [realHome + "/.gemini", tempFolder, "/private/tmp"])
     }
 }

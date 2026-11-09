@@ -46,6 +46,7 @@ final class ClaudeRunner: AgentRunner {
     func start(claudePath: String, model: String, prompt: String, workDir: URL) {
         cancel()
         buffer = Data()
+        let userCommands = ToolStore.shared.activeCommands
 
         let process = Process()
         process.currentDirectoryURL = workDir
@@ -62,16 +63,19 @@ final class ClaudeRunner: AgentRunner {
             "--add-dir", FileManager.default.homeDirectoryForCurrentUser.path,
         ] + SearchFolder.outsideHome.flatMap { ["--add-dir", $0] } + [
             "--allowedTools",
-        ] + Self.allowedTools(extra: ToolStore.shared.activeCommands)
+        ] + Self.allowedTools(extra: userCommands)
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
-                                                             profile: AgentSandbox.privacyOnlyProfile)
+        // With user tools enabled, also no writes outside Claude's own state: the validator can't prove
+        // a tool read-only, the sandbox can.
+        let profile = userCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.claudeProfile()
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments, profile: profile)
         process.executableURL = launcher
         process.arguments = launchArguments
 
         var env = ProcessInfo.processInfo.environment
         // Use the claude.ai login rather than whatever API key a parent shell exported.
         env.removeValue(forKey: "ANTHROPIC_API_KEY")
+        if !userCommands.isEmpty { env["DISABLE_AUTOUPDATER"] = "1" }   // its install folder isn't writable then
         env["PATH"] = AgentPath.value(agentExecutable: claudePath, inherited: env["PATH"])
         process.environment = env
 

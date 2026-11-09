@@ -12,10 +12,16 @@ Tools live in one file, the source of truth:
 ```
 
 Edit it in Settings → Tools, by hand, or let a coding agent do it (Settings → Tools → "Set up with your
-coding agent" has a prompt to paste). Likely watches the file and checks it again before each search,
-so changes apply from the next search without a restart. If the file is missing, there are no extra
-tools; if it isn't valid JSON, Likely logs why (`~/Library/Logs/Likely/likely.log`), shows it in the
-Tools tab and uses only the built-in commands.
+coding agent" has a prompt to paste). Likely watches the file and checks it again before each search. If
+the file is missing, there are no extra tools; if it isn't valid JSON, Likely logs why
+(`~/Library/Logs/Likely/likely.log`), shows it in the Tools tab and uses only the built-in commands.
+
+**Approval.** Edits made in Settings → Tools apply right away. When tools.json changes any other way (a
+coding agent, a script, an editor) and the commands or instructions of an enabled tool change, that tool
+isn't used until you click **Approve** in Settings → Tools. The tab shows which tools changed and a short
+diff of their commands; the menu bar icon gets a dot and its menu shows "Approve Tool Changes…" (plus a
+notification, if Likely is allowed to post them). Likely stores a SHA-256 of each approved tool's commands
+and instructions in its preferences, which no agent can write.
 
 ## Schema
 
@@ -51,20 +57,33 @@ A bare array of tools (without the `{"tools": …}` wrapper) is also accepted. E
 
 The agent runs these commands **unattended**, without asking you. Only add read-only commands.
 
+Likely's checks catch mistakes; they can't prove a command is read-only. The guarantee is the sandbox:
+while any tool is on, every agent runs where it can't write outside its own state (see below), and no
+agent can ever write Likely's own folder (`~/Library/Application Support/Likely`, including tools.json) or
+its preferences.
+
 - **Prefix matching.** Each entry in `commands` is matched against the start of the command line:
   `rclip -n` allows `rclip -n -t 20 "a red car"` but not `rclip "a red car"`. Put flags that keep the
   tool read-only into the prefix.
-- **No shell metacharacters or quotes:** `;` `|` `&` `>` `<` `$` `` ` `` `(` `)` `*` `\` `"` `'`, newlines,
-  carriage returns or tabs. They would let a prefix chain or redirect commands, or break an agent's
-  permission syntax. (The *agent* may still write `cd ~ && rclip …`: each part is checked separately.)
-- **Blocked first words** (after any directory, case-insensitive): `rm`, `rmdir`, `mv`, `cp`, `dd`, `ln`,
-  `tee`, `truncate`, `shred`, `sudo`, `su`, `chmod`, `chown`, `chflags`, `curl`, `wget`, `ssh`, `scp`,
-  `rsync`, shells (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`, `csh`, `tcsh`), interpreters (`python*`,
-  `perl*`, `ruby*`, `node`), `osascript`, `env`, `xargs`, `eval`, `exec`, `nohup`, `command`, `open`, `kill`,
-  `killall`, `pkill`, `launchctl`.
+- **Allowed characters only:** letters A-Z and a-z, digits, spaces and `. _ / ~ = : + @ % -`. Everything
+  else is rejected, including quotes, commas (Gemini splits its allowlist on them), `?` `*` `[ ]` `{ }`
+  (wildcards for OpenCode and the shell), `; | & > < $` and backticks, newlines and tabs. (The *agent*
+  may still write `cd ~ && rclip …`: each part is checked separately.)
+- **Blocked first words** (after any directory, case-insensitive), because they can write, reach the
+  network, or run other code directly, through a flag (`rg --pre`, `find -exec`, `awk system()`) or by
+  wrapping another command: `rm`, `rmdir`, `mv`, `cp`, `dd`, `ln`, `tee`, `truncate`, `shred`, `mkdir`,
+  `touch`, `install`, `ditto`, `xattr`, `sudo`, `su`, `chmod`, `chown`, `chflags`, `curl`, `wget`, `ssh`,
+  `scp`, `sftp`, `ftp`, `rsync`, `nc`, `ncat`, `telnet`, shells (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`,
+  `csh`, `tcsh`), interpreters (`python*`, `perl*`, `ruby*`, `node`, `swift`), `osascript`, `env`, `xargs`,
+  `eval`, `exec`, `nohup`, `command`, `arch`, `nice`, `time`, `timeout`, `script`, `screen`, `tmux`, `at`,
+  `crontab`, `find`, `awk`, `gawk`, `sed`, `rg`, `sort`, `file`, `git`, `make`, `npm`, `npx`, `pip*`, `brew`,
+  `tar`, `zip`, `unzip`, `sqlite3`, `exiftool`, `plutil`, `defaults`, `security`, `open`, `kill`, `killall`,
+  `pkill`, `launchctl`, `pbcopy`, `say`.
 - **No empty commands.**
+- **`cd`** only for tools that search the current folder and don't read config or plugins from the
+  working directory (the agent runs `cd ~ && <tool> …`, so a config file in your home folder would apply).
 
-A tool that breaks a rule is still saved, but turned off, and the Tools tab says why. The list in code is
+A tool that breaks a rule is still saved, but turned off, and the Tools tab says why. The rules live in
 `ToolValidator` (`Sources/LikelyTools/ToolValidator.swift`); the setup prompt is generated from it.
 
 The command must be found on the agent's PATH: the agent's own folder, `/opt/homebrew/bin`,
@@ -78,14 +97,15 @@ Every enabled, valid tool's instructions go into the prompt under "Extra tools y
 
 | Agent | Allowlist | Notes |
 |---|---|---|
-| Claude Code | `--allowedTools Bash(<prefix>:*)` | `cd` only works into folders Claude was given (`--add-dir`: home and your search folders). |
-| Gemini CLI | `--allowed-tools=run_shell_command(<prefix>)` | Each segment of a `&&` chain must match. |
+| Claude Code | `--allowedTools Bash(<prefix>:*)` | While any tool is on, runs in a sandbox that only allows writes to its own state (`~/.claude`, `~/.claude.json*`, its caches) and temp folders, HTTPS only. `cd` only works into folders Claude was given (`--add-dir`: home and your search folders). |
+| Gemini CLI | `--allowed-tools=run_shell_command(<prefix>)` | While any tool is on, runs in a sandbox that only allows writes to `~/.gemini` and temp folders, HTTPS only. Each segment of a `&&` chain must match. |
 | OpenCode | bash permissions `"<prefix>": "allow"`, `"<prefix> *": "allow"` | Added before the `find -exec/-delete` denials, which still win. Runs in Likely's write-blocking sandbox. |
-| Codex | none | Codex has no per-command allowlist: it runs any command, inside its read-only sandbox (no writes, no network). Tools reach it through the prompt only. |
-| Hermes | none | Hermes has no allowlist either; it runs any command inside Likely's write-blocking sandbox (HTTPS only). Tools reach it through the prompt only. |
+| Codex | none | Codex can't limit commands; it relies on its read-only sandbox (no writes, no network). Tools reach it through the prompt only. |
+| Hermes | none | Hermes can't limit commands either; it relies on Likely's write-blocking sandbox (HTTPS only). Tools reach it through the prompt only. |
 
-Under OpenCode, Hermes and Codex, a tool that needs to write (a cache, an index) or, under Codex, reach
-the network fails at run time. Do that work in the tool's setup, outside Likely.
+So with tools on, a tool that needs to write (a cache, an index) or, under Codex, reach the network fails
+at run time, whichever agent runs it. Do that work in the tool's setup, outside Likely. (`rclip -n` was
+checked to work this way under Claude Code, Gemini CLI and OpenCode.)
 
 ## Worked example: image search with rclip
 
@@ -112,7 +132,8 @@ index.
    cd ~ && rclip -n -t 5 "a screenshot of an app window"
    ```
 
-4. Add the tool to `tools.json`:
+4. Add the tool to `tools.json` (or turn on the Photo search row; edits made outside Likely need your
+   Approve in Settings → Tools):
 
    ```json
    {
