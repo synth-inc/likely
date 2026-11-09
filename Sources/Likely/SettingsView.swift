@@ -31,9 +31,7 @@ struct SettingsView: View {
             ToolsSettings().tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }.tag(SettingsNavigation.Tab.tools)
             PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }.tag(SettingsNavigation.Tab.permissions)
             HistorySettings().tabItem { Label("History", systemImage: "clock.arrow.circlepath") }.tag(SettingsNavigation.Tab.history)
-            #if LIKELY_DEV
-            EvalsSettings().tabItem { Label("Evals", systemImage: "checklist") }.tag(SettingsNavigation.Tab.evals)
-            #endif
+            EvalsSettings().tabItem { Label("Tests", systemImage: "checklist") }.tag(SettingsNavigation.Tab.evals)
             if MenuBarGlyph.isDebugEnabled {
                 DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }.tag(SettingsNavigation.Tab.debug)
             }
@@ -604,10 +602,10 @@ private struct ToolsSettings: View {
             }
 
             Section("Set up with your coding agent") {
-                Text("Paste this into Claude Code, Codex or another coding agent and say what you want. It installs the tool, checks it works, and adds it to tools.json; Likely picks it up automatically.")
+                Text("Paste this into Claude Code, Codex or another coding agent and say what you want. It installs the tool, checks it works, and adds it to tools.json; Likely picks it up automatically. It also runs your saved tests before and after (Settings → Tests), so you see whether results improved.")
                     .font(.caption).foregroundStyle(.secondary)
                 ScrollView {
-                    Text(ToolPrompts.setupPrompt)
+                    Text(ToolPrompts.setupPrompt(request: "", testCommand: EvalCommand.command))
                         .font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -621,7 +619,7 @@ private struct ToolsSettings: View {
                     if copied { Text("Copied").font(.caption).foregroundStyle(.secondary) }
                     Button("Copy") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(ToolPrompts.setupPrompt, forType: .string)
+                        NSPasteboard.general.setString(ToolPrompts.setupPrompt(request: "", testCommand: EvalCommand.command), forType: .string)
                         copied = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
                     }
@@ -942,7 +940,7 @@ private struct PhotoSearchSetupSheet: View {
     let checkAgain: () -> Void
     let done: () -> Void
     @State private var copied = false
-    private let prompt = ToolPrompts.setupPrompt(request: ToolPrompts.photoSearchRequest)
+    private let prompt = ToolPrompts.setupPrompt(request: ToolPrompts.photoSearchRequest, testCommand: EvalCommand.command)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -73,13 +73,22 @@ Then commit and deploy the appcast in onit-server (the script prints the command
   Tools or by a coding agent. Their commands are added to each agent's allowlist and their instructions to
   the prompt. See [docs/TOOLS.md](docs/TOOLS.md).
 
-## Evals
+## Tests (evals)
 
-`Likely --eval fixtures --agent opencode` runs the public eval suite (synthetic files in `evals/fixtures`)
-headlessly through the app's real prompt and agent runner, and writes `results.json` + `report.html`.
-Eval mode, Settings → Evals and "Save as test" exist only in dev builds (`./build.sh`), not in release builds.
-Your own cases live in `~/Library/Application Support/Likely/evals/cases.jsonl` ("Save as test" in the bar above a
-picker, Settings → History → Make Eval, Settings → Evals, or automatic saving of picks). See [docs/EVALS.md](docs/EVALS.md).
+Save searches as tests ("Save as test" in the bar above a picker, Settings → History → Make Eval, Settings →
+Tests, or automatic saving of picks), then re-run them after adding a tool or editing the prompt to see
+whether results improved: **Settings → Tests → Run Tests…**, or from the command line (your coding agent
+can run it too):
+
+```sh
+/Applications/Likely.app/Contents/MacOS/Likely --eval personal --json
+```
+
+It runs headlessly through the app's real prompt, agent runner and sandbox, writes `results.json` +
+`report.html`, and compares with your previous run. Release builds run only your own tests, with agents
+Likely detected; dev builds (`./build.sh`) also run the public suite (`--eval fixtures`, synthetic files in
+`evals/fixtures`) and take developer options. Your tests live in
+`~/Library/Application Support/Likely/evals/cases.jsonl`. See [docs/EVALS.md](docs/EVALS.md).
 
 Logs: `~/Library/Logs/Likely/likely.log`. Release builds leave out queries, window titles, paths and agent text
 unless Settings → General → "Log details for troubleshooting" is on (24 hours at most; it also logs every AX

@@ -1,7 +1,6 @@
-// Dev builds only (./build.sh, LIKELY_DEV): release builds have no eval mode at all.
-#if LIKELY_DEV
 import AppKit
 import CryptoKit
+import Darwin
 import LikelyEvalKit
 import LikelyStorage
 import LikelyTools
@@ -10,11 +9,59 @@ import LikelyTools
 /// writes results.json + report.html. No menu bar item, onboarding, AX watching or copying into the
 /// Likely folder: FILE lines go to a dry-run sink that records what Likely would have shown.
 /// See docs/EVALS.md.
+///
+/// Every build has it. Release builds accept only a safe subset (`EvalOptions.Policy.release`): the
+/// user's own cases (`--eval personal`), agents Likely detected itself, the prompt saved in Settings,
+/// the same license check as searches, and a clean environment (`EvalEnvironment`). Dev builds
+/// (`./build.sh`, LIKELY_DEV) accept everything: fixtures, any cases file, `--agent-path`, `--prompt-file`, ….
 enum EvalCLI {
     /// The made-up person the fixture files belong to (evals/fixtures/generate.py).
     static let fixturePersona = "Jordan Rivera"
 
-    static let usage = """
+    static var policy: EvalOptions.Policy {
+        #if LIKELY_DEV
+        return .dev
+        #else
+        return .release
+        #endif
+    }
+
+    /// The command a user (or their coding agent) runs: this executable, quoted for the shell.
+    static var commandPath: String {
+        let path = Bundle.main.executablePath ?? "/Applications/Likely.app/Contents/MacOS/Likely"
+        return path.contains(where: { " '\"$`\\!&;()<>|*?[]#~".contains($0) }) ? "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'" : path
+    }
+
+    static let releaseUsage = """
+    Usage: Likely --eval personal [options]
+
+    Runs your own tests (Likely → Settings → Tests) through the agent and prompt Likely uses, and compares
+    the results with your previous run. Nothing opens on screen; it works while Likely is running.
+
+    Options:
+      --agent <id>        claude, codex, gemini, opencode or hermes (default: the one chosen in Settings).
+                          Only agents Likely found on this Mac, at the path it found them.
+      --model <name>      model for that agent (default: the one chosen in Settings)
+      --case <id>         only this test (repeat, or separate with commas)
+      --tag <tag>         only tests with this tag (repeat, or separate with commas)
+      --k <n>             pass if an expected file is in the top n suggestions (1-8, default 8)
+      --timeout <sec>     per test, all turns included (10-600, default 120)
+      --jobs <n>          tests run in parallel (1-4, default 1; times are only comparable at 1)
+      --repeat <n>        run every test n times (1-5, default 1)
+      --with-tools        give the agent your approved tools (the default)
+      --without-tools     run on the built-in search commands only, to measure what your tools add
+      --json              print machine-readable results on stdout (progress still goes to stderr)
+      --verbose           also print Likely's log lines on stderr
+
+    Progress goes to stderr; the summary (or, with --json, the results) to stdout. Every run also writes
+    results.json and report.html to ~/Library/Application Support/Likely/evals/runs/<time>-<agent>-<model>/.
+
+    Exit status: 0 the run completed (whatever the pass rate); 1 error (no agent found, no tests, another
+    run in progress, results not written); 2 usage error; 3 Likely isn't licensed; 130/143 stopped by
+    SIGINT/SIGTERM (partial results are written).
+    """
+
+    static let devUsage = """
     Usage: Likely --eval <fixtures|personal|all|cases.jsonl> [options]
 
       fixtures            the repo's public suite (evals/fixtures/cases.jsonl, synthetic files only)
@@ -30,24 +77,33 @@ enum EvalCLI {
       --timeout <sec>     per case, all turns included (default 120)
       --repeat <n>        run every case n times (default 1)
       --jobs <n>          cases run in parallel (default 1; latency is only comparable at 1)
-      --tags <a,b>        only cases with any of these tags
-      --case <id,id>      only these cases
+      --tags <a,b>        only cases with any of these tags (also --tag, repeatable)
+      --case <id,id>      only these cases (repeatable)
       --prompt-file <f>   use this prompt template instead of the one in Settings
       --out <dir>         results folder (default: …/Likely/evals/runs/<time>-<agent>-<model>)
       --no-isolate        don't sandbox cases that set searchFolders (see EVALS.md)
       --with-tools        give fixture cases your tools too (personal cases always get them; see EVALS.md)
+      --without-tools     no case gets your tools
+      --json              machine-readable results on stdout
       --dry-run           print the prompts that would be sent; run nothing
       --verbose           also print Likely's log lines
 
-    Eval mode exists only in dev builds (./build.sh).
+    This is a dev build: release builds accept only --eval personal and the safe options (see EVALS.md).
 
-    Exit status: 0 when the run completed (whatever the pass rate), 1 if results couldn't be written,
-    2 on a usage/setup error, 130/143 when stopped by SIGINT/SIGTERM (partial results are written).
+    Exit status: 0 when the run completed (whatever the pass rate), 1 on errors (results couldn't be
+    written, no agent, no cases), 2 on a usage error, 130/143 when stopped by SIGINT/SIGTERM (partial
+    results are written).
     """
+
+    static var usage: String { policy == .release ? releaseUsage : devUsage }
 
     static func isRequested(_ arguments: [String]) -> Bool { arguments.contains("--eval") }
 
     private static var current: EvalSession?
+    /// Held for the whole run (see EvalStorage.runLockURL).
+    private static var runLock: FileLock.Held?
+    /// `--json`: errors are also reported as JSON on stdout.
+    private(set) static var json = false
 
     /// The user's enabled, approved tools (tools.json), read once at the start so every case of a
     /// run sees the same set. Cases that use tools get exactly these (see EvalToolPolicy).
@@ -59,18 +115,33 @@ enum EvalCLI {
 
     /// Never returns.
     static func main(_ arguments: [String]) -> Never {
-        var options: Options
+        json = EvalOptions.wantsJSON(arguments)
+        var options: EvalOptions
         do {
-            options = try Options.parse(Array(arguments.dropFirst()))
+            options = try EvalOptions.parse(Array(arguments.dropFirst()), policy: policy)
         } catch {
-            fail("\(error)\n\n\(usage)")
+            usageError("\(error)")
         }
         if options.help {
             print(usage)
-            exit(0)
+            exit(EvalExit.completed)
+        }
+        if policy == .release {
+            // Before anything reads a preference, a file in ~ or starts a process.
+            restartWithCleanEnvironmentIfNeeded(arguments)
+            // `-key value` arguments override preferences for this process (NSArgumentDomain); the parser
+            // refused any, and none may count.
+            UserDefaults.standard.removeVolatileDomain(forName: UserDefaults.argumentDomain)
         }
         Log.echoToStderr = options.verbose
         Log.write("eval", "eval mode: \(sensitive: arguments.dropFirst().joined(separator: " "))")
+
+        // Same gate as searches (Coordinator.isLicensed): the cached entitlement, no network, no UI.
+        // Dev builds don't check: eval mode there is a developer tool.
+        if policy == .release, !License.isActive {
+            fail(EvalExit.unlicensed, "Likely isn't licensed on this Mac, so it can't run searches or tests. Open Likely to buy or "
+                 + "restore a license (a subscription is re-checked when Likely runs), then try again.")
+        }
 
         let suite: Suite
         do { suite = try Suite.load(options.suite) } catch { fail("\(error)") }
@@ -79,7 +150,14 @@ enum EvalCLI {
         let skipped = suite.cases.count - cases.count
         if !options.tags.isEmpty { cases = cases.filter { !Set($0.evalCase.tags).isDisjoint(with: options.tags) } }
         if !options.caseIDs.isEmpty { cases = cases.filter { options.caseIDs.contains($0.evalCase.id) } }
-        guard !cases.isEmpty else { fail("No cases to run in \(options.suite)\(options.tags.isEmpty ? "" : " with tags \(options.tags.sorted())").") }
+        if let unknown = options.caseIDs.subtracting(suite.cases.map(\.evalCase.id)).sorted().first {
+            printErr("warning: no test with id \(unknown)")
+        }
+        guard !cases.isEmpty else {
+            fail(suite.cases.isEmpty && options.suite == "personal"
+                 ? "You have no saved tests yet. Save one with “Save as test” in the bar above a picker, Settings → History → Make Eval, or Settings → Tests → New Test…."
+                 : "No cases to run in \(options.suite)\(options.tags.isEmpty ? "" : " with tags \(options.tags.sorted())").")
+        }
         if skipped > 0 { printErr("note: skipped \(skipped) case\(skipped == 1 ? "" : "s") with no expected files") }
         // Likely never shows files in some places (/tmp, hidden folders, ~/Library, …): such cases can't pass.
         for item in cases {
@@ -93,16 +171,17 @@ enum EvalCLI {
         }
 
         var template = Settings.promptTemplate
-        if let file = options.promptFile {
+        if let file = options.promptFile {   // dev builds only (EvalOptions refuses it in release builds)
             guard let text = try? String(contentsOfFile: (file as NSString).expandingTildeInPath, encoding: .utf8) else { fail("Can't read \(file)") }
             template = text
         }
 
         let agentID = options.agent ?? Settings.agentID
         guard let kind = AgentKind.with(id: agentID), kind.isSupported else {
-            fail("Unknown or unsupported agent \"\(agentID)\". Supported: \(AgentKind.all.filter(\.isSupported).map(\.id).joined(separator: ", "))")
+            usageError("Unknown or unsupported agent \"\(agentID)\". Supported: \(AgentKind.all.filter(\.isSupported).map(\.id).joined(separator: ", "))")
         }
         let model = options.model ?? AgentModels.selected(for: agentID)
+        if policy == .release, !EvalOptions.isValidModel(model) { usageError("Invalid model name \(model) (Settings → Agent)") }
 
         let wantsIsolation = options.isolate && cases.contains { $0.evalCase.searchFolders != nil }
         if wantsIsolation, kind.id == "codex" {
@@ -111,10 +190,10 @@ enum EvalCLI {
                      + "The run is recorded as not isolated.")
         }
         if wantsIsolation, kind.id == "hermes", options.jobs > 1 {
-            fail("Hermes serves every case through one gateway, which runs inside the sandbox of the case that started it. Isolated Hermes runs need --jobs 1 (or --no-isolate).")
+            usageError("Hermes serves every case through one gateway, which runs inside the sandbox of the case that started it. Isolated Hermes runs need --jobs 1 (or --no-isolate).")
         }
 
-        if options.dryRun {
+        if options.dryRun {   // dev builds only
             for item in cases {
                 let run = EvalCaseRun(item: item, agent: EvalCaseRun.Agent(kind: kind, path: "-", model: model), template: template,
                                       options: options, attempt: 1, workDir: FileManager.default.temporaryDirectory)
@@ -125,12 +204,29 @@ enum EvalCLI {
                 }
                 print()
             }
-            exit(0)
+            exit(EvalExit.completed)
         }
 
+        // Release builds: only where Likely found the agent itself (the same lookup as the app).
         guard let path = options.agentPath ?? locate(agentID) else {
-            fail("\(kind.name) not found. Install it, or pass --agent-path.")
+            fail(policy == .release ? "\(kind.name) isn't installed (Likely looked where the app looks). Install it, or pick another agent with --agent."
+                                    : "\(kind.name) not found. Install it, or pass --agent-path.")
         }
+
+        // One run at a time: the app's Settings and a coding agent may both start one.
+        do {
+            guard let held = try FileLock.tryHold(EvalStorage.runLockURL) else {
+                fail("Another test run is in progress (from Likely's Settings or another command). Wait for it to finish, then run again.")
+            }
+            runLock = held
+        } catch {
+            fail("Can't start the run: \(error)")
+        }
+        // Hermes: a profile of its own, so the run never stops or reuses the app's gateway (see HermesRunner).
+        HermesRunner.usesEvalProfile = true
+        // Codex can't use sandbox patterns: find Photos libraries now, as the app does at launch.
+        if kind.id == "codex", PrivateDataAccess.blocked().contains(.photos) { PhotoLibraries.refreshNow() }
+
         let agent = EvalCaseRun.Agent(kind: kind, path: path, model: model)
         let session = EvalSession(suite: suite, cases: cases, agent: agent, template: template, options: options)
         // Held for the life of the process (a local could be released early by the optimizer).
@@ -140,6 +236,49 @@ enum EvalCLI {
         // Agent runners deliver output on the main queue; keep the run loop alive until the session exits.
         RunLoop.main.add(Port(), forMode: .default)
         while true { RunLoop.main.run(mode: .default, before: .distantFuture) }
+    }
+
+    /// Release builds: run in the environment the app gets from launchd, rebuilt from the user
+    /// database (EvalEnvironment), by exec'ing this same executable again if the caller's differs. The
+    /// caller's environment could otherwise steer which programs Likely and its agents load or run
+    /// (DYLD_*, NODE_OPTIONS, PATH, ZDOTDIR, …) or which "home" Likely reads (CFFIXED_USER_HOME, which
+    /// Foundation reads at launch, so it can't be unset in-process).
+    private static func restartWithCleanEnvironmentIfNeeded(_ arguments: [String]) {
+        guard let pw = getpwuid(getuid()) else { fail("Can't read your user account") }
+        let home = String(cString: pw.pointee.pw_dir)
+        let user = String(cString: pw.pointee.pw_name)
+        let shell = String(cString: pw.pointee.pw_shell)
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
+        let tmpdir = confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, buffer.count) > 0 ? String(cString: buffer) : nil
+        var passThrough: Set<String> = []
+        #if LIKELY_EVAL_TEST_SEAM
+        // scripts/test-eval-cli.sh only: a build made for that test lets it use a fake home folder.
+        passThrough = ["CFFIXED_USER_HOME", "HOME", "LIKELY_EVALS_DIR"]
+        #endif
+        let marker = "__LIKELY_EVAL_CLEAN_ENV"
+        let current = ProcessInfo.processInfo.environment
+        var clean = EvalEnvironment.sanitized(current, home: home, user: user, shell: shell, tmpdir: tmpdir, passThrough: passThrough)
+        clean[marker] = "1"
+        let differences = EvalEnvironment.differences(current, from: clean)
+        guard !differences.isEmpty else { return }
+        // Never loop: after one restart the environment is the clean one.
+        if current[marker] != nil { fail("Can't run with a clean environment (\(differences.joined(separator: ", ")))") }
+
+        var size = UInt32(0)
+        _NSGetExecutablePath(nil, &size)
+        var raw = [CChar](repeating: 0, count: Int(size) + 1)
+        guard _NSGetExecutablePath(&raw, &size) == 0, let real = realpath(raw, nil) else { fail("Can't find Likely's executable") }
+        let executable = String(cString: real)
+        free(real)
+        let argv = [executable] + arguments.dropFirst()
+        let envp = clean.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+        var cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) } + [nil]
+        var cEnv: [UnsafeMutablePointer<CChar>?] = envp.map { strdup($0) } + [nil]
+        fflush(stdout)
+        fflush(stderr)
+        execve(executable, &cArgs, &cEnv)
+        let code = errno
+        fail("Can't restart with a clean environment: \(String(cString: strerror(code)))")
     }
 
     private static var signalSources: [DispatchSourceSignal] = []
@@ -155,6 +294,8 @@ enum EvalCLI {
         }
     }
 
+    /// Where the app would run the agent from: the saved Claude path, then AgentDetector's lookup (fixed
+    /// install folders, then the user's login shell).
     private static func locate(_ agentID: String) -> String? {
         let fm = FileManager.default
         if agentID == "claude", let saved = UserDefaults.standard.string(forKey: "claudePath"), fm.isExecutableFile(atPath: saved) {
@@ -163,86 +304,26 @@ enum EvalCLI {
         return AgentDetector.locateAll()[agentID]
     }
 
-    static func fail(_ message: String) -> Never {
+    /// A setup or run error: exit 1 (or `status`).
+    static func fail(_ status: Int32 = EvalExit.failed, _ message: String) -> Never {
         printErr(message)
-        exit(2)
+        if json { print(EvalCLIResult.failure(message, exitCode: status).encoded()) }
+        fflush(stdout)
+        exit(status)
+    }
+
+    static func fail(_ message: String) -> Never { fail(EvalExit.failed, message) }
+
+    /// Exit 2, with the usage.
+    static func usageError(_ message: String) -> Never {
+        printErr("\(message)\n\n\(usage)")
+        if json { print(EvalCLIResult.failure(message, exitCode: EvalExit.usage).encoded()) }
+        fflush(stdout)
+        exit(EvalExit.usage)
     }
 
     static func printErr(_ message: String) {
         FileHandle.standardError.write(Data((message + "\n").utf8))
-    }
-
-    // MARK: Options
-
-    struct Options {
-        var suite = ""
-        var agent: String?
-        var model: String?
-        var agentPath: String?
-        var k = 8
-        var timeout: TimeInterval = 120
-        var repeatCount = 1
-        var jobs = 1
-        var tags = Set<String>()
-        var caseIDs = Set<String>()
-        var promptFile: String?
-        var out: String?
-        var isolate = true
-        var withTools = false
-        var dryRun = false
-        var verbose = false
-        var help = false
-
-        struct ParseError: Error, CustomStringConvertible { let description: String }
-
-        static func parse(_ args: [String]) throws -> Options {
-            var o = Options()
-            var i = 0
-            func value(_ flag: String) throws -> String {
-                i += 1
-                guard i < args.count else { throw ParseError(description: "\(flag) needs a value") }
-                return args[i]
-            }
-            func int(_ flag: String) throws -> Int {
-                let v = try value(flag)
-                guard let n = Int(v), n > 0 else { throw ParseError(description: "\(flag) needs a positive number, got \(v)") }
-                return n
-            }
-            func list(_ s: String) -> Set<String> {
-                Set(s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-            }
-            while i < args.count {
-                let arg = args[i]
-                switch arg {
-                case "--eval": o.suite = try value(arg)
-                case "--agent": o.agent = try value(arg)
-                case "--model": o.model = try value(arg)
-                case "--agent-path": o.agentPath = try value(arg)
-                case "--k": o.k = try int(arg)
-                case "--timeout": o.timeout = TimeInterval(try int(arg))
-                case "--repeat": o.repeatCount = try int(arg)
-                case "--jobs": o.jobs = try int(arg)
-                case "--tags": o.tags = list(try value(arg))
-                case "--case", "--cases": o.caseIDs = list(try value(arg))
-                case "--prompt-file": o.promptFile = try value(arg)
-                case "--out": o.out = try value(arg)
-                case "--no-isolate": o.isolate = false
-                case "--isolate": o.isolate = true
-                case "--with-tools": o.withTools = true
-                case "--dry-run": o.dryRun = true
-                case "--verbose": o.verbose = true
-                case "--help", "-h": o.help = true
-                default:
-                    // Xcode/launchd may add -NSDocumentRevisionsDebugMode etc.; ignore those.
-                    if arg.hasPrefix("-NS") || arg.hasPrefix("-Apple") { i += 1 } else {
-                        throw ParseError(description: "Unknown option \(arg)")
-                    }
-                }
-                i += 1
-            }
-            if o.suite.isEmpty && !o.help { throw ParseError(description: "--eval needs a suite") }
-            return o
-        }
     }
 }
 
@@ -265,6 +346,10 @@ struct Suite {
     struct LoadError: Error, CustomStringConvertible { let description: String }
 
     static func load(_ spec: String) throws -> Suite {
+        // Release builds: the user's own cases file only (EvalOptions refuses anything else first).
+        if EvalCLI.policy == .release, !EvalOptions.releaseSuites.contains(spec) {
+            throw LoadError(description: "Release builds run only your own tests (--eval personal).")
+        }
         var files: [URL]
         switch spec {
         case "fixtures":
@@ -284,6 +369,7 @@ struct Suite {
             let isFixtures = file.standardizedFileURL.resolvingSymlinksInPath() == fixtures
             guard FileManager.default.fileExists(atPath: file.path) else {
                 if spec == "all" { warnings.append("\(file.path) doesn't exist"); continue }
+                if spec == "personal" || spec == "mine" { continue }   // no tests saved yet: said by the caller
                 throw LoadError(description: "No cases file at \(file.path)")
             }
             let (loaded, errors) = try EvalCaseFile.load(file)
@@ -301,6 +387,7 @@ struct Suite {
     /// evals/fixtures/cases.jsonl: $LIKELY_FIXTURES, the app bundle (dev builds), or the repo the binary
     /// was built in (walking up from the executable), or the current directory.
     static func fixturesFile() throws -> URL {
+        guard EvalCLI.policy == .dev else { throw LoadError(description: "The public fixtures are in dev builds only.") }
         let fm = FileManager.default
         var candidates: [URL] = []
         if let env = ProcessInfo.processInfo.environment["LIKELY_FIXTURES"] {
@@ -329,7 +416,7 @@ final class EvalSession {
     let cases: [SuiteCase]
     let agent: EvalCaseRun.Agent
     let template: String
-    let options: EvalCLI.Options
+    let options: EvalOptions
     let runDir: URL
     private let startedAt = Date()
     /// (index in `cases`, case, attempt)
@@ -339,8 +426,10 @@ final class EvalSession {
     private var results: [(index: Int, result: EvalCaseResult)] = []
     private var total = 0
     private var interruptedBy: Int32?
+    /// Tools changed outside Likely and not approved yet: not used, and said so.
+    let pendingTools: [String] = ToolStore.shared.pending.map(\.tool.id).sorted()
 
-    init(suite: Suite, cases: [SuiteCase], agent: EvalCaseRun.Agent, template: String, options: EvalCLI.Options) {
+    init(suite: Suite, cases: [SuiteCase], agent: EvalCaseRun.Agent, template: String, options: EvalOptions) {
         self.suite = suite
         self.cases = cases
         self.agent = agent
@@ -364,13 +453,17 @@ final class EvalSession {
         } catch {
             EvalCLI.fail("Can't create \(runDir.path): \(error)")
         }
-        print("Running \(total) case\(total == 1 ? "" : "s") from \(suite.name) with \(agent.kind.name) · \(agent.model)")
+        // Progress goes to stderr; stdout gets only the summary (or the JSON).
+        EvalCLI.printErr("Running \(total) case\(total == 1 ? "" : "s") from \(suite.name) with \(agent.kind.name) · \(agent.model)")
         let withTools = cases.filter { EvalCaseRun.usesTools($0, options: options) }.count
         let tools = EvalCLI.userTools.isEmpty ? "none" : EvalCLI.userTools.map(\.id).joined(separator: ", ")
-        print("Your tools: \(tools)" + (EvalCLI.userTools.isEmpty || withTools == cases.count ? ""
+        EvalCLI.printErr("Your tools: \(tools)" + (EvalCLI.userTools.isEmpty || withTools == cases.count ? ""
               : " (\(cases.count - withTools) of \(cases.count) cases run without them)"))
-        print("Results: \(runDir.path)")
-        fflush(stdout)
+        if !pendingTools.isEmpty {
+            EvalCLI.printErr("note: waiting for your approval in Likely → Settings → Tools, so not used in this run: "
+                             + pendingTools.joined(separator: ", "))
+        }
+        EvalCLI.printErr("Results: \(runDir.path)")
         fill()
     }
 
@@ -418,8 +511,7 @@ final class EvalSession {
         line += "  rank \(result.score.firstHitRank.map(String.init) ?? "–")  \(String(format: "%.1fs", result.totalSeconds))"
         if let cost = result.costUSD { line += String(format: "  $%.4f", cost) }
         if result.status != "ok" { line += "  [\(result.status)\(result.error.map { ": \($0.prefix(80))" } ?? "")]" }
-        print(line)
-        fflush(stdout)
+        EvalCLI.printErr(line)
         fill()
     }
 
@@ -439,19 +531,25 @@ final class EvalSession {
                           interrupted: interruptedBy == nil ? nil : true,
                           tools: EvalCLI.toolSet(cases.contains { EvalCaseRun.usesTools($0, options: options) } ? EvalCLI.userTools : []))
         let previous = EvalRun.previous(of: run, in: runDir.deletingLastPathComponent(), excluding: runDir)
-        var status: Int32 = interruptedBy.map { 128 + $0 } ?? 0
+        let status: Int32 = interruptedBy.map(EvalExit.interrupted(by:)) ?? EvalExit.completed
+        let report = runDir.appendingPathComponent("report.html")
         do {
             try run.write(to: runDir.appendingPathComponent("results.json"))
             try OwnerOnly.write(template, to: runDir.appendingPathComponent("prompt-template.txt"))
-            let report = runDir.appendingPathComponent("report.html")
             try OwnerOnly.write(EvalReport.html(run, previous: previous?.0, previousPath: previous?.1.path), to: report)
             try? OwnerOnly.write(report.path, to: EvalStorage.lastRunURL)
-            print("")
-            print(EvalReport.textSummary(run, previous: previous?.0))
-            print("Report: \(report.path)")
         } catch {
-            EvalCLI.printErr("Couldn't write results: \(error)")
-            status = 1
+            EvalCLI.fail("Couldn't write results: \(error)")
+        }
+        var summary = EvalReport.textSummary(run, previous: previous?.0)
+        if !pendingTools.isEmpty { summary += "\nNot used (waiting for approval in Settings → Tools): " + pendingTools.joined(separator: ", ") }
+        summary += "\nResults: \(runDir.appendingPathComponent("results.json").path)\nReport: \(report.path)"
+        if options.json {
+            EvalCLI.printErr("\n" + summary)
+            print(EvalCLIResult.make(run: run, runFolder: runDir, previous: previous, pendingTools: pendingTools, exitCode: status).encoded())
+        } else {
+            print("")
+            print(summary)
         }
         fflush(stdout)
         exit(status)
@@ -477,7 +575,7 @@ final class EvalCaseRun {
     let item: SuiteCase
     let agent: Agent
     let template: String
-    let options: EvalCLI.Options
+    let options: EvalOptions
     let attempt: Int
     /// The case's folder: its prompt, transcript and results. Agents can't read it.
     let workDir: URL
@@ -505,6 +603,12 @@ final class EvalCaseRun {
     /// when the case ends. Plain PNGs (the repo's fixtures) are used as they are.
     private lazy var screenshot: URL? = {
         guard let path = evalCase.context?.screenshot.map({ EvalPath.resolve($0, relativeTo: item.base) }) else { return nil }
+        // Release builds attach only screenshots Likely saved with the tests (evals/screenshots), never
+        // another file a cases file points at.
+        if EvalCLI.policy == .release, !EvalPath.isInside(path, EvalPath.normalize(EvalStorage.screenshotsURL.path)) {
+            EvalCLI.printErr("warning: \(evalCase.id): its screenshot isn't one Likely saved, so it runs without it")
+            return nil
+        }
         do {
             let file = try EvalScreenshots.materialize(path, in: agentDir, cipher: DataProtection.cipher)
             if file.isTemporary { temporaryScreenshot = file.url }
@@ -521,14 +625,15 @@ final class EvalCaseRun {
     /// … and the sandbox enforces it (not for Codex).
     private var isolated: Bool { wantsIsolation && agent.canIsolate }
 
-    static func usesTools(_ item: SuiteCase, options: EvalCLI.Options) -> Bool {
-        EvalToolPolicy.usesTools(item.evalCase, inFixtureSuite: item.inFixtureSuite, withTools: options.withTools)
+    static func usesTools(_ item: SuiteCase, options: EvalOptions) -> Bool {
+        EvalToolPolicy.usesTools(item.evalCase, inFixtureSuite: item.inFixtureSuite, withTools: options.withTools,
+                                 withoutTools: options.withoutTools)
     }
     /// The user's tools this case runs with: all of the app's, or none (prompt, allowlist and sandbox
     /// profile alike).
     private var tools: [CustomTool] { Self.usesTools(item, options: options) ? EvalCLI.userTools : [] }
 
-    init(item: SuiteCase, agent: Agent, template: String, options: EvalCLI.Options, attempt: Int, workDir: URL) {
+    init(item: SuiteCase, agent: Agent, template: String, options: EvalOptions, attempt: Int, workDir: URL) {
         self.item = item
         self.agent = agent
         self.template = template
@@ -712,4 +817,3 @@ final class EvalCaseRun {
         return cost
     }
 }
-#endif

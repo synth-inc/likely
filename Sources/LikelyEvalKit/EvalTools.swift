@@ -7,8 +7,11 @@ public enum EvalToolPolicy {
     ///   tool and running the evals again measures the tool.
     /// - Fixture cases (`source: "fixture"`, or anything in the public fixtures suite) ignore them,
     ///   so results stay comparable across machines. `--with-tools` (`withTools`) opts them in.
-    /// - A case's `context.useTools` decides for that case, either way.
-    public static func usesTools(_ evalCase: EvalCase, inFixtureSuite: Bool, withTools: Bool) -> Bool {
+    /// - A case's `context.useTools` decides for that case, either way...
+    /// - ...except `--without-tools` (`withoutTools`), which runs every case on the built-in commands only,
+    ///   to measure what the tools add.
+    public static func usesTools(_ evalCase: EvalCase, inFixtureSuite: Bool, withTools: Bool, withoutTools: Bool = false) -> Bool {
+        if withoutTools { return false }
         if let explicit = evalCase.context?.useTools { return explicit }
         if withTools { return true }
         return !(inFixtureSuite || evalCase.source == "fixture")

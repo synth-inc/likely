@@ -17,7 +17,8 @@ survive rebuilds (an ad-hoc signature changes every build, and macOS then asks a
 more than one, pin one with `LIKELY_SIGN_ID` (its SHA-1 from `security find-identity -v -p codesigning`,
 or its full name). Otherwise the first one is used, and which one that is can change.
 
-Builds from `./build.sh` are dev builds: they also have Settings → Evals, `--eval` and the Debug tab.
+Builds from `./build.sh` are dev builds: they also have the Debug tab, `devLicenseOverride`, and the developer options of
+`--eval` (public fixtures, any cases file, `--agent-path`, `--prompt-file`; see [EVALS.md](EVALS.md)).
 
 ## Encryption needs a provisioning profile
 

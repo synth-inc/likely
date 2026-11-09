@@ -11,7 +11,7 @@ searching to its model provider; that's how the search works.
 | Search history (what you typed, the app, suggestions, the pick; last 500) | `~/Library/Application Support/Likely/History/history.enc.jsonl` (encrypted), or `history.jsonl` in builds without encryption | Encrypted (official releases), owner-only, agents can't read it |
 | Your test cases and drafts | `…/Likely/evals/cases.jsonl`, `drafts.jsonl` | Plaintext (see below), owner-only, agents can't read them |
 | Screenshots saved with tests | `…/Likely/evals/screenshots/<id>.png.enc`, or `<id>.png` in builds without encryption | Encrypted (official releases), owner-only, agents can't read them |
-| Eval runs (results, reports, transcripts) | `…/Likely/evals/runs/` (dev builds only) | Owner-only, agents can't read them (a running case reads only its own folder) |
+| Test runs (results, reports, transcripts) | `…/Likely/evals/runs/` | Owner-only, agents can't read them (a running case reads only its own folder) |
 | Your extra agent tools | `…/Likely/tools.json` | Plaintext (see below), owner-only, agents can't read it |
 | The screenshot sent with a search | `…/Likely/run/context-<id>.png` | Owner-only; only on disk while the agent works on a turn (see below) |
 | Agent transcript of the last search | `…/Likely/transcripts/last-run.jsonl`, only while "Log details for troubleshooting" is on (dev builds: always) | Owner-only, agents can't read it; deleted when details turn off and at launch |
@@ -206,7 +206,7 @@ changed outside Likely's Settings does nothing until you approve it there.
 ## Deleting it
 
 - **Search history:** Settings → History → Clear History…, or delete the `History` folder.
-- **Tests:** Settings → Evals, or delete `…/Likely/evals`.
+- **Tests:** Settings → Tests, or delete `…/Likely/evals`.
 - **Log:** Settings → General → Clear Log (both files), or delete `~/Library/Logs/Likely`.
 - **Everything:** quit Likely, then delete `~/Library/Application Support/Likely`,
   `~/Library/Application Support/Likely.noindex`, `~/Library/Logs/Likely`, `~/Library/Logs/Likely.noindex`

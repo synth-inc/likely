@@ -172,6 +172,10 @@ public enum SearchHistoryFile {
     /// there's no key.
     @discardableResult
     public static func convertPlaintext(from plain: URL, to encrypted: URL, cipher: DataCipher) throws -> Int {
+        try locked(encrypted) { try convertPlaintextLocked(from: plain, to: encrypted, cipher: cipher) }
+    }
+
+    private static func convertPlaintextLocked(from plain: URL, to encrypted: URL, cipher: DataCipher) throws -> Int {
         let source = try rawLines(plain)
         let toConvert = source.filter { !DataCipher.isSealedLine($0) }
         guard !toConvert.isEmpty else { return 0 }
@@ -199,7 +203,8 @@ public enum SearchHistoryFile {
 
     public static func read(_ url: URL, cipher: DataCipher?) throws -> Contents {
         var contents = Contents(entries: [], unreadable: 0, problem: nil)
-        for line in try rawLines(url) {
+        let raw = FileManager.default.fileExists(atPath: url.path) ? try locked(url) { try rawLines(url) } : []
+        for line in raw {
             switch open(line, cipher: cipher) {
             case .success(let entry?): contents.entries.append(entry)
             case .success(nil): break
@@ -230,10 +235,19 @@ public enum SearchHistoryFile {
 
     /// Adds entries in order, in one write: all of them or (on any error) none.
     public static func append(_ entries: [SearchHistoryEntry], to url: URL, cipher: DataCipher?, limit: Int = defaultLimit) throws {
-        var all = try rawLines(url)
-        for e in entries { all.append(try seal(encodeLine(e), cipher: cipher)) }
-        if all.count > limit { all.removeFirst(all.count - limit) }
-        try write(all, to: url)
+        try locked(url) {
+            var all = try rawLines(url)
+            for e in entries { all.append(try seal(encodeLine(e), cipher: cipher)) }
+            if all.count > limit { all.removeFirst(all.count - limit) }
+            try write(all, to: url)
+        }
+    }
+
+    /// Read-modify-write under the history folder's cross-process lock (FileLock): two Likely processes
+    /// (say a dev build and a release build) never drop each other's entries.
+    private static func locked<T>(_ url: URL, _ body: () throws -> T) throws -> T {
+        try OwnerOnly.createDirectory(url.deletingLastPathComponent())
+        return try FileLock.withLock(FileLock.url(for: url.deletingLastPathComponent()), body)
     }
 
     /// Rewrites the entry with `id`, if there is one. Returns the updated entry, or nil if no line this
@@ -241,19 +255,23 @@ public enum SearchHistoryFile {
     @discardableResult
     public static func update(id: String, in url: URL, cipher: DataCipher?,
                               _ change: (inout SearchHistoryEntry) -> Void) throws -> SearchHistoryEntry? {
-        var updated: SearchHistoryEntry?
-        let all = try rawLines(url).map { line -> String in
-            guard updated == nil, case .success(var e?) = open(line, cipher: cipher), e.id == id else { return line }
-            change(&e)
-            updated = e
-            return try seal(encodeLine(e), cipher: cipher)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try locked(url) {
+            var updated: SearchHistoryEntry?
+            let all = try rawLines(url).map { line -> String in
+                guard updated == nil, case .success(var e?) = open(line, cipher: cipher), e.id == id else { return line }
+                change(&e)
+                updated = e
+                return try seal(encodeLine(e), cipher: cipher)
+            }
+            if updated != nil { try write(all, to: url) }
+            return updated
         }
-        if updated != nil { try write(all, to: url) }
-        return updated
     }
 
     public static func clear(_ url: URL) throws {
-        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try locked(url) { try FileManager.default.removeItem(at: url) }
     }
 
     private static func seal(_ line: String, cipher: DataCipher?) throws -> String {

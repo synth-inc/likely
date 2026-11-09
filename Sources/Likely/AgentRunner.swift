@@ -366,6 +366,14 @@ enum PhotoLibraries {
         return known
     }
 
+    /// Blocking: for `Likely --eval`, whose first case can't wait for a background scan.
+    static func refreshNow() {
+        let found = PhotoLibraryScan.find()
+        lock.lock()
+        known = found
+        lock.unlock()
+    }
+
     static func refresh() {
         lock.lock()
         guard !scanning else { return lock.unlock() }

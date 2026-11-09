@@ -10,9 +10,113 @@ through the app's real prompt and agent runner, and every answer is scored.
 - **Capture** turns real use into cases: "Save as test" in the bar above a picker, or (opt-in)
   automatically saving every confirmed pick as a test.
 
-## Running
+In the app, cases are called **tests** (Settings → Tests), and every build can run your own: see
+[Running your tests](#running-your-tests-every-build).
 
-Build a dev build (`./build.sh`) or a bare binary (`swift build -c release -Xswiftc -DLIKELY_DEV`), then:
+## Running your tests (every build)
+
+Every build, including the one you download, can re-run **your own tests** and compare the result with
+the previous run, from Settings or from the command line. The loop it's for:
+
+1. **Save misses as tests**: "Save as test" in the bar above a picker, **Make Eval** in Settings → History,
+   or automatic saving (Settings → Tests, off by default). See [Writing your own cases](#writing-your-own-cases).
+2. **Change something**: add a tool (Settings → Tools, or your coding agent; see [TOOLS.md](TOOLS.md)), edit
+   the prompt (Settings → Prompt), or switch agent or model.
+3. **Re-run** and **compare**: the summary says how many tests pass, which started or stopped passing, and
+   whether your tools changed since the previous run ("tools changed: +rclip").
+
+### From Settings
+
+**Settings → Tests** lists your tests (search, filter by tag, Edit, delete, New Test…) and the drafts that
+need an expected file. **Run Tests…** picks the agent (the current one by default; only agents Likely found),
+the model, and **with or without your tools** (with, by default), then shows progress, the pass count, the
+comparison with the previous run, and **Open Report**. **Open Report** in the tab opens the last run's
+report.
+
+The row at the bottom is for the command line: the exact command with **Copy Command**, **Copy for Coding
+Agent** (instructions for Claude Code, Codex, …: run the tests before and after a change and report the
+difference), and **Install Command…**, which writes a small `likely` script to `~/.local/bin` (never with an
+administrator password, never over a file Likely didn't write) so `likely --json` runs your tests.
+
+### From the command line, or your coding agent
+
+```sh
+/Applications/Likely.app/Contents/MacOS/Likely --eval personal            # summary on stdout
+/Applications/Likely.app/Contents/MacOS/Likely --eval personal --json     # JSON on stdout
+/Applications/Likely.app/Contents/MacOS/Likely --eval personal --agent codex --model gpt-5.6-luna --tag image
+/Applications/Likely.app/Contents/MacOS/Likely --eval personal --without-tools   # what do my tools add?
+```
+
+It opens no window, no menu bar item and no onboarding, and works while the menu bar app is running.
+
+| Option | Default | |
+|---|---|---|
+| `--eval personal` | | your tests: `~/Library/Application Support/Likely/evals/cases.jsonl` |
+| `--agent <id>` | Settings | `claude`, `codex`, `gemini`, `opencode`, `hermes`: only one Likely found on this Mac, run from where it found it |
+| `--model <name>` | Settings | e.g. `haiku`, `sonnet`, `opencode/deepseek-v4.1-flash-free` |
+| `--case <id>` | all | only these tests (repeat the option, or separate ids with commas) |
+| `--tag <tag>` | all | only tests with one of these tags (repeatable; `--tags a,b` works too) |
+| `--k <n>` | 8 | pass if an expected file is in the top n (1-8) |
+| `--timeout <sec>` | 120 | per test, all turns included (10-600) |
+| `--jobs <n>` | 1 | tests in parallel (1-4); keep 1 when comparing times |
+| `--repeat <n>` | 1 | run each test n times (1-5; agents aren't deterministic) |
+| `--with-tools` / `--without-tools` | with | your approved tools, or the built-in search commands only, for every test |
+| `--json` | | machine-readable results on stdout |
+| `--verbose` | | also print Likely's (redacted) log lines on stderr |
+
+The prompt is always the one in Settings → Prompt, and your name is never sent (see Case format).
+
+**Output.** Progress (one line per test: `[2/5] PASS lease  rank 1  12.3s  $0.0042`) and warnings go to
+stderr. The summary goes to stdout, ending with the paths of `results.json` and `report.html`; with
+`--json`, stdout holds only one JSON object (the summary goes to stderr):
+
+| Field | |
+|---|---|
+| `status`, `exitCode`, `error` | `completed`, `interrupted` or `error` (then `error` says why, and the other fields are absent). Fields without a value are left out |
+| `suite`, `agent`, `model`, `k`, `promptHash` | what ran |
+| `runFolder`, `resultsPath`, `reportPath` | the run's files |
+| `summary` | `cases`, `scored`, `passed`, `failed`, `passRate`, `hitAt1`, `hitAt3`, `hitAtK`, `meanRecall`, `medianFirstFileSeconds`, `medianTotalSeconds`, `totalCostUSD` (Claude Code only), `timeouts`, `errors` |
+| `cases[]` | `id`, `attempt`, `pass`, `status`, `rank` (of the first expected file; absent if none was suggested), `totalSeconds`, `firstFileSeconds`, `costUSD`, `usedTools`, `error` |
+| `tools` | `active` (`id` and `hash` of each tool the agent got), `hash` (of the set), `pendingApproval` (tools changed outside Likely, not used until you approve them in Settings → Tools), `casesWithoutTools` |
+| `comparison` | absent on the first run; else `previousRunFolder`, `previousStartedAt`, `previousAgent`, `previousModel`, `previousPassed`, `previousScored`, `previousPassRate`, `passedDelta`, `passRateDelta`, `settingsDiffer` (non-empty: not like for like), `toolsChanged`, `toolChanges` (`+id` added, `-id` removed, `~id` edited), `nowPassing`, `nowFailing` |
+
+**Exit status**
+
+| | |
+|---|---|
+| 0 | the run completed, whatever the pass rate |
+| 1 | an error: the agent isn't installed, no saved tests, another run in progress, results couldn't be written |
+| 2 | a usage error: an unknown option, an option release builds refuse (below), a bad value |
+| 3 | Likely isn't licensed (paid builds; the same check as searches, from the license Likely last confirmed: open Likely to buy, restore or re-check one). Free builds (`LIKELY_FREE`) never check |
+| 130 / 143 | stopped by Ctrl-C (SIGINT) or SIGTERM: running tests are cancelled, partial results written |
+
+**What release builds refuse.** Anything that would let the caller choose a program, file or folder that
+Likely then uses: `--agent-path`, `--prompt-file`, `--out`, a cases file or `fixtures`/`all` as the suite,
+`--no-isolate`/`--isolate`, `--dry-run`, any other or single-dash argument (Foundation would read
+`-claudePath /x` as a preference), and option values starting with `-`. `--model` must look like a model
+name. A test's screenshot is only attached if it's one Likely saved (in `evals/screenshots`). The run
+re-executes itself in a clean environment rebuilt from your user account (home, user, shell, the
+standard `PATH`, temporary folder, locale): nothing the caller sets, such as `DYLD_*`, `NODE_OPTIONS`, `PATH`,
+`ZDOTDIR` or `CFFIXED_USER_HOME`, reaches Likely or the agents, so agents start exactly as they do from the
+app. `LIKELY_EVALS_DIR` and `LIKELY_FIXTURES` are dev-only. Everything else is what the app does: the same
+agent lookup, prompt, sandbox profiles, tool approval (an unapproved tool isn't used, and the run says so),
+private data rules, owner-only files and redacted log.
+
+**Running next to the app.** A run and the app share files, so:
+- One run at a time: a run holds `evals/.run.lock` (flock) while it runs; a second one (from Settings or a
+  command) exits 1 at once. This also keeps the runs folder and `last-run.txt` consistent.
+- `cases.jsonl`/`drafts.jsonl` and the search history are read and written under a lock file in their
+  folder (`.likely.lock`), so an append in one process is never seen half written or lost by another.
+  A run only reads your cases and never writes history.
+- Hermes: runs use their own profile, `likely-eval` (a copy of the app's `likely` profile when it has
+  one), so a run never stops the app's gateway or leaves one with a test's sandbox rules for the app.
+- Decrypted test screenshots live in the run's case folder and are deleted when the case ends; the app
+  only clears leftovers older than an hour, so it never deletes a running test's copy.
+
+### Dev builds
+
+Dev builds (`./build.sh`, or `swift build -c release -Xswiftc -DLIKELY_DEV`) accept everything above plus
+the developer options, and don't check the license:
 
 ```sh
 APP=build/Likely.app/Contents/MacOS/Likely
@@ -24,27 +128,24 @@ $APP --eval ~/my-cases.jsonl --case lease,k1s --repeat 3
 $APP --eval fixtures --dry-run                   # print the prompts; run nothing
 ```
 
-| Option | Default | |
-|---|---|---|
-| `--eval <suite>` | | `fixtures` (repo suite), `personal` (your cases.jsonl), `all` (both), or a path to any `.jsonl` |
-| `--agent <id>` | Settings | `claude`, `codex`, `gemini`, `opencode`, `hermes` |
-| `--model <name>` | Settings | e.g. `haiku`, `sonnet`, `opencode/deepseek-v4.1-flash-free` |
-| `--agent-path <path>` | auto-detected | agent executable |
-| `--k <n>` | 8 | cutoff for pass/fail and hit@k (Likely shows at most 8) |
-| `--timeout <sec>` | 120 | per case, all turns included |
-| `--repeat <n>` | 1 | run each case n times (agents are not deterministic) |
-| `--jobs <n>` | 1 | cases in parallel; keep 1 when comparing latency |
-| `--tags a,b` / `--case id,id` | all | filter |
-| `--prompt-file <file>` | Settings | try a different prompt template |
-| `--out <dir>` | see below | results folder |
-| `--no-isolate` | | don't sandbox cases that set `searchFolders` |
-| `--with-tools` | | give fixture cases your tools too (see Your tools) |
-| `--verbose` | | also print Likely's log lines |
+| Option | |
+|---|---|
+| `--eval <suite>` | also `fixtures` (repo suite), `all` (personal + fixtures), or a path to any `.jsonl` |
+| `--agent-path <path>` | agent executable (default: auto-detected) |
+| `--prompt-file <file>` | try a different prompt template |
+| `--out <dir>` | results folder |
+| `--no-isolate` | don't sandbox cases that set `searchFolders` |
+| `--with-tools` | give fixture cases your tools too (see Your tools) |
+| `--dry-run` | print the prompts; run nothing |
 
-From the app: **Settings → Evals → Run Suite…** runs the same command as a subprocess and shows its
-progress; **Open Last Report** opens the newest report.
+`LIKELY_EVALS_DIR` moves the evals folder and `LIKELY_FIXTURES` points at another fixtures folder. Dev
+builds also bundle `evals/fixtures` in the app, so Run Tests offers the public suite too.
+`scripts/test-eval-cli.sh` tests the release command line end to end with a fake agent and a fake home
+folder (in a build made with `LIKELY_EVAL_TEST_SEAM`, which nothing else sets).
 
-Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-<model>/`:
+### Run files
+
+Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-<model>/` (owner-only):
 
 - `results.json`: every case's suggestions, score, timings, cost, tool calls, and the run's tools (schema:
   `EvalRun` in `Sources/LikelyEvalKit/EvalResults.swift`).
@@ -59,21 +160,10 @@ Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-
   it may read: the decrypted screenshot and its config files, never the prompt or transcript files.
 - `prompt-template.txt`: the template used (its hash is in the report, to tell prompt versions apart).
 
-The command prints one line per case and a summary, and exits 0 when the run completes (whatever the
-pass rate), 1 if the results couldn't be written, or 2 on a usage/setup error. A case passes only if it
-ran to the end: a timeout or error counts as a failure even if the right file was already suggested.
+A case passes only if it ran to the end: a timeout or error counts as a failure even if the right file was
+already suggested. Closing the Run Tests sheet or quitting Likely stops a run started there (SIGTERM).
 
-Ctrl-C (SIGINT) or SIGTERM (what **Stop** in Run Suite sends) cancels the running cases, stops their
-agents, skips the rest and writes partial results (marked *interrupted*); the exit status is then 130 or
-143. Closing the Run Suite sheet or quitting Likely stops a run the same way.
-
-### Dev builds only
-
-Eval mode is a developer tool and doesn't check the license, so it exists only in dev builds
-(`./build.sh`, which compiles with `LIKELY_DEV`). Release builds (`LIKELY_DISTRIBUTION=1`) contain no
-`--eval` mode, no Settings → Evals tab and no "Save as test" in the bar; there's no flag to turn them on.
 The case format and file handling (`LikelyEvalKit`) are in every build: search history uses them.
-Dev builds also bundle `evals/fixtures` in the app, so the public suite runs from Settings too.
 
 ## Case format
 
@@ -165,7 +255,7 @@ Your cases live in `~/Library/Application Support/Likely/evals/cases.jsonl`. Way
    opening while the picker is up would take focus from it and could change its selection, and waiting
    means the actual pick can be prefilled as the answer.
 2. **Settings → History → Make Eval** for any past search, including the most recent one (see Search history).
-3. **Debug View → Make This a Test…** for any recent run, or **Settings → Evals → New Test…** from scratch.
+3. **Debug View → Make This a Test…** for any recent run, or **Settings → Tests → New Test…** from scratch.
 4. **Automatic saving** (see Capture), or edit the file by hand.
 
 Good cases are specific about *your* files: "the signed offer letter", "the PDF my landlord asked for",
@@ -176,16 +266,16 @@ model is weak.
 
 ## Capture from real use
 
-With **Settings → Evals → "Automatically save picks as tests"** turned on (off by default in every build),
+With **Settings → Tests → "Automatically save picks as tests"** turned on (off by default in every build),
 each confirmed pick becomes a case in `cases.jsonl` right away, with no approval step: what you typed,
 the app, the window title, the screenshot (if one was taken, saved as `…/evals/screenshots/<id>.png.enc`
 in builds with encryption, see [BUILDING.md](BUILDING.md), or as a 0600 `<id>.png` without; the case
 editor decrypts it in memory for its preview, and an eval run decrypts it into a temporary 0600 file in
 the case's `agent` folder, deleted when the case ends, or at the app's next launch if the run was killed), and the
 file(s) you picked. Captured cases have `"source": "captured"` and the tag `captured`, so they're easy to
-filter, edit or delete in Settings → Evals. Nothing is recorded for cancelled pickers, or when you neither
+filter, edit or delete in Settings → Tests. Nothing is recorded for cancelled pickers, or when you neither
 typed anything nor had a screenshot. If the pick can't be read, it stays out of your tests: it's logged
-and kept in `drafts.jsonl`, shown under **Needs expected** in Settings → Evals, where you can choose the
+and kept in `drafts.jsonl`, shown under **Needs expected** in Settings → Tests, where you can choose the
 file (Fix…) and add it to your tests, or discard it.
 
 How the pick is read (Accessibility; `PickTracker` in `Sources/Likely/Evals/EvalCapture.swift`):
@@ -261,7 +351,7 @@ unreadable lines are skipped, and kept until they age out.
 
 Your cases name your files, and running them sends those paths (and whatever the agent reads) to the
 agent's model provider, just as using Likely does. That's why personal cases live outside the repo, and
-why nothing runs them except you.
+why nothing runs them except you (or a coding agent you ask to: `Likely --eval personal`).
 
 The public suite in `evals/fixtures` uses only synthetic files (`evals/fixtures/files`, regenerated by
 `evals/fixtures/generate.py`): a lease, pay stubs, K-1s, invoices, a résumé, notes, a portrait-like
@@ -284,17 +374,23 @@ image, a landscape and an app icon, all for a made-up "Jordan Rivera". Its cases
 
 **Codex can't be isolated**: it runs inside its own sandbox, which can't be nested. Isolated suites run
 with Codex print a warning, keep only the prompt's "search there only", and are recorded as *not
-isolated*; Run Suite shows a note when you pick Codex for the public fixtures.
+isolated*; Run Tests shows a note when you pick Codex for the public fixtures.
 
 ## Code map
 
 - `Sources/LikelyEvalKit/`: case format, path rules, scoring, results, reports, which cases get your tools
   (`EvalToolPolicy`, `EvalToolSet` in EvalTools.swift) (tested in `Tests/LikelyEvalKitTests`).
-- `Sources/Likely/Evals/EvalCLI.swift`: `--eval` mode (suites, runner loop, dry-run sink, isolation).
+- `Sources/LikelyEvalKit/EvalCommandLine.swift`: `--eval` options and what release builds accept
+  (`EvalOptions`), the clean environment (`EvalEnvironment`), exit codes and the `--json` output
+  (`EvalCLIResult`); tested in `EvalCommandLineTests`.
+- `Sources/Likely/Evals/EvalCLI.swift`: `--eval` mode (suites, runner loop, dry-run sink, isolation, license
+  check, run lock, clean-environment restart).
+- `Sources/LikelyStorage/FileLock.swift`: the cross-process locks (cases, history, one run at a time).
 - `Sources/Likely/Evals/EvalCapture.swift`: cases from real use (`EvalCapture`, `PickTracker`).
 - `Sources/LikelyEvalKit/SearchHistory.swift`, `Sources/Likely/Evals/SearchHistorySettings.swift`: search
   history (file format, history → case) and Settings → History with the Make Eval sheet.
-- `Sources/Likely/Evals/EvalsSettings.swift`: Settings → Evals and the case editor (also used by the bar's
-  "Save as test" and the Debug View).
+- `Sources/Likely/Evals/EvalsSettings.swift`: Settings → Tests, Run Tests (a `--eval … --json`
+  subprocess), the command-line row and `likely` shim (`EvalCommand`), and the case editor (also used by
+  the bar's "Save as test" and the Debug View).
 - Shared with the app: `PromptBuilder` (Coordinator.swift) builds every agent message;
   `LikelyFolder.screen(path:)` decides which FILE: lines Likely shows.

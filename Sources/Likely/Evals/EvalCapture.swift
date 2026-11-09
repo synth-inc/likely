@@ -7,7 +7,7 @@ import LikelyEvalKit
 /// cases.jsonl, tagged "captured". Cancelled pickers are never recorded. If the pick couldn't be
 /// read, nothing goes into cases; a "needs expected" entry goes to drafts.jsonl instead.
 ///
-/// Off by default in every build: "Automatically save picks as tests" in Settings → Evals.
+/// Off by default in every build: "Automatically save picks as tests" in Settings → Tests.
 enum EvalCapture {
     static let defaultsKey = "evalAutoCapture"
     static let capturedTag = "captured"
@@ -60,7 +60,7 @@ enum EvalCapture {
         let draft = EvalCase(id: id, query: queries.isEmpty ? [""] : queries,
                              context: EvalCase.Context(app: app, windowTitle: windowTitle, screenshot: screenshotPath, button: button),
                              expect: expect, tags: tags, source: "captured", notes: notes)
-        // Unknown pick: keep it out of the tests; it waits under "Needs expected" in Settings → Evals.
+        // Unknown pick: keep it out of the tests; it waits under "Needs expected" in Settings → Tests.
         let destination = picked.isEmpty ? EvalStorage.draftsURL : EvalStorage.casesURL
         do {
             try EvalCaseFile.append(draft, to: destination)
