@@ -168,17 +168,44 @@ How the pick is read (Accessibility; `PickTracker` in `Sources/Likely/Evals/Eval
 ## Search history
 
 With **Settings → History → "Save search history"** on (the default; independent of automatic saving),
-every picker Likely searched for is kept in `~/Library/Application Support/Likely/history.jsonl`, newest
-500 only: the time, the app, the window title and confirm button, what you typed (in order), the
+every picker Likely searched for is kept in `~/Library/Application Support/Likely/History/history.jsonl`,
+newest 500 only: the time, the app, the window title and confirm button, what you typed (in order), the
 originals the agent suggested (not the `~/Likely` copies), and what you picked, when the picker was
 confirmed and the pick could be read (same `PickTracker` as Capture). Pickers where nothing ran (nothing
-typed in input-first mode, or no license) aren't recorded. Turning the toggle off stops recording;
-**Clear History…** deletes the file. It's never uploaded or included in eval runs.
+typed in input-first mode, or no license), and a picker still open when Likely quits, aren't recorded.
+
+**Privacy.** History never leaves the Mac and isn't included in eval runs.
+- The folder is `0700` and the file `0600`. (Pre-release builds kept `history.jsonl` one level up; it's
+  moved into `History/` on launch.)
+- No search agent can read it: every `sandbox-exec` profile (`AgentSandbox.historyRules`) denies the
+  `History` folder and the old path, and Codex gets a permission profile that extends its built-in
+  read-only one with the same paths set to `"none"` (`CodexRunner.baseArguments`).
+- The first time a search is recorded, Settings → History shows a short line about it (until you click
+  OK), and the next picker's bar shows the same line once: "Likely keeps a private history of your
+  searches on this Mac so you can turn them into tests. Turn it off in Settings → History."
+- Turning the toggle off stops recording and asks whether to delete what's already saved. **Clear
+  History…** deletes the file. Both mention `~/Library/Logs/Likely/likely.log`, which may still contain
+  past queries and file paths (it's the debugging log; see below).
+- Reading the pick (`PickTracker`, Accessibility) only runs while search history or automatic saving is
+  on; with both off it never starts.
+
+**Robustness.** Writes go through one serial background queue (never the main thread when a picker
+closes), and rewrite the file atomically. If the file exists but can't be read (permissions, invalid
+UTF-8), nothing is written, so a bad read never replaces your history with one entry. Lines are split on
+`\n` only (a trailing `\r` is dropped): JSONEncoder doesn't escape U+2028, U+2029 or U+0085, so splitting
+on every Unicode newline would cut entries in half. The list is only read while Settings → History is on
+screen.
+
+**The log.** `likely.log` keeps logging what it always has (window titles of pickers, follow-up text you
+typed, file paths Likely copied) because it's what makes bug reports debuggable, and redacting only some
+lines would suggest a privacy guarantee it doesn't give. History's own log lines don't include queries,
+apps or paths.
 
 Each row has **Make Eval**: a sheet with the query (editable, one message per line), the pick (checked)
 and Likely's suggestions as checkboxes, **Add Files…** for anything else, and any-of / all-of. Saving
 appends a case to `cases.jsonl` with `"source": "history"` and the tag `history`, and marks the row
-"test saved". The entry format is `SearchHistoryEntry` in `Sources/LikelyEvalKit/SearchHistory.swift`;
+"test saved" (if the search is no longer in the file by then, e.g. it aged out, the tab says the test
+was saved but the row couldn't be marked). The entry format is `SearchHistoryEntry` in `Sources/LikelyEvalKit/SearchHistory.swift`;
 unreadable lines are skipped, and kept until they age out.
 
 ## Privacy and the fixture suite
@@ -208,6 +235,6 @@ Codex runs inside its own sandbox, which can't be nested, so for Codex isolation
 - `Sources/LikelyEvalKit/SearchHistory.swift`, `Sources/Likely/Evals/SearchHistorySettings.swift`: search
   history (file format, history → case) and Settings → History with the Make Eval sheet.
 - `Sources/Likely/Evals/EvalsSettings.swift`: Settings → Evals and the case editor (also used by the bar's
-  "Save as test", the menu bar item and the Debug View).
+  "Save as test" and the Debug View).
 - Shared with the app: `PromptBuilder` (Coordinator.swift) builds every agent message;
   `LikelyFolder.screen(path:)` decides which FILE: lines Likely shows.

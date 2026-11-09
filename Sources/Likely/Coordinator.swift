@@ -254,13 +254,15 @@ final class Coordinator {
         debugRun.windowTitle = picker.windowTitle
         debugRun.buttonTitle = picker.buttonTitle
         debugRun.log("Picker opened")
-        // Read the pick for automatic tests and for search history.
+        // Read the pick (Accessibility, the picker's selection) only for automatic tests or search
+        // history; with both off, PickTracker never starts.
         if EvalCapture.isEnabled || SearchHistoryStore.isEnabled { pickTracker.begin(window: picker.element, pid: picker.pid) }
         if Settings.openToLikely, let window = picker.element {
             let generation = generation
             PickerNavigator.selectLikelyInSidebar(of: window) { [weak self] in self?.generation == generation && self?.active != nil }
         }
         hud.show(attachedTo: picker.element, fallbackFrame: picker.frame)
+        if SearchHistoryStore.shared.takeHUDNotice() { hud.model.notice = SearchHistoryStore.notice }
 
         guard autoMode else {
             // Input-first: nothing runs until the user describes the file in the bar.
@@ -384,13 +386,15 @@ final class Coordinator {
 
     /// Search history (Settings → History): one entry per picker Likely searched for, whether or
     /// not anything was picked. Pickers where nothing ran (unpaid, nothing typed in input-first mode)
-    /// aren't recorded.
+    /// aren't recorded, and neither is a picker still open when Likely quits. The write happens on
+    /// SearchHistoryStore's background queue.
     private func recordHistory(_ picker: Picker, picked: [String], how: String) {
-        guard SearchHistoryStore.isEnabled, let run = debugRun, lastPrompt != nil || !typedQueries.isEmpty else { return }
+        guard SearchHistoryStore.isEnabled, how != "app quitting", let run = debugRun,
+              lastPrompt != nil || !typedQueries.isEmpty else { return }
         var suggested: [String] = []
         for file in run.files where file.added && !suggested.contains(file.path) { suggested.append(file.path) }
         SearchHistoryStore.shared.record(SearchHistoryEntry(
-            date: ISO8601DateFormatter().string(from: run.date), app: picker.appName,
+            date: SearchHistoryEntry.dateFormatter.string(from: run.date), app: picker.appName,
             windowTitle: run.windowTitle ?? picker.windowTitle, button: picker.buttonTitle,
             queries: typedQueries, suggested: suggested, picked: picked, outcome: how))
     }

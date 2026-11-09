@@ -214,7 +214,7 @@ public enum EvalCaseFile {
     public static func parse(_ text: String) -> (cases: [EvalCase], errors: [LoadError]) {
         var cases: [EvalCase] = []
         var errors: [LoadError] = []
-        for (index, raw) in text.components(separatedBy: .newlines).enumerated() {
+        for (index, raw) in splitLines(text).enumerated() {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") || line.hasPrefix("//") { continue }
             do {
@@ -224,6 +224,12 @@ public enum EvalCaseFile {
             }
         }
         return (cases, errors)
+    }
+
+    /// Lines split on "\n" only, with a trailing "\r" dropped. Not `.newlines`: JSONEncoder leaves
+    /// U+2028, U+2029 and U+0085 unescaped inside strings, so splitting on those would cut a line in half.
+    public static func splitLines(_ text: String) -> [String] {
+        text.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
     }
 
     public static func encodeLine(_ c: EvalCase) -> String {

@@ -61,7 +61,10 @@ public struct SearchHistoryEntry: Codable, Identifiable, Hashable {
         evalCaseID = try? c.decodeIfPresent(String.self, forKey: .evalCaseID)
     }
 
-    public var timestamp: Date? { ISO8601DateFormatter().date(from: date) }
+    /// ISO8601DateFormatter is expensive to make and thread-safe to share.
+    public static let dateFormatter = ISO8601DateFormatter()
+
+    public var timestamp: Date? { Self.dateFormatter.date(from: date) }
     public var wasPicked: Bool { !picked.isEmpty }
     public var hasEval: Bool { evalCaseID != nil }
 
@@ -94,19 +97,38 @@ public struct SearchHistoryEntry: Codable, Identifiable, Hashable {
 }
 
 /// Reads and writes history.jsonl. Lines that don't decode are skipped on load but left in place on
-/// rewrites, until they age out past the cap.
+/// rewrites, until they age out past the cap. A file that exists but can't be read (permissions,
+/// invalid UTF-8, I/O error) makes every call throw rather than start over with an empty file.
 public enum SearchHistoryFile {
     public static let defaultLimit = 500
 
-    /// ~/Library/Application Support/Likely/history.jsonl, next to the evals folder.
-    public static var defaultURL: URL {
+    /// ~/Library/Application Support/Likely/History: a folder of its own (0700) so the agent sandboxes
+    /// can deny reading it as a whole (see AgentSandbox).
+    public static var defaultDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Likely/history.jsonl")
+            .appendingPathComponent("Library/Application Support/Likely/History", isDirectory: true)
     }
 
-    /// Entries oldest first (file order).
-    public static func load(_ url: URL) -> [SearchHistoryEntry] {
-        rawLines(url).compactMap(decode)
+    /// ~/Library/Application Support/Likely/History/history.jsonl.
+    public static var defaultURL: URL { defaultDirectory.appendingPathComponent("history.jsonl") }
+
+    /// Where pre-release builds kept it (next to the evals folder); moved by `migrate`.
+    public static var legacyURL: URL {
+        defaultDirectory.deletingLastPathComponent().appendingPathComponent("history.jsonl")
+    }
+
+    /// Moves `legacy` to `url` if there's nothing at `url` yet, with the new permissions.
+    public static func migrate(from legacy: URL, to url: URL) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: url.path) else { return }
+        try prepareDirectory(for: url)
+        try fm.moveItem(at: legacy, to: url)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// Entries oldest first (file order). No file means no entries; an unreadable file throws.
+    public static func load(_ url: URL) throws -> [SearchHistoryEntry] {
+        try rawLines(url).compactMap(decode)
     }
 
     public static func parse(_ text: String) -> [SearchHistoryEntry] {
@@ -119,19 +141,20 @@ public enum SearchHistoryFile {
         return String(decoding: (try? encoder.encode(e)) ?? Data(), as: UTF8.self)
     }
 
-    /// Adds an entry, then drops the oldest lines beyond `limit`.
+    /// Adds an entry, then drops the oldest lines beyond `limit`. Throws without writing if the
+    /// existing file can't be read.
     public static func append(_ e: SearchHistoryEntry, to url: URL, limit: Int = defaultLimit) throws {
-        var all = rawLines(url)
+        var all = try rawLines(url)
         all.append(encodeLine(e))
         if all.count > limit { all.removeFirst(all.count - limit) }
         try write(all, to: url)
     }
 
-    /// Rewrites the entry with `id`, if there is one. Returns the updated entry.
+    /// Rewrites the entry with `id`, if there is one. Returns the updated entry, or nil if no line has that id.
     @discardableResult
     public static func update(id: String, in url: URL, _ change: (inout SearchHistoryEntry) -> Void) throws -> SearchHistoryEntry? {
         var updated: SearchHistoryEntry?
-        let all = rawLines(url).map { line -> String in
+        let all = try rawLines(url).map { line -> String in
             guard var e = decode(line), e.id == id else { return line }
             change(&e)
             updated = e
@@ -149,17 +172,26 @@ public enum SearchHistoryFile {
         try? JSONDecoder().decode(SearchHistoryEntry.self, from: Data(line.utf8))
     }
 
-    private static func lines(_ text: String) -> [String] {
-        text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    /// "\n"-separated lines (see EvalCaseFile.splitLines: not every Unicode newline).
+    static func lines(_ text: String) -> [String] {
+        EvalCaseFile.splitLines(text).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
-    private static func rawLines(_ url: URL) -> [String] {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        return lines(text)
+    private static func rawLines(_ url: URL) throws -> [String] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        return lines(try String(contentsOf: url, encoding: .utf8))
     }
 
+    private static func prepareDirectory(for url: URL) throws {
+        let dir = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+    }
+
+    /// Atomic, owner-only (0600) file in an owner-only (0700) folder.
     private static func write(_ lines: [String], to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try prepareDirectory(for: url)
+        try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }
