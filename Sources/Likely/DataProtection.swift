@@ -50,12 +50,12 @@ enum DataProtection {
         for folder in LikelyDataPaths.all() {
             do {
                 let outcome = try SpotlightExclusion.exclude(folder)
-                if outcome != .alreadyExcluded { Log.write("privacy", "Spotlight exclusion for \(folder.path): \(outcome)") }
+                if outcome != .alreadyExcluded { Log.write("privacy", "Spotlight exclusion for \(path: folder): \(outcome)") }
             } catch {
-                Log.write("privacy", "couldn't keep \(folder.path) out of Spotlight: \(error)")
+                Log.write("privacy", "couldn't keep \(path: folder) out of Spotlight: \(error: error)")
             }
             let changed = OwnerOnly.repair(folder)
-            if changed > 0 { Log.write("privacy", "made \(changed) item(s) in \(folder.path) owner-only") }
+            if changed > 0 { Log.write("privacy", "made \(changed) item(s) in \(path: folder) owner-only") }
         }
         #if !LIKELY_DEV
         // Release builds keep debug screenshots in memory only.
@@ -84,7 +84,7 @@ enum DataProtection {
             if count > 0 { Log.write("privacy", "encrypted \(count) saved test screenshot(s)") }
         } catch {
             noteKeyResult(error)
-            Log.write("privacy", "couldn't encrypt saved test screenshots (left as they are): \(error)")
+            Log.write("privacy", "couldn't encrypt saved test screenshots (left as they are): \(error: error)")
         }
     }
 
@@ -110,7 +110,7 @@ final class EncryptionStatus: ObservableObject {
     init(_ initial: EncryptionAvailability) {
         state = initial
         current = initial
-        Log.write("privacy", initial.summary)
+        Log.write("privacy", "\(meta: initial.summary)")
         if case .keychainError = initial { scheduleRetry() }
     }
 
@@ -126,7 +126,7 @@ final class EncryptionStatus: ObservableObject {
         current = new
         lock.unlock()
         guard new != old else { return }
-        Log.write("privacy", new.summary)
+        Log.write("privacy", "\(meta: new.summary)")
         DispatchQueue.main.async { self.state = new }
         if case .keychainError = new { scheduleRetry() }
         if case .keychainError = old, new.isOn { DataProtection.keychainRecovered() }

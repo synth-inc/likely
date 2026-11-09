@@ -56,6 +56,8 @@ final class Coordinator {
     }
 
     let supportDirectory: URL
+    /// The last search's agent transcript (see AgentTranscript).
+    var transcriptURL: URL { AgentTranscript.searchURL(supportDirectory: supportDirectory) }
     private let axWatcher = AXWatcher()
     private let windowWatcher = WindowListWatcher()
     private let snapshotter = PrePickerSnapshotter()
@@ -91,6 +93,7 @@ final class Coordinator {
         Self.removeScreenshots(in: supportDirectory.appendingPathComponent("run"))
         // Older versions kept the agent's transcript in the work folder, which agents may read.
         try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent("run/last-run.jsonl"))
+        if !AgentTranscript.isKept { try? FileManager.default.removeItem(at: AgentTranscript.searchURL(supportDirectory: supportDirectory)) }
         Settings.migrate()
         folder = LikelyFolder(supportDirectory: supportDirectory)
 
@@ -209,7 +212,7 @@ final class Coordinator {
            candidate.roughlyEquals(frame) { return }
         let verdict = PickerHeuristics.evaluate(window)
         let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
-        Log.write("detect", "\(appName) \(notification) \(AX.describe(window)) → \(verdict)")
+        Log.write("detect", "\(meta: appName) \(meta: notification) \(AX.describe(window)) → \(verdict.logLine)")
 
         if verdict.isPicker {
             PickerHeuristics.logDiagnostics(window)
@@ -240,7 +243,7 @@ final class Coordinator {
         let picker = Picker(pid: app.processIdentifier, appName: app.localizedName ?? "?", element: nil,
                             cgWindowID: window.id, frame: window.bounds, buttonTitle: nil, source: "cg:panel-service",
                             windowTitle: Self.titleBehindPicker(pid: app.processIdentifier, picker: nil))
-        Log.write("detect", "panel service window #\(window.id) while \(picker.appName) is frontmost")
+        Log.write("detect", "panel service window #\(window.id) while \(meta: picker.appName) is frontmost")
         pickerOpened(picker)
     }
 
@@ -261,7 +264,7 @@ final class Coordinator {
         navigated = false
         // Keeps the snapshotter's snapshot: it's of the click that opened this picker.
         cancelScreenshot(forgetSnapshot: false)
-        Log.write("picker", "OPENED in \(picker.appName) via \(picker.source) frame=\(picker.frame.map { "\($0)" } ?? "?")")
+        Log.write("picker", "OPENED in \(meta: picker.appName) via \(meta: picker.source) frame=\(picker.frame) title=\(sensitive: picker.windowTitle)")
 
         // The previous picker's copies were kept for its app; a new picker replaces them.
         cleanupTimer?.invalidate()
@@ -325,13 +328,13 @@ final class Coordinator {
                 let capture = try WindowCapture.save(image, to: url)
                 self.screenshotURL = url
                 self.screenshotPNG = capture.png
-                Log.write("capture", "\(capture.mode) title=\(capture.windowTitle ?? "-")")
+                Log.write("capture", "\(meta: capture.mode) title=\(sensitive: capture.windowTitle)")
                 if let title = capture.windowTitle { debugRun.windowTitle = title }
                 DebugStore.shared.attachScreenshot(capture.png, mode: capture.mode, to: debugRun)
                 debugRun.log("Screenshot: \(capture.mode)")
                 return capture
             } catch {
-                Log.write("capture", "screenshot failed: \(error)")
+                Log.write("capture", "screenshot failed: \(error: error)")
                 debugRun.captureMode = "failed: \(error)"
                 debugRun.log("Screenshot failed: \(error)")
                 return nil
@@ -363,7 +366,7 @@ final class Coordinator {
         do {
             try OwnerOnly.write(screenshotPNG, to: screenshotURL)
         } catch {
-            Log.write("capture", "couldn't write the screenshot again for a follow-up: \(error)")
+            Log.write("capture", "couldn't write the screenshot again for a follow-up: \(error: error)")
         }
     }
 
@@ -376,7 +379,7 @@ final class Coordinator {
         folder.showRecent(limit: Settings.recentFileCount, roots: SearchFolder.all.map(\.url)) { [weak self] result, added in
             debugRun.recentFiles = added
             debugRun.log("Recent files: \(added.count) via \(result.source) in \(result.milliseconds) ms")
-            Log.write("recent", "\(added.count) via \(result.source) in \(result.milliseconds) ms: \(added.joined(separator: ", "))")
+            Log.write("recent", "\(added.count) via \(meta: result.source) in \(result.milliseconds) ms: \(paths: added)")
             guard let self, self.generation == generation, self.active != nil, !self.searchStarted, added.isEmpty else { return }
             self.folder.setStatus(hint)
         }
@@ -415,7 +418,7 @@ final class Coordinator {
         folder.release()
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         debugRun?.closedReason = reason
-        Log.write("picker", "CLOSED in \(picker.appName) (\(reason))")
+        Log.write("picker", "CLOSED in \(meta: picker.appName) (\(meta: reason))")
         onStateChange?(.idle, isLicensed() ? "Watching for file pickers" : "Inactive · Get Likely")
     }
 
@@ -469,7 +472,11 @@ final class Coordinator {
                 debugRun?.pickedPaths = picked
                 debugRun?.log("Picked: \(picked.isEmpty ? "unknown" : picked.joined(separator: ", ")) (\(pick.how))")
             }
-            if !pick.confirmed { Log.write("evals", "picker closed without a confirmed pick (\(pick.how))") }
+            if pick.confirmed {
+                Log.write("picker", "picked \(picked.count) (\(meta: pick.how)): \(paths: picked)")
+            } else {
+                Log.write("evals", "picker closed without a confirmed pick (\(meta: pick.how))")
+            }
         }
         if saveRequested, let run = debugRun {
             // Opened after the picker is gone, so it never competes with the picker for focus or selection.
@@ -588,7 +595,10 @@ final class Coordinator {
         } else {
             message = "Done – found \(foundCount) file\(foundCount == 1 ? "" : "s")"
         }
-        Log.write("agent", "\(message) cost=\(outcome.costUSD.map { String(format: "$%.4f", $0) } ?? "?")")
+        // The error summary is the agent's own text.
+        let logged: LogMessage = outcome.success ? "\(meta: message)"
+            : "\(meta: agentName) error kind=\(AgentFailureKind.classify(outcome.summary)) – \(sensitive: outcome.summary.prefix(60))"
+        Log.write("agent", "\(logged) cost=\(outcome.costUSD)")
         // Done: drop the status file so only real suggestions are left in the folder, and the
         // screenshot file (kept in memory in case the user follows up).
         folder.removeStatus()
@@ -614,7 +624,7 @@ final class Coordinator {
             typedQueries.append(text)
             debugRun?.queries.append(text)
             debugRun?.log("You: \(text)")
-            Log.write("feedback", "request: \(text)")
+            Log.write("feedback", "request: \(text.count) chars \(sensitive: text)")
             // The results replace the recent files rather than mixing with them.
             folder.clearRecent()
             folder.setStatus("Looking for \(text)")
@@ -644,7 +654,11 @@ final class Coordinator {
         let message = PromptBuilder.followUp(text, rejected: rejected)
 
         debugRun?.log("You: \(text ?? "Not these")")
-        Log.write("feedback", text ?? "Not these")
+        if let text {
+            Log.write("feedback", "follow-up: \(text.count) chars \(sensitive: text), rejected \(rejected.count)")
+        } else {
+            Log.write("feedback", "Not these, rejected \(rejected.count)")
+        }
         let status = text == nil ? "Trying a different approach" : "Got it, searching again"
         folder.setStatus(status)
         hud.model.status = status
@@ -835,10 +849,6 @@ enum Settings {
         get { UserDefaults.standard.string(forKey: "model") ?? "sonnet" }
         set { UserDefaults.standard.set(newValue, forKey: "model") }
     }
-    static var verbose: Bool {
-        get { UserDefaults.standard.bool(forKey: "verbose") }
-        set { UserDefaults.standard.set(newValue, forKey: "verbose") }
-    }
     static var openToLikely: Bool {
         get { UserDefaults.standard.object(forKey: "openToLikely") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "openToLikely") }
@@ -869,6 +879,9 @@ enum Settings {
         if defaults.object(forKey: "sendScreenshot") == nil, let old = defaults.object(forKey: "autoSuggest") as? Bool {
             defaults.set(old, forKey: "sendScreenshot")
         }
+        // "Log every accessibility event (verbose)" is now part of "Log details for troubleshooting",
+        // which turns itself off (see AppDelegate.applyLogDetails).
+        defaults.removeObject(forKey: "verbose")
     }
     /// Put the most recently added files in the Likely folder when a picker opens.
     static var showRecentFiles: Bool {
@@ -935,7 +948,7 @@ enum ClaudeLocator {
                     path = found
                     UserDefaults.standard.set(found, forKey: "claudePath")
                 }
-                Log.write("claude", "shell lookup: \(found ?? "not found")")
+                Log.write("claude", found == nil ? "shell lookup: not found" : "shell lookup: \(path: found)")
                 completion?()
             }
         }
@@ -967,7 +980,7 @@ enum LoginShell {
             try shell.run()
         } catch {
             out.fileHandleForReading.readabilityHandler = nil
-            Log.write("shell", "login shell failed: \(error)")
+            Log.write("shell", "login shell failed: \(error: error)")
             return nil
         }
         if done.wait(timeout: .now() + timeout) == .timedOut {

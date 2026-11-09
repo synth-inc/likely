@@ -52,9 +52,23 @@ enum AgentTranscript {
         options.transcriptURL ?? workDir.deletingLastPathComponent().appendingPathComponent("transcripts/last-run.jsonl")
     }
 
-    /// Owner-only (0600) from creation.
+    /// Where a search's transcript goes (the app's runs; evals pass their own `transcriptURL`).
+    static func searchURL(supportDirectory: URL) -> URL {
+        supportDirectory.appendingPathComponent("transcripts/last-run.jsonl")
+    }
+
+    /// It holds the whole search, so release builds keep it only while "Log details for
+    /// troubleshooting" is on, and only the last run (each run starts it over). Dev builds and evals
+    /// (`append`, their own case folders) always keep it.
+    static var isKept: Bool { Log.details.showsDetails }
+
+    /// Owner-only (0600) from creation. nil when transcripts aren't kept (an older one is removed).
     static func open(_ url: URL, append: Bool) -> FileHandle? {
-        try? OwnerOnly.openForWriting(url, truncate: !append)
+        guard isKept || append else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        return try? OwnerOnly.openForWriting(url, truncate: !append)
     }
 }
 
@@ -256,7 +270,7 @@ final class CodexRunner: AgentRunner {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.hasPrefix("Reading additional input") { Log.write("codex-stderr", trimmed) }
+            if !trimmed.hasPrefix("Reading additional input") { Log.write("codex-stderr", "\(trimmed.count) chars: \(sensitive: trimmed)") }
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -276,9 +290,9 @@ final class CodexRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("codex", "started \(arguments.first == "exec" && arguments.dropFirst().first == "resume" ? "resume" : "exec") model=\(model) pid=\(process.processIdentifier)")
+            Log.write("codex", "started \(public: arguments.first == "exec" && arguments.dropFirst().first == "resume" ? "resume" : "exec") model=\(meta: model) pid=\(process.processIdentifier)")
         } catch {
-            Log.write("codex", "failed to launch \(executable): \(error)")
+            Log.write("codex", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch codex", costUSD: nil))
         }
     }
@@ -320,7 +334,7 @@ final class CodexRunner: AgentRunner {
             turnEnded = true
             isBusy = false
             let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
-            Log.write("codex", "turn failed: \(message.prefix(300))")
+            Log.write("codex", "turn failed kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(300))")
             onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
         default:
             break

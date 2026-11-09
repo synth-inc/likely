@@ -102,7 +102,8 @@ final class ClaudeRunner: AgentRunner {
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Log.write("claude-stderr", text.trimmingCharacters(in: .whitespacesAndNewlines))
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            Log.write("claude-stderr", "\(trimmed.count) chars: \(sensitive: trimmed)")
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -121,10 +122,10 @@ final class ClaudeRunner: AgentRunner {
             try process.run()
             self.process = process
             input = stdin.fileHandleForWriting
-            Log.write("claude", "started \(claudePath) model=\(model) pid=\(process.processIdentifier)")
+            Log.write("claude", "started \(path: claudePath) model=\(meta: model) pid=\(process.processIdentifier)")
             send(prompt)
         } catch {
-            Log.write("claude", "failed to launch \(claudePath): \(error)")
+            Log.write("claude", "failed to launch \(path: claudePath): \(error: error)")
             onExit?(Outcome(success: false, summary: "Couldn't launch claude", costUSD: nil))
         }
     }
@@ -139,7 +140,7 @@ final class ClaudeRunner: AgentRunner {
         do {
             try input.write(contentsOf: data)
         } catch {
-            Log.write("claude", "send failed: \(error)")
+            Log.write("claude", "send failed: \(error: error)")
             return false
         }
         isBusy = true
@@ -194,7 +195,7 @@ final class ClaudeRunner: AgentRunner {
         case "result":
             let isError = event["is_error"] as? Bool ?? false
             let result = event["result"] as? String ?? ""
-            Log.write("claude", "result is_error=\(isError) turns=\(event["num_turns"] ?? "?") cost=\(event["total_cost_usd"] ?? "?") result=\(result.prefix(300))")
+            Log.write("claude", "result is_error=\(isError) kind=\(isError ? AgentFailureKind.classify(result) : nil) subtype=\(ClaudeResultSubtype(event["subtype"] as? String)) turns=\(event["num_turns"] as? Int) cost=\(event["total_cost_usd"] as? Double) result=\(sensitive: result.prefix(300))")
             isBusy = false
             onTurnFinished?(Outcome(success: !isError, summary: isError ? result : "done", costUSD: event["total_cost_usd"] as? Double))
         default:
@@ -222,5 +223,14 @@ final class ClaudeRunner: AgentRunner {
         default:
             return nil
         }
+    }
+}
+
+/// Claude Code's `result` subtypes, a fixed vocabulary; anything else logs as "other".
+enum ClaudeResultSubtype: String, LogSafeEnum {
+    case success, error_max_turns, error_during_execution, error_max_budget_usd, other, none
+
+    init(_ raw: String?) {
+        self = raw.map { ClaudeResultSubtype(rawValue: $0) ?? .other } ?? .none
     }
 }

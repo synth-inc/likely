@@ -69,7 +69,7 @@ struct SearchFolder: Identifiable, Hashable {
         guard panel.runModal() == .OK, let url = panel.url,
               !all.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else { return nil }
         Settings.extraSearchFolders.append(url.path)
-        Log.write("folders", "added search folder \(url.path)")
+        Log.write("folders", "added search folder \(path: url)")
         return url
     }
 

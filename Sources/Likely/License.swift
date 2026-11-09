@@ -180,10 +180,10 @@ final class LicenseStore: ObservableObject {
             fresh.save()
             cached = fresh
             lastError = nil
-            Log.write("license", "entitlement active=\(entitlement.active) kind=\(entitlement.kind ?? "none") status=\(entitlement.status ?? "none")")
+            Log.write("license", "entitlement active=\(entitlement.active) kind=\(meta: entitlement.kind) status=\(meta: entitlement.status)")
         } catch {
             lastError = error.localizedDescription
-            Log.write("license", "entitlement check failed: \(error.localizedDescription)")
+            Log.write("license", "entitlement check failed: \(error: error)")
         }
         return isActive
     }
@@ -201,7 +201,7 @@ final class LicenseStore: ObservableObject {
         let active = isActive
         guard active != lastActive else { return }
         lastActive = active
-        Log.write("license", "license is now \(active ? "active" : "inactive")")
+        Log.write("license", "license is now \(public: active ? "active" : "inactive")")
         onActiveChange?(active)
     }
 

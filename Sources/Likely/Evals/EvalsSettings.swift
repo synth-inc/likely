@@ -123,7 +123,7 @@ final class EvalCaseStore: ObservableObject {
         do {
             return try EvalScreenshots.save(png, id: id, cipher: DataProtection.cipher)
         } catch {
-            Log.write("evals", "couldn't save the test's screenshot: \(error)")
+            Log.write("evals", "couldn't save the test's screenshot: \(error: error)")
             return nil
         }
     }

@@ -114,7 +114,7 @@ final class HermesRunner: AgentRunner {
             DispatchQueue.main.async {
                 guard generation == self.generation else { return }
                 if let problem {
-                    Log.write("hermes", "not started: \(problem)")
+                    Log.write("hermes", "not started: \(meta: problem)")
                     self.isBusy = false
                     self.onExit?(AgentOutcome(success: false, summary: problem, costUSD: nil))
                     return
@@ -153,7 +153,7 @@ final class HermesRunner: AgentRunner {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { Log.write("hermes-stderr", trimmed) }
+            if !trimmed.isEmpty { Log.write("hermes-stderr", "\(trimmed.count) chars: \(sensitive: trimmed)") }
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -173,10 +173,10 @@ final class HermesRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("hermes", "started session=\(sessionName ?? "?") model=\(model) pid=\(process.processIdentifier)")
+            Log.write("hermes", "started session=\(meta: sessionName) model=\(meta: model) pid=\(process.processIdentifier)")
         } catch {
             isBusy = false
-            Log.write("hermes", "failed to launch \(executable): \(error)")
+            Log.write("hermes", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch hermes", costUSD: nil))
         }
     }
@@ -226,7 +226,7 @@ final class HermesRunner: AgentRunner {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
             } else {
                 let message = (event["error"] as? String) ?? (event["text"] as? String) ?? "hermes failed"
-                Log.write("hermes", "turn failed (\(exitCode)): \(message.prefix(300))")
+                Log.write("hermes", "turn failed (\(exitCode)) kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(300))")
                 onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
             }
         default:
@@ -498,7 +498,7 @@ extension HermesRunner {
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return -1 }
         process.waitUntilExit()
-        Log.write("hermes", "\(arguments.prefix(4).joined(separator: " ")) → \(process.terminationStatus)")
+        Log.write("hermes", "\(meta: arguments.prefix(4).joined(separator: " ")) → \(process.terminationStatus)")
         return process.terminationStatus
     }
 }

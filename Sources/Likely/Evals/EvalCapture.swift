@@ -64,10 +64,10 @@ enum EvalCapture {
         let destination = picked.isEmpty ? EvalStorage.draftsURL : EvalStorage.casesURL
         do {
             try EvalCaseFile.append(draft, to: destination)
-            Log.write("evals", picked.isEmpty ? "pick unknown: \(id) saved to drafts (needs expected)" : "test \(id) saved (\(picked.count) picked)")
+            Log.write("evals", picked.isEmpty ? "pick unknown: \(sensitive: id) saved to drafts (needs expected)" : "test \(sensitive: id) saved (\(picked.count) picked)")
             DispatchQueue.main.async { EvalCaseStore.shared.reload() }
         } catch {
-            Log.write("evals", "couldn't save captured test: \(error)")
+            Log.write("evals", "couldn't save captured test: \(error: error)")
             if let screenshotPath { try? FileManager.default.removeItem(atPath: screenshotPath) }
         }
     }
@@ -177,7 +177,8 @@ final class PickTracker {
             let point = Self.axPoint(NSEvent.mouseLocation)
             if let button = AX.element(window, kAXDefaultButtonAttribute), let frame = AX.frame(button), frame.contains(point) {
                 readSelection()
-                intent = (.confirm("confirmed with \(AX.string(button, kAXTitleAttribute).map { "“\($0)”" } ?? "the default button")"), Date())
+                // Fixed wording (it's logged): the button's title can be anything the app put there.
+                intent = (.confirm("confirmed with the default button"), Date())
             } else if let button = AX.element(window, kAXCancelButtonAttribute), let frame = AX.frame(button), frame.contains(point) {
                 intent = (.cancel("cancelled with the Cancel button"), Date())
             } else if event.clickCount == 2, let frame = AX.frame(window), frame.contains(point) {

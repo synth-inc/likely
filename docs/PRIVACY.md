@@ -14,11 +14,12 @@ searching to its model provider; that's how the search works.
 | Eval runs (results, reports, transcripts) | `…/Likely/evals/runs/` (dev builds only) | Owner-only, agents can't read them (a running case reads only its own folder) |
 | Your extra agent tools | `…/Likely/tools.json` | Plaintext (see below), owner-only, agents can't read it |
 | The screenshot sent with a search | `…/Likely/run/context-<id>.png` | Owner-only; only on disk while the agent works on a turn (see below) |
-| Agent transcripts of the current search | `…/Likely/transcripts/last-run.jsonl` | Owner-only, agents can't read it |
+| Agent transcript of the last search | `…/Likely/transcripts/last-run.jsonl`, only while "Log details for troubleshooting" is on (dev builds: always) | Owner-only, agents can't read it; deleted when details turn off and at launch |
 | The agent CLIs' own session files | Their own folders (see "The agents' own session files") | Turned off or deleted when the picker closes; other agents can't read them |
 | Copies Likely made in the Likely folder (bookkeeping) | `…/Likely/likely-manifest.json` | Owner-only |
 | Debug view screenshots | In memory only. Dev builds also write `…/Likely/debug/<id>.png` | Owner-only (dev builds) |
-| Log | `~/Library/Logs/Likely/likely.log` | Owner-only, agents can't read it |
+| Log (events, timings, counts; no queries, titles, paths or agent text, see "The log") | `~/Library/Logs/Likely/likely.log` | Owner-only, agents can't read it |
+| Detailed log, only while "Log details for troubleshooting" is on (dev builds: always) | `~/Library/Logs/Likely/likely-details.log` | Owner-only, agents can't read it; deleted when details turn off and at launch |
 | Settings, tool approvals | `~/Library/Preferences/inc.synth.likely.plist` | Agents can't write them |
 | Encryption key | Data-protection keychain, access group `<team id>.inc.synth.likely`, "Likely data key" (`inc.synth.likely.data-key`) | Only Likely can read it; this device only, never synced |
 
@@ -139,6 +140,62 @@ opens (call history, the TCC database, Biome, iPhone backups, cookies, the data-
 are always denied, even with every area on. See [TOOLS.md](TOOLS.md#private-data-needs), which also lists
 what's left for Codex.
 
+## The log
+
+`~/Library/Logs/Likely/likely.log` (Settings → General → Troubleshooting → Open Log) is for finding out why
+a picker wasn't detected or a search went wrong. By default it records:
+
+- events and states: a picker opened or closed and in which app, how it was detected, the agent
+  starting, finishing or failing, a copy made or skipped and why, license and update checks;
+- timings and counts: how long recent files took, how many files were found or picked, how long what you
+  typed was, the cost of a search;
+- non-identifying metadata: app names, agent and model names, accessibility roles and identifiers, window
+  sizes and positions, process IDs, error domains and codes.
+
+It doesn't record what you typed, window titles (email subjects, document names), file paths and names,
+what the agent wrote (its STATUS and FILE lines, answers, error output), or the prompt. Where one of those
+belongs in a line, the log has a short code instead, plus the extension for a file:
+
+```
+[picker] OPENED in Safari via ax:AXWindowCreated frame=440,210 800x500 title=<#9c41d2e7>
+[feedback] request: 18 chars <#3f0a7e11>
+[likely] added <#b81c55a0 .pdf>
+[likely] skip <#20e9af3c .env> (hidden file or folder)
+[picker] picked 1 (confirmed with Return): [<#b81c55a0 .pdf>]
+[claude] result is_error=true kind=rateLimit subtype=success turns=1 cost=0.0123 result=<#5d02aa94>
+```
+
+The same value gets the same code within one run of Likely, so lines about the same file can be followed.
+The codes are keyed with a random value that changes at every launch and is never written down, so they
+can't be checked against guesses.
+
+Release builds write nothing to the macOS unified log: any process running as you can read that with
+`log show`, outside the protection of `~/Library/Logs/Likely`. (Dev builds copy each line there with the
+message marked private.)
+
+**Log details for troubleshooting** (Settings → General → Troubleshooting) also writes every line that
+has one of those values, in full, to a second file, `likely-details.log`; logs every accessibility event and
+window; and keeps the agent's transcript of the last search (`…/Likely/transcripts/last-run.jsonl`). Turn it
+on to reproduce a problem and send the detailed log (Open Log shows it while details are on) with a bug
+report. It turns itself off after 24 hours or when you quit Likely, whichever comes first, and at the next
+launch if Likely didn't quit normally; `likely-details.log` and the transcript are deleted then. Only
+turning it on in Settings counts: the end time is kept in Likely's memory, and the copy in its preferences
+only shows it in Settings, so a changed preferences file can't turn details on (the search agents can't
+write Likely's preferences anyway; checked for Codex's read-only sandbox too). An end time more than 24
+hours away (the clock was set back) counts as off. Dev builds (`./build.sh`) always log details.
+
+**Upgrading.** Versions before this one wrote what you typed, window titles and file paths into the log.
+Before writing the first line, Likely checks the format recorded in the log folder (`log-format`); if
+it's older, it deletes `likely.log` and any rotated `likely.log.*` copies, and notes it in the new log.
+
+For developers: a log line is a `LogMessage`, whose literal type is `StaticString`, so a `String` can only
+go into it marked: `sensitive:` (private), `path:` (private, keeps the extension), `error:` (domain and
+code; the description is private), `public:` (constants only) or `meta:` (non-identifying runtime
+metadata, such as an app or model name). Bare interpolations compile only for numbers, booleans and
+`LogSafe` types. `LogPrivacySourceTests` keeps every `meta:` use (by its source line) and every `LogSafe`
+type to a reviewed list, so a new one fails `swift test` until someone checks it (see
+`Sources/LikelyStorage/LogPrivacy.swift`, and `scripts/check-log-privacy.sh`).
+
 ### Why tools.json and cases.jsonl stay plaintext
 
 You edit both, often with your own coding agent ("add an rclip tool to Likely", "fix this test case").
@@ -150,6 +207,7 @@ changed outside Likely's Settings does nothing until you approve it there.
 
 - **Search history:** Settings → History → Clear History…, or delete the `History` folder.
 - **Tests:** Settings → Evals, or delete `…/Likely/evals`.
+- **Log:** Settings → General → Clear Log (both files), or delete `~/Library/Logs/Likely`.
 - **Everything:** quit Likely, then delete `~/Library/Application Support/Likely`,
   `~/Library/Application Support/Likely.noindex`, `~/Library/Logs/Likely`, `~/Library/Logs/Likely.noindex`
   and `~/Library/Preferences/inc.synth.likely.plist`. Without the data, the key left in the keychain

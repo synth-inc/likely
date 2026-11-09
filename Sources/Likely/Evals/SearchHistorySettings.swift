@@ -57,7 +57,7 @@ final class SearchHistoryStore: ObservableObject {
             do {
                 try SearchHistoryFile.migrate(from: SearchHistoryFile.legacyURL, to: SearchHistoryFile.plaintextURL)
             } catch {
-                Log.write("history", "couldn't move history.jsonl into History/: \(error)")
+                Log.write("history", "couldn't move history.jsonl into History/: \(error: error)")
             }
         }
     }
@@ -76,7 +76,7 @@ final class SearchHistoryStore: ObservableObject {
                 }
             } catch {
                 DataProtection.noteKeyResult(error)
-                Log.write("history", "couldn't encrypt saved searches, left as they are: \(error)")
+                Log.write("history", "couldn't encrypt saved searches, left as they are: \(error: error)")
             }
         }
     }
@@ -156,9 +156,9 @@ final class SearchHistoryStore: ObservableObject {
         do {
             try pending.write(adding: entry, to: url, cipher: cipher)
             if cipher != nil { DataProtection.noteKeyResult(nil) }
-            let saved = entry.map { "saved search (\($0.suggested.count) suggested, \($0.picked.isEmpty ? "no pick" : "picked"))" } ?? "saved"
+            let saved: LogMessage = entry.map { "saved search (\($0.suggested.count) suggested, \(public: $0.picked.isEmpty ? "no pick" : "picked"))" } ?? "saved"
             let waited = entry == nil ? count : count - 1
-            Log.write("history", saved + (waited > 0 ? " and \(waited) that waited in memory" : ""))
+            Log.write("history", waited > 0 ? "\(saved) and \(waited) that waited in memory" : saved)
             DispatchQueue.main.async {
                 let defaults = UserDefaults.standard
                 if defaults.object(forKey: Self.firstRecordedKey) == nil { defaults.set(Date().timeIntervalSince1970, forKey: Self.firstRecordedKey) }
@@ -169,7 +169,7 @@ final class SearchHistoryStore: ObservableObject {
         } catch {
             if cipher != nil { DataProtection.noteKeyResult(error) }
             let waiting = pending.entries.count
-            Log.write("history", "couldn't save search, \(waiting) waiting in memory, history left as is: \(error)")
+            Log.write("history", "couldn't save search, \(waiting) waiting in memory, history left as is: \(error: error)")
             let why: String
             if case .keyUnavailable? = error as? DataCipher.CipherError {
                 why = "the Keychain isn't answering, so the encryption key can't be read"

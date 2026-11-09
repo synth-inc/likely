@@ -87,7 +87,7 @@ final class ToolStore: ObservableObject {
     func approvePending() {
         var approvals = self.approvals
         for item in pending { approvals[item.tool.id] = ToolApproval.record(for: item.tool) }
-        Log.write("tools", "approved: \(pending.map(\.tool.name).joined(separator: ", "))")
+        Log.write("tools", "approved \(pending.count): \(sensitive: pending.map(\.tool.name))")
         storeApprovals(approvals)
     }
 
@@ -97,7 +97,7 @@ final class ToolStore: ObservableObject {
         guard keys != announcedPending else { return }
         announcedPending = keys
         if !keys.isEmpty {
-            Log.write("tools", "changed outside Likely, waiting for approval: \(pending.map(\.tool.name).joined(separator: ", "))")
+            Log.write("tools", "changed outside Likely, waiting for approval: \(sensitive: pending.map(\.tool.name))")
         }
         NotificationCenter.default.post(name: Self.approvalNeeded, object: nil)
     }
@@ -125,15 +125,14 @@ final class ToolStore: ObservableObject {
             let file = try ToolsFile.decode(try Data(contentsOf: Self.fileURL))
             apply(file, error: nil)
             let active = file.tools.filter(\.isActive).map(\.name)
-            Log.write("tools", "loaded \(file.tools.count) tool(s), active: \(active.isEmpty ? "none" : active.joined(separator: ", "))"
-                      + (file.issues.isEmpty ? "" : "; issues: \(file.issues.joined(separator: "; "))"))
+            Log.write("tools", "loaded \(file.tools.count) tool(s), \(active.count) active: \(sensitive: active); \(file.issues.count) issue(s) \(sensitive: file.issues)")
             for tool in file.tools where tool.enabled && !tool.isActive {
-                Log.write("tools", "\(tool.name) disabled: \(tool.problems.joined(separator: "; "))")
+                Log.write("tools", "\(sensitive: tool.name) disabled: \(tool.problems.count) problem(s) \(sensitive: tool.problems)")
             }
             checkPending()
         } catch {
             let message = (error as? ToolsFile.DecodeError)?.description ?? "Couldn't read tools.json: \(error.localizedDescription)"
-            Log.write("tools", "\(message); using built-in commands only")
+            Log.write("tools", "\(error: error); using built-in commands only")
             apply(ToolsFile(), error: message)
         }
     }
@@ -205,7 +204,7 @@ final class ToolStore: ObservableObject {
             }
             try OwnerOnly.write(try ToolsFile(tools: list).encoded(), to: Self.fileURL)   // 0600, atomic
         } catch {
-            Log.write("tools", "couldn't write tools.json: \(error)")
+            Log.write("tools", "couldn't write tools.json: \(error: error)")
         }
         reloadIfChanged()
         checkPending()

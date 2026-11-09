@@ -171,7 +171,7 @@ final class GeminiRunner: AgentRunner {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.hasPrefix("Hook registry initialized") { Log.write("gemini-stderr", String(trimmed.prefix(500))) }
+            if !trimmed.hasPrefix("Hook registry initialized") { Log.write("gemini-stderr", "\(trimmed.count) chars: \(sensitive: trimmed.prefix(500))") }
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -191,9 +191,9 @@ final class GeminiRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("gemini", "started \(arguments.contains("--resume") ? "resume" : "new") model=\(model) project=\(Self.vertexProject ?? "-") location=\(Self.vertexLocation) pid=\(process.processIdentifier)")
+            Log.write("gemini", "started \(public: arguments.contains("--resume") ? "resume" : "new") model=\(meta: model) project=\(sensitive: Self.vertexProject) location=\(meta: Self.vertexLocation) pid=\(process.processIdentifier)")
         } catch {
-            Log.write("gemini", "failed to launch \(executable): \(error)")
+            Log.write("gemini", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch gemini", costUSD: nil))
         }
     }
@@ -238,7 +238,7 @@ final class GeminiRunner: AgentRunner {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
             } else {
                 let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
-                Log.write("gemini", "turn failed: \(message.prefix(500))")
+                Log.write("gemini", "turn failed kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(500))")
                 onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
             }
         default:

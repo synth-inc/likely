@@ -32,7 +32,7 @@ enum PrivateDataPermission {
         let finish: (Outcome) -> Void = { outcome in
             DispatchQueue.main.async {
                 PrivateDataAccess.setAllowed(outcome == .granted, area)
-                Log.write("privacy", "\(area.rawValue): \(outcome == .granted ? "allowed" : "not allowed")")
+                Log.write("privacy", "\(meta: area.rawValue): \(public: outcome == .granted ? "allowed" : "not allowed")")
                 ToolStore.shared.privateDataChanged()
                 completion(outcome)
             }
@@ -52,7 +52,7 @@ enum PrivateDataPermission {
 
     static func disable(_ area: PrivateDataArea) {
         PrivateDataAccess.setAllowed(false, area)
-        Log.write("privacy", "\(area.rawValue): blocked for agents again")
+        Log.write("privacy", "\(meta: area.rawValue): blocked for agents again")
         ToolStore.shared.privateDataChanged()
     }
 

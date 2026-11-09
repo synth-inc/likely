@@ -1,4 +1,5 @@
 import AppKit
+import LikelyStorage
 import ApplicationServices
 import OnboardingKit
 import SwiftUI
@@ -15,18 +16,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsWindow: NSWindow?
     private var testWindow: NSWindow?
     private var trustTimer: Timer?
+    private var logDetailsTimer: Timer?
     private var started = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Log.write("app", "launched, log at \(Log.fileURL.path)")
+        Log.write("app", "launched, log at \(path: Log.fileURL)")
         // The login-shell part of the lookup runs in the background (it can take seconds).
-        ClaudeLocator.resolve { Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")") }
+        ClaudeLocator.resolve { Log.write("app", "claude: \(path: ClaudeLocator.path)") }
         buildStatusItem()
         toolApprovalChanged()   // loads tools.json; anything changed while Likely was closed shows up now
         if Settings.agentID == "codex" { PhotoLibraries.refresh() }   // for Codex's sandbox (see PhotoLibraries)
         if Updater.isEnabled { MainActor.assumeIsolated { Updater.shared.start() } }
 
-        coordinator.verbose = Settings.verbose
+        applyLogDetails()
+        // A timer doesn't notice the clock moving: check again after sleep or a clock change.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.applyLogDetails()
+        }
+        NotificationCenter.default.addObserver(forName: .NSSystemClockDidChange, object: nil, queue: .main) { [weak self] _ in
+            self?.applyLogDetails()
+        }
         coordinator.onStateChange = { [weak self] state, message in
             self?.stateItem.title = message
             self?.setIcon(state)
@@ -57,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// re-check the license and bring the relevant window forward.
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first(where: { $0.scheme == "likely" }) else { return }
-        Log.write("app", "opened by \(url.scheme ?? "")://\(url.host ?? "")")
+        Log.write("app", "opened by \(meta: url.scheme)://\(meta: url.host)")
         Task { @MainActor in
             await LicenseStore.shared.refresh()
             if !Settings.onboarded || !License.isActive || OnboardingWindowManager.shared.isVisible {
@@ -84,6 +93,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         coordinator.quit()
+        if Log.details.isSwitchedOn { setLogDetails(false, why: "Likely quit") }
+    }
+
+    /// Settings → General → "Log details for troubleshooting".
+    func setLogDetails(_ on: Bool, why: StaticString) {
+        if on { Log.details.turnOn() } else { Log.details.turnOff() }
+        Log.write("app", "log details \(public: on ? "on for 24 hours" : "off") (\(public: why))")
+        applyLogDetails()
+    }
+
+    /// Details also log every accessibility event and window (the old "verbose" setting), and keep
+    /// the agent's transcript. A timer turns them off when the 24 hours are up.
+    private func applyLogDetails() {
+        // Expired while asleep, or the clock moved past the end: off, and the stored copy too.
+        if !Log.details.isSwitchedOn && UserDefaults.standard.object(forKey: LogDetailsSwitch.defaultsKey) != nil {
+            Log.details.turnOff()
+            Log.write("app", "log details off (24 hours passed)")
+        }
+        logDetailsTimer?.invalidate()
+        logDetailsTimer = nil
+        coordinator.verbose = Log.details.isSwitchedOn
+        if !Log.details.showsDetails {
+            Log.removeDetails()
+            try? FileManager.default.removeItem(at: coordinator.transcriptURL)
+        }
+        guard let expiry = Log.details.expiry else { return }
+        let timer = Timer(fire: expiry, interval: 0, repeats: false) { [weak self] _ in
+            self?.setLogDetails(false, why: "24 hours passed")
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        logDetailsTimer = timer
     }
 
     /// AX observers created before the Accessibility grant silently do nothing, so wait for it.
@@ -243,7 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 showOnboarding: { [weak self] in self?.showOnboarding() },
                 showLicense: { [weak self] in self?.showLicense() },
                 showDebugView: { [weak self] in self?.showDebugView() },
-                verboseChanged: { [weak self] value in self?.coordinator.verbose = value })
+                logDetailsChanged: { [weak self] on in self?.setLogDetails(on, why: "Settings") })
             let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(actions: actions)))
             window.title = "Likely Settings"
             window.styleMask = [.titled, .closable, .miniaturizable]
@@ -262,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func showOnboarding() {
-        Log.write("app", "showing onboarding at step \(LikelyOnboardingStep.saved.rawValue)")
+        Log.write("app", "showing onboarding at step \(meta: LikelyOnboardingStep.saved.rawValue)")
         CopyEditor.shared.saveURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely/debug/onboarding-copy.json")
         let view = LikelyOnboardingView {
@@ -272,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 UserDefaults.standard.set(path, forKey: "claudePath")
                 ClaudeLocator.resolve()
             }
-            Log.write("app", "onboarding finished, agent=\(Settings.agentID)")
+            Log.write("app", "onboarding finished, agent=\(meta: Settings.agentID)")
             self.startWhenTrusted()
             MainActor.assumeIsolated { OnboardingWindowManager.shared.closeWindow() }
         }

@@ -65,13 +65,13 @@ final class WindowListWatcher {
         for (id, window) in current where known[id] == nil {
             let fromService = Self.isPanelService(window.pid)
             if verbose || fromService || window.layer == 0 {
-                Log.write("cg-window", "appeared #\(id) owner=\(window.owner)(\(window.pid)) layer=\(window.layer) name=\(window.name ?? "-") bounds=\(window.bounds)\(fromService ? " [PANEL SERVICE]" : "")")
+                Log.write("cg-window", "appeared #\(id) owner=\(meta: window.owner)(\(window.pid)) layer=\(window.layer) name=\(sensitive: window.name) bounds=\(window.bounds)\(public: fromService ? " [PANEL SERVICE]" : "")")
             }
             if fromService && window.layer == 0 { onPanelServiceWindow?(window) }
         }
         for (id, window) in known where current[id] == nil {
             if verbose || window.layer == 0 || Self.isPanelService(window.pid) {
-                Log.write("cg-window", "disappeared #\(id) owner=\(window.owner)(\(window.pid))")
+                Log.write("cg-window", "disappeared #\(id) owner=\(meta: window.owner)(\(window.pid))")
             }
         }
         known = current
