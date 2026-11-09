@@ -4,19 +4,37 @@ import SwiftUI
 
 /// Personal eval cases and drafts (~/Library/Application Support/Likely/evals), for Settings → Evals
 /// and the Debug View's "Make This a Test".
+///
+/// Edits change only the target case's line: every other line (comments, lines this version can't
+/// read) is kept as is. If a file couldn't be read cleanly, editing it here is refused so nothing in
+/// it is lost; fix it in a text editor first.
 final class EvalCaseStore: ObservableObject {
     static let shared = EvalCaseStore()
 
     @Published private(set) var cases: [EvalCase] = []
     @Published private(set) var drafts: [EvalCase] = []
     @Published var lastError: String?
+    /// Why a file can't be edited here (parse errors or a failed read), by file.
+    private var loadProblems: [URL: String] = [:]
 
     func reload() {
+        loadProblems = [:]
+        cases = load(EvalStorage.casesURL)
+        drafts = load(EvalStorage.draftsURL)
+        lastError = loadProblems.values.sorted().first
+    }
+
+    private func load(_ url: URL) -> [EvalCase] {
         do {
-            cases = try EvalCaseFile.load(EvalStorage.casesURL).cases
-            drafts = try EvalCaseFile.load(EvalStorage.draftsURL).cases
+            let (loaded, errors) = try EvalCaseFile.load(url)
+            if let first = errors.first {
+                loadProblems[url] = "\(url.lastPathComponent) has \(errors.count) line\(errors.count == 1 ? "" : "s") Likely can't read (\(first)). "
+                    + "Fix \(url.lastPathComponent) in a text editor; editing here is off until then."
+            }
+            return loaded
         } catch {
-            lastError = "Couldn't read your tests: \(error.localizedDescription)"
+            loadProblems[url] = "Couldn't read \(url.lastPathComponent): \(error.localizedDescription). Editing here is off until it can be read."
+            return []
         }
     }
 
@@ -24,29 +42,40 @@ final class EvalCaseStore: ObservableObject {
 
     /// Adds or replaces (by `replacing` id, or the case's own id) a case in cases.jsonl.
     func save(_ c: EvalCase, replacing oldID: String? = nil) {
-        var list = cases
-        if let index = list.firstIndex(where: { $0.id == (oldID ?? c.id) }) { list[index] = c } else { list.append(c) }
-        write(list, to: EvalStorage.casesURL) { self.cases = list }
+        let old = cases.first { $0.id == (oldID ?? c.id) }
+        write(EvalStorage.casesURL, id: oldID ?? c.id, with: c, released: old)
+    }
+
+    /// Appends a case to cases.jsonl (EvalCaseFile.append, so lines this version can't read are kept).
+    @discardableResult
+    func append(_ c: EvalCase) -> Bool {
+        do {
+            try EvalCaseFile.append(c, to: EvalStorage.casesURL)
+            reload()
+            lastError = nil
+            return true
+        } catch {
+            lastError = "Couldn't save: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func delete(_ c: EvalCase) {
-        let list = cases.filter { $0.id != c.id }
-        write(list, to: EvalStorage.casesURL) { self.cases = list }
+        write(EvalStorage.casesURL, id: c.id, with: nil, released: c)
     }
 
     func saveDraft(_ c: EvalCase, replacing oldID: String) {
-        var list = drafts
-        if let index = list.firstIndex(where: { $0.id == oldID }) { list[index] = c }
-        write(list, to: EvalStorage.draftsURL) { self.drafts = list }
+        guard let old = drafts.first(where: { $0.id == oldID }) else { return }
+        write(EvalStorage.draftsURL, id: oldID, with: c, released: old)
     }
 
     func discardDraft(_ c: EvalCase) {
-        let list = drafts.filter { $0.id != c.id }
-        write(list, to: EvalStorage.draftsURL) { self.drafts = list }
+        write(EvalStorage.draftsURL, id: c.id, with: nil, released: c)
     }
 
     /// Moves a draft (as edited) into cases.jsonl.
     func approve(_ c: EvalCase, draftID: String) {
+        guard loadProblems[EvalStorage.draftsURL] == nil else { lastError = loadProblems[EvalStorage.draftsURL]; return }
         var approved = c
         approved.id = EvalCaseFile.uniqueID(c.id, existing: cases)
         approved.tags.removeAll { $0 == EvalCase.needsExpectedTag }
@@ -54,14 +83,29 @@ final class EvalCaseStore: ObservableObject {
         if lastError == nil { discardDraft(drafts.first { $0.id == draftID } ?? c) }
     }
 
-    private func write(_ list: [EvalCase], to url: URL, then update: () -> Void) {
+    /// Replaces or removes one case's line. `released`: the case as it was, whose screenshot is
+    /// deleted if nothing refers to it any more.
+    private func write(_ url: URL, id: String, with replacement: EvalCase?, released: EvalCase?) {
+        if let problem = loadProblems[url] {
+            lastError = problem
+            return
+        }
         do {
-            try EvalCaseFile.save(list, to: url)
-            lastError = nil
-            update()
+            try EvalCaseFile.replace(id: id, with: replacement, in: url)
+            reload()
+            if let shot = released?.context?.screenshot { removeScreenshotIfUnused(shot) }
         } catch {
             lastError = "Couldn't save: \(error.localizedDescription)"
         }
+    }
+
+    /// Deletes a screenshot Likely copied into the evals folder once no case or draft uses it.
+    func removeScreenshotIfUnused(_ path: String) {
+        let folder = EvalStorage.screenshotsURL.standardizedFileURL.path + "/"
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard standardized.hasPrefix(folder), loadProblems.isEmpty else { return }
+        let used = (cases + drafts).contains { $0.context?.screenshot.map { URL(fileURLWithPath: $0).standardizedFileURL.path } == standardized }
+        if !used { try? FileManager.default.removeItem(atPath: standardized) }
     }
 
     /// Copies a screenshot next to the cases (debug-view copies are deleted as runs roll over).
@@ -76,6 +120,10 @@ final class EvalCaseStore: ObservableObject {
 }
 
 // MARK: - Settings tab
+
+// The Evals tab and Run Suite are dev-build only (LIKELY_DEV), like `--eval` itself. The store and
+// the editor above/below stay in every build (the Debug View and search history use them).
+#if LIKELY_DEV
 
 struct EvalsSettings: View {
     @ObservedObject private var store = EvalCaseStore.shared
@@ -191,6 +239,8 @@ struct EvalsSettings: View {
         .listStyle(.inset(alternatesRowBackgrounds: true))
     }
 }
+
+#endif
 
 // MARK: - Editor
 
@@ -373,10 +423,13 @@ struct EvalCaseEditor: View {
         switch request.mode {
         case .newCase:
             c.id = EvalCaseFile.uniqueID(c.id, existing: store.cases)
+            var copied: String?
             if let shot = c.context?.screenshot, let kept = EvalCaseStore.keepScreenshot(URL(fileURLWithPath: shot), id: c.id) {
+                if kept != shot { copied = kept }
                 c.context?.screenshot = kept
             }
             store.save(c)
+            if store.lastError != nil, let copied { store.removeScreenshotIfUnused(copied) }
         case .editCase(let oldID):
             if c.id != oldID { c.id = EvalCaseFile.uniqueID(c.id, existing: store.cases.filter { $0.id != oldID }) }
             store.save(c, replacing: oldID)
@@ -420,6 +473,8 @@ struct EvalCaseEditor: View {
 
 // MARK: - Run suite
 
+#if LIKELY_DEV
+
 /// Runs `Likely --eval …` (this same binary) as a subprocess and shows its progress.
 struct RunSuiteSheet: View {
     let tags: [String]
@@ -432,6 +487,8 @@ struct RunSuiteSheet: View {
     @State private var tagFilter = ""
     @State private var k = 8
     @State private var timeout = 120
+    /// The public suite ships in dev builds (build.sh copies evals/fixtures); hidden if it's missing.
+    private let hasFixtures = (try? Suite.fixturesFile()) != nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -439,8 +496,10 @@ struct RunSuiteSheet: View {
             Form {
                 Picker("Suite", selection: $suite) {
                     Text("My tests").tag("personal")
-                    Text("Public fixtures (synthetic files)").tag("fixtures")
-                    Text("Both").tag("all")
+                    if hasFixtures {
+                        Text("Public fixtures (synthetic files)").tag("fixtures")
+                        Text("Both").tag("all")
+                    }
                 }
                 Picker("Agent", selection: $agentID) {
                     ForEach(AgentKind.all.filter { $0.isSupported && agents.path(for: $0) != nil }) { Text($0.name).tag($0.id) }
@@ -458,6 +517,11 @@ struct RunSuiteSheet: View {
             if suite != "fixtures" {
                 Text("Running your tests sends their queries, and whatever the agent finds, to \(AgentKind.with(id: agentID)?.name ?? "the agent")'s provider, as using Likely does.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if suite != "personal" && agentID == "codex" {
+                // Codex can't run inside the isolation sandbox (see EvalCLI): the fixtures aren't isolated.
+                Text("Codex can't be isolated: during the public fixtures it can read any of your files, and whatever it reads goes to OpenAI, as using Likely does.")
+                    .font(.caption).foregroundStyle(.orange)
             }
             if job.isRunning || job.finished {
                 VStack(alignment: .leading, spacing: 6) {
@@ -497,7 +561,7 @@ struct RunSuiteSheet: View {
     }
 
     private func run() {
-        var args = ["--eval", suite, "--agent", agentID, "--model", model, "--k", "\(k)", "--timeout", "\(timeout)", "--allow-eval"]
+        var args = ["--eval", suite, "--agent", agentID, "--model", model, "--k", "\(k)", "--timeout", "\(timeout)"]
         let filter = tagFilter.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if !filter.isEmpty { args += ["--tags", filter.joined(separator: ",")] }
         if let path = agents.paths[agentID] { args += ["--agent-path", path] }
@@ -515,6 +579,19 @@ final class EvalJob: ObservableObject {
     @Published var report: URL?
     private var process: Process?
     private var buffer = Data()
+    private var quitObserver: NSObjectProtocol?
+
+    init() {
+        // Quitting Likely mid-run mustn't leave the eval (and its agents) running.
+        quitObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                                              queue: .main) { [weak self] _ in self?.stopAndWait() }
+    }
+
+    /// Closing the sheet (or Settings) releases the job: stop the eval with it.
+    deinit {
+        if let quitObserver { NotificationCenter.default.removeObserver(quitObserver) }
+        if let process, process.isRunning { process.terminate() }
+    }
 
     func start(arguments: [String]) {
         guard let executable = Bundle.main.executableURL else { return }
@@ -552,8 +629,18 @@ final class EvalJob: ObservableObject {
         }
     }
 
+    /// SIGTERM: the eval cancels its agents and writes partial results (see EvalCLI).
     func stop() {
-        process?.terminate()
+        guard let process, process.isRunning else { return }
+        process.terminate()
+    }
+
+    /// At quit: give the eval a moment to stop its agents and write partial results.
+    private func stopAndWait() {
+        guard let process, process.isRunning else { return }
+        process.terminate()
+        let deadline = Date().addingTimeInterval(3)
+        while process.isRunning, Date() < deadline { usleep(50_000) }
     }
 
     private func consume(_ data: Data) {
@@ -572,3 +659,4 @@ final class EvalJob: ObservableObject {
         }
     }
 }
+#endif

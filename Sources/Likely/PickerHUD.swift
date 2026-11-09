@@ -20,6 +20,8 @@ final class HUDModel: ObservableObject {
     @Published var saveRequested = false
     /// "Get Likely" in the unpaid state.
     var onGetLikely: (() -> Void)?
+    /// A one-time line under the bar (the search history notice); the bar grows to fit it.
+    @Published var notice: String?
 }
 
 /// A slim floating bar glued above (or below) the open picker: live status from Claude plus a text
@@ -34,6 +36,8 @@ final class PickerHUD {
     private var sidebar: AXUIElement?
     private var sidebarLookups = 0
     private static let height: CGFloat = 44
+    private static let noticeHeight: CGFloat = 20
+    private var currentHeight: CGFloat { Self.height + (model.notice == nil ? 0 : Self.noticeHeight) }
     private static let gap: CGFloat = 8
 
     init() {
@@ -61,6 +65,7 @@ final class PickerHUD {
         model.fileCount = 0
         model.draft = ""
         model.saveRequested = false
+        model.notice = nil
         guard reposition() else { return }
         panel.orderFrontRegardless()
         trackTimer?.invalidate()
@@ -106,13 +111,14 @@ final class PickerHUD {
         let visible = screen.visibleFrame
 
         // Prefer just above the picker; if that runs off-screen, go below it; failing both, overlap its top edge.
+        let height = currentHeight
         var y = flippedTop + Self.gap
-        if y + Self.height > visible.maxY {
-            y = flippedBottom - Self.gap - Self.height
-            if y < visible.minY { y = flippedTop - Self.gap - Self.height }
+        if y + height > visible.maxY {
+            y = flippedBottom - Self.gap - height
+            if y < visible.minY { y = flippedTop - Self.gap - height }
         }
         let x = min(max(left, visible.minX), visible.maxX - width)
-        let frame = NSRect(x: x, y: y, width: width, height: Self.height)
+        let frame = NSRect(x: x, y: y, width: width, height: height)
         if frame != panel.frame { panel.setFrame(frame, display: true) }
         return true
     }
@@ -159,6 +165,34 @@ private struct HUDView: View {
     private var trimmedDraft: String { model.draft.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
+        VStack(spacing: 0) {
+            bar.frame(height: 44)
+            if let notice = model.notice {
+                HStack(spacing: 6) {
+                    Text(notice)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(notice)
+                    Spacer(minLength: 4)
+                    Button {
+                        model.notice = nil
+                        returnFocus()
+                    } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain)
+                        .help("Dismiss")
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(height: 20, alignment: .top)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 10)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.12)))
+    }
+
+    private var bar: some View {
         HStack(spacing: 10) {
             LikelyMark(working: model.working && model.mode == .normal)
             switch model.mode {
@@ -187,9 +221,7 @@ private struct HUDView: View {
         }
         .padding(.leading, 12)
         .padding(.trailing, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(VisualEffect().clipShape(RoundedRectangle(cornerRadius: 10)))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.12)))
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder private var trailingStatus: some View {
@@ -203,6 +235,7 @@ private struct HUDView: View {
                 }
                 .buttonStyle(.plain)
                 .underline()
+                #if LIKELY_DEV
                 Text("·")
                 Button(model.saveRequested ? "Test opens after you pick" : "Save as test") {
                     model.onSaveAsTest?()
@@ -212,6 +245,7 @@ private struct HUDView: View {
                 .underline(!model.saveRequested)
                 .disabled(model.saveRequested)
                 .help("Save this search as an eval test. The editor opens when the picker closes, with what you picked as the answer.")
+                #endif
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
