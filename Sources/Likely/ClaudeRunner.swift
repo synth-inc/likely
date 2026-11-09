@@ -47,7 +47,7 @@ final class ClaudeRunner: AgentRunner {
     func start(claudePath: String, model: String, prompt: String, workDir: URL) {
         cancel()
         buffer = Data()
-        let userCommands = ToolStore.shared.activeCommands
+        let userCommands = launchOptions.toolCommands
 
         let process = Process()
         process.currentDirectoryURL = workDir

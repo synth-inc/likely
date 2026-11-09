@@ -4,6 +4,7 @@ import AppKit
 import CryptoKit
 import LikelyEvalKit
 import LikelyStorage
+import LikelyTools
 
 /// `Likely --eval …`: runs eval cases headlessly through the app's own prompt and agent runners, and
 /// writes results.json + report.html. No menu bar item, onboarding, AX watching or copying into the
@@ -34,6 +35,7 @@ enum EvalCLI {
       --prompt-file <f>   use this prompt template instead of the one in Settings
       --out <dir>         results folder (default: …/Likely/evals/runs/<time>-<agent>-<model>)
       --no-isolate        don't sandbox cases that set searchFolders (see EVALS.md)
+      --with-tools        give fixture cases your tools too (personal cases always get them; see EVALS.md)
       --dry-run           print the prompts that would be sent; run nothing
       --verbose           also print Likely's log lines
 
@@ -46,6 +48,14 @@ enum EvalCLI {
     static func isRequested(_ arguments: [String]) -> Bool { arguments.contains("--eval") }
 
     private static var current: EvalSession?
+
+    /// The user's enabled, approved tools (tools.json), read once at the start so every case of a
+    /// run sees the same set. Cases that use tools get exactly these (see EvalToolPolicy).
+    static let userTools: [CustomTool] = ToolStore.shared.activeTools
+
+    static func toolSet(_ tools: [CustomTool]) -> EvalToolSet {
+        EvalToolSet(tools.map { (id: $0.id, commands: $0.cleanedCommands, instructions: $0.instructions) })
+    }
 
     /// Never returns.
     static func main(_ arguments: [String]) -> Never {
@@ -178,6 +188,7 @@ enum EvalCLI {
         var promptFile: String?
         var out: String?
         var isolate = true
+        var withTools = false
         var dryRun = false
         var verbose = false
         var help = false
@@ -217,6 +228,7 @@ enum EvalCLI {
                 case "--out": o.out = try value(arg)
                 case "--no-isolate": o.isolate = false
                 case "--isolate": o.isolate = true
+                case "--with-tools": o.withTools = true
                 case "--dry-run": o.dryRun = true
                 case "--verbose": o.verbose = true
                 case "--help", "-h": o.help = true
@@ -240,6 +252,8 @@ struct SuiteCase {
     let evalCase: EvalCase
     /// The folder of the cases file: relative paths in the case resolve against it.
     let base: URL
+    /// From the repo's public fixtures file (evals/fixtures/cases.jsonl).
+    var inFixtureSuite = false
 }
 
 struct Suite {
@@ -265,7 +279,9 @@ struct Suite {
         var cases: [SuiteCase] = []
         var warnings: [String] = []
         var seen = Set<String>()
+        let fixtures = (try? fixturesFile())?.resolvingSymlinksInPath()
         for file in files {
+            let isFixtures = file.standardizedFileURL.resolvingSymlinksInPath() == fixtures
             guard FileManager.default.fileExists(atPath: file.path) else {
                 if spec == "all" { warnings.append("\(file.path) doesn't exist"); continue }
                 throw LoadError(description: "No cases file at \(file.path)")
@@ -275,7 +291,7 @@ struct Suite {
             for c in loaded {
                 if seen.contains(c.id) { warnings.append("duplicate case id \(c.id) in \(file.lastPathComponent); both run") }
                 seen.insert(c.id)
-                cases.append(SuiteCase(evalCase: c, base: file.deletingLastPathComponent()))
+                cases.append(SuiteCase(evalCase: c, base: file.deletingLastPathComponent(), inFixtureSuite: isFixtures))
             }
         }
         let name = ["fixtures", "personal", "mine", "all"].contains(spec) ? (spec == "mine" ? "personal" : spec) : files[0].path
@@ -349,6 +365,10 @@ final class EvalSession {
             EvalCLI.fail("Can't create \(runDir.path): \(error)")
         }
         print("Running \(total) case\(total == 1 ? "" : "s") from \(suite.name) with \(agent.kind.name) · \(agent.model)")
+        let withTools = cases.filter { EvalCaseRun.usesTools($0, options: options) }.count
+        let tools = EvalCLI.userTools.isEmpty ? "none" : EvalCLI.userTools.map(\.id).joined(separator: ", ")
+        print("Your tools: \(tools)" + (EvalCLI.userTools.isEmpty || withTools == cases.count ? ""
+              : " (\(cases.count - withTools) of \(cases.count) cases run without them)"))
         print("Results: \(runDir.path)")
         fflush(stdout)
         fill()
@@ -416,7 +436,8 @@ final class EvalSession {
                           isolated: options.isolate && agent.canIsolate && cases.contains { $0.evalCase.searchFolders != nil },
                           promptHash: String(hash), likelyVersion: version, cases: ordered,
                           caseFilter: options.caseIDs.isEmpty ? nil : options.caseIDs.sorted(),
-                          interrupted: interruptedBy == nil ? nil : true)
+                          interrupted: interruptedBy == nil ? nil : true,
+                          tools: EvalCLI.toolSet(cases.contains { EvalCaseRun.usesTools($0, options: options) } ? EvalCLI.userTools : []))
         let previous = EvalRun.previous(of: run, in: runDir.deletingLastPathComponent(), excluding: runDir)
         var status: Int32 = interruptedBy.map { 128 + $0 } ?? 0
         do {
@@ -495,6 +516,13 @@ final class EvalCaseRun {
     /// … and the sandbox enforces it (not for Codex).
     private var isolated: Bool { wantsIsolation && agent.canIsolate }
 
+    static func usesTools(_ item: SuiteCase, options: EvalCLI.Options) -> Bool {
+        EvalToolPolicy.usesTools(item.evalCase, inFixtureSuite: item.inFixtureSuite, withTools: options.withTools)
+    }
+    /// The user's tools this case runs with: all of the app's, or none (prompt, allowlist and sandbox
+    /// profile alike).
+    private var tools: [CustomTool] { Self.usesTools(item, options: options) ? EvalCLI.userTools : [] }
+
     init(item: SuiteCase, agent: Agent, template: String, options: EvalCLI.Options, attempt: Int, workDir: URL) {
         self.item = item
         self.agent = agent
@@ -512,7 +540,7 @@ final class EvalCaseRun {
         let userName = context?.userName ?? (evalCase.source == "fixture" ? EvalCLI.fixturePersona : nil)
         let base = PromptBuilder.initial(PromptBuilder.Context(appName: context?.app ?? "an app", windowTitle: context?.windowTitle,
                                                                buttonTitle: context?.button, screenshot: screenshot,
-                                                               userName: userName),
+                                                               userName: userName, tools: tools),
                                          imageAttached: agent.takesImages, template: template)
         var prompt = base
         if wantsIsolation, let folders = searchFolders {
@@ -539,6 +567,7 @@ final class EvalCaseRun {
         var o = AgentLaunchOptions()
         o.isEval = true
         o.appendTranscript = true
+        o.tools = tools
         if isolated, let folders = searchFolders {
             // All of ~ and /Volumes denied; the case's folders, its work folder and the agents' own
             // config/state allowed back (see EvalIsolation).
@@ -637,7 +666,7 @@ final class EvalCaseRun {
             turnSuggestions: turnSuggestions, refused: refused, score: score, turns: turn + 1,
             firstFileSeconds: firstFile.map { $0.timeIntervalSince(started) }, totalSeconds: total, costUSD: costUSD,
             toolCalls: tools, transcriptPath: hasTranscript ? transcriptCopy.path : nil,
-            promptPath: workDir.appendingPathComponent("prompt.txt").path)
+            promptPath: workDir.appendingPathComponent("prompt.txt").path, usedTools: Self.usesTools(item, options: options))
         let completion = self.completion
         self.completion = nil
         // Let the runner's cancellation settle before the next case starts.

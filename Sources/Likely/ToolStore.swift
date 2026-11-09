@@ -48,9 +48,12 @@ final class ToolStore: ObservableObject {
     var pending: [ToolApproval.Pending] { ToolApproval.pending(tools, approvals: approvals) }
 
     /// Command prefixes of the enabled, valid tools, without duplicates.
-    var activeCommands: [String] { ToolPermissions.merged([], activeTools.flatMap(\.cleanedCommands)) }
+    var activeCommands: [String] { Self.commands(of: activeTools) }
 
     var promptSection: String { ToolPrompts.section(for: activeTools) }
+
+    /// Command prefixes of `tools`, without duplicates.
+    static func commands(of tools: [CustomTool]) -> [String] { ToolPermissions.merged([], tools.flatMap(\.cleanedCommands)) }
 
     // MARK: Approval
 
@@ -233,4 +236,9 @@ final class ToolStore: ObservableObject {
         pendingReload = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
+}
+
+extension AgentLaunchOptions {
+    /// The command prefixes this launch allowlists: its own tool set, or else the app's.
+    var toolCommands: [String] { tools.map(ToolStore.commands(of:)) ?? ToolStore.shared.activeCommands }
 }

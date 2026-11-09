@@ -2,6 +2,7 @@ import AppKit
 import LikelyStorage
 import ApplicationServices
 import LikelyEvalKit
+import LikelyTools
 
 /// Detects pickers opening and closing. On open, the Likely folder gets the most recently added files;
 /// when the user types in the bar, it runs the (screenshot +) description → agent → ~/Likely search.
@@ -681,6 +682,9 @@ enum PromptBuilder {
         /// Filled into `{{userName}}`. The app passes NSFullUserName() (if allowed in Settings); evals
         /// pass the case's persona or nil, never the real user's name.
         var userName: String?
+        /// The user's tools for the prompt's tools section. nil: the app's (ToolStore); evals pass
+        /// the case's set ([] for none).
+        var tools: [CustomTool]? = nil
     }
 
     /// The first message: the prompt template filled in for this picker.
@@ -696,7 +700,7 @@ enum PromptBuilder {
             ?? "No screenshot is available; work from the app name, window title and what the user says."
         let name = c.userName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // The tools section goes where {{tools}} is, or at the end of templates that don't have it.
-        let tools = ToolStore.shared.promptSection
+        let tools = c.tools.map(ToolPrompts.section(for:)) ?? ToolStore.shared.promptSection
         var filled = template
         if !tools.isEmpty && !filled.contains("{{tools}}") { filled += "\n\n{{tools}}" }
         return PromptTemplate.render(filled, values: [

@@ -12,6 +12,7 @@ public enum EvalReport {
         var main = "Passed \(s.passed)/\(s.scored) (\(pct(s.passRate)))  hit@1 \(pct(s.hitAt1))  hit@3 \(pct(s.hitAt3))  hit@\(run.k) \(pct(s.hitAtK))"
         main += "  recall \(pct(s.meanRecall))  precision \(s.meanPrecision.map(pct) ?? "–")"
         lines.append(main)
+        if let tools = run.tools { lines.append("Tools: \(tools.summary)") }
         var perf = "Median first file \(secs(s.medianFirstFileSeconds))  median total \(secs(s.medianTotalSeconds))"
         perf += "  cost \(s.totalCostUSD.map { String(format: "$%.4f", $0) } ?? "n/a")"
         perf += "  tool calls/case \(s.meanToolCalls.map { String(format: "%.1f", $0) } ?? "n/a")"
@@ -22,6 +23,8 @@ public enum EvalReport {
             let p = previous.summary
             let differs = run.mismatches(with: previous)
             if !differs.isEmpty { lines.append("note: the previous run used different settings (\(differs.joined(separator: ", "))); not a like-for-like comparison") }
+            let toolChanges = run.toolChanges(since: previous)
+            if !toolChanges.isEmpty { lines.append("note: tools changed: \(toolChanges.joined(separator: ", "))") }
             lines.append("vs previous (\(previous.startedAt), \(previous.agent) \(previous.model)): pass \(pct(p.passRate)) → \(pct(s.passRate)), hit@1 \(pct(p.hitAt1)) → \(pct(s.hitAt1))")
             let changes = caseChanges(run, previous)
             if !changes.fixed.isEmpty { lines.append("  now passing: " + changes.fixed.joined(separator: ", ")) }
@@ -80,7 +83,7 @@ public enum EvalReport {
         </style></head><body>
         <h1>Likely eval: \(esc(run.suite))</h1>
         <div class="muted">\(esc(run.agent)) · \(esc(run.model)) · k=\(run.k) · timeout \(Int(run.timeoutSeconds))s\
-        \(run.isolated ? " · isolated" : "")\(run.interrupted == true ? " · <span class=\"warn\">interrupted (partial results)</span>" : "") · prompt \(esc(run.promptHash)) · Likely \(esc(run.likelyVersion))<br>
+        \(run.isolated ? " · isolated" : "")\(run.interrupted == true ? " · <span class=\"warn\">interrupted (partial results)</span>" : "") · prompt \(esc(run.promptHash))\(run.tools.map { " · tools: " + esc($0.summary) } ?? "") · Likely \(esc(run.likelyVersion))<br>
         \(esc(run.startedAt)) → \(esc(run.finishedAt))\(run.tags.isEmpty ? "" : " · tags: " + esc(run.tags.joined(separator: ", ")))</div>
         <div class="tiles">
         """
@@ -114,6 +117,10 @@ public enum EvalReport {
             let differs = run.mismatches(with: previous)
             if !differs.isEmpty {
                 h += "<p class=\"warn\">Different settings: \(esc(differs.joined(separator: ", "))). Not a like-for-like comparison.</p>"
+            }
+            let toolChanges = run.toolChanges(since: previous)
+            if !toolChanges.isEmpty {
+                h += "<p class=\"warn\">Tools changed: \(esc(toolChanges.joined(separator: ", "))) (previous: \(esc(previous.tools?.summary ?? "none"))).</p>"
             }
             h += "<p>Pass rate \(pct(previous.summary.passRate)) → <b>\(pct(s.passRate))</b>. "
             h += changes.fixed.isEmpty ? "" : "<span class=\"up\">Now passing: \(esc(changes.fixed.joined(separator: ", ")))</span>. "
@@ -175,6 +182,7 @@ public enum EvalReport {
             h += "<p class=\"muted\">recall \(pct(c.score.recall)) · precision \(c.score.precision.map(pct) ?? "–")"
             h += " · first file \(secs(c.firstFileSeconds)) · total \(secs(c.totalSeconds))"
             h += " · tool calls \(c.toolCalls.map(String.init) ?? "n/a")"
+            if let used = c.usedTools, run.tools?.isEmpty == false { h += used ? " · your tools" : " · without your tools" }
             if let t = c.transcriptPath { h += " · <a href=\"\(esc(t))\">transcript</a>" }
             if let pr = c.promptPath { h += " · <a href=\"\(esc(pr))\">prompt</a>" }
             h += "</p></div></details>"
