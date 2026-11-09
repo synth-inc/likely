@@ -370,7 +370,7 @@
       wait(TIMING.afterFound);
     }
     function pickAndOpen(files) {
-      cam('pick', CAMERA.follow);
+      cam('wide', 1);
       moveTo(560, rowY(0), TIMING.move); click(); add({ type: 'sel', ids: [files[0].n] });
       if (files.length > 1) {
         wait(TIMING.clickGap);
@@ -399,7 +399,7 @@
       submit(s);
       found(s.found);
       if (s.quickLook) {
-        cam('pick', CAMERA.follow);
+        cam('wide', 1);
         moveTo(560, rowY(0), TIMING.move); click(); add({ type: 'sel', ids: [s.found[0].n] });
         wait(0.25); add({ type: 'ql', on: true }); cam('ql', CAMERA.ql);
         wait(1.7); add({ type: 'ql', on: false }); wait(0.3);
@@ -607,7 +607,11 @@
     function fitName(n) {
       if (nameCache[n]) return nameCache[n];
       var out = n;
-      if (textWidth(n) > nameMax) {
+      if (textWidth(n) > nameMax && n.lastIndexOf('.') <= 0) {
+        // No extension (e.g. the "…Searching…" status files): cut the end, like Finder does.
+        var cut = n.length;
+        do { cut--; out = n.slice(0, cut).replace(/[\s…]+$/, '') + '…'; } while (cut > 4 && textWidth(out) > nameMax);
+      } else if (textWidth(n) > nameMax) {
         var dot = n.lastIndexOf('.'), tail = n.length - Math.max(dot - 6, 0), head = n.length - tail;
         do { head--; out = n.slice(0, head) + '…' + n.slice(n.length - tail); } while (head > 4 && textWidth(out) > nameMax);
       }
