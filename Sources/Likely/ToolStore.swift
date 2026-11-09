@@ -41,8 +41,21 @@ final class ToolStore: ObservableObject {
         startWatching()
     }
 
-    /// Enabled, valid and approved: the tools the agent gets.
-    var activeTools: [CustomTool] { ToolApproval.usable(tools, approvals: approvals) }
+    /// Enabled, valid, approved, and every private data area it needs turned on (Settings →
+    /// Permissions): the tools the agent gets. A tool whose areas are still off isn't used, since its
+    /// commands would fail in the sandbox (and the user hasn't agreed to open them).
+    var activeTools: [CustomTool] {
+        PrivateDataAccess.activeTools(tools, approvals: approvals) { PrivateDataAccess.isAllowed($0) }
+    }
+
+    /// Whether `tool` changed outside Likely and waits for the user's Approve.
+    func isPending(_ tool: CustomTool) -> Bool { pending.contains { $0.tool.id == tool.id } }
+
+    /// Areas `tool` needs that are still off.
+    func unmetNeeds(of tool: CustomTool) -> [PrivateDataArea] { PrivateDataAccess.unmetNeeds(of: tool) }
+
+    /// A Private data toggle changed: views showing tools redraw.
+    func privateDataChanged() { objectWillChange.send() }
 
     /// Enabled, valid tools changed outside Likely and not yet approved.
     var pending: [ToolApproval.Pending] { ToolApproval.pending(tools, approvals: approvals) }
@@ -160,11 +173,14 @@ final class ToolStore: ObservableObject {
         write(tools.filter { $0.id != id })
     }
 
-    /// Turning a tool on only works if it's valid.
+    /// Turning a tool on only works if it's valid. Unlike `save` (an edit made in Likely's editor),
+    /// this never approves anything (ToolApproval.afterToggle): a tool changed outside Likely stays
+    /// pending until the user clicks Approve, whatever its switch says.
     func setEnabled(_ enabled: Bool, id: String) {
         guard var tool = tools.first(where: { $0.id == id }), !(enabled && !tool.problems.isEmpty) else { return }
         tool.enabled = enabled
-        save(tool)
+        storeApprovals(ToolApproval.afterToggle(tool, approvals: approvals), check: false)
+        write(tools.map { $0.id == id ? tool : $0 })
     }
 
     /// A fresh id for a new tool named `name`.

@@ -74,6 +74,10 @@ public enum ToolValidator {
         } else {
             problems += tool.commands.compactMap(problem(with:))
         }
+        let unknown = PrivateDataAccess.unknownNeeds(tool.needs)
+        if !unknown.isEmpty {
+            problems.append("Unknown \"needs\": \(unknown.joined(separator: ", ")) (use \(PrivateDataArea.allCases.map(\.rawValue).joined(separator: ", ")))")
+        }
         return problems
     }
 }

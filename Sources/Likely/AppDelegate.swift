@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ClaudeLocator.resolve { Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")") }
         buildStatusItem()
         toolApprovalChanged()   // loads tools.json; anything changed while Likely was closed shows up now
+        if Settings.agentID == "codex" { PhotoLibraries.refresh() }   // for Codex's sandbox (see PhotoLibraries)
         if Updater.isEnabled { MainActor.assumeIsolated { Updater.shared.start() } }
 
         coordinator.verbose = Settings.verbose

@@ -140,16 +140,27 @@ final class CodexRunner: AgentRunner {
     /// can't be combined. Verified with `codex sandbox` (codex-cli 0.153): reads under the denied
     /// paths fail with EPERM, the more specific "read" entry for the work folder wins.
     /// The screenshot is attached with `-i`, which Codex itself reads (outside the sandbox).
+    ///
+    /// Private data (PrivateDataArea): the table can't say "any `.photoslibrary`" or match container
+    /// names, so the containers are listed at each launch and Photos libraries outside the default
+    /// places come from PhotoLibraries (found in the background). Codex's `view_image` tool reads an
+    /// image file itself, outside the sandbox, so it's turned off while Photos is: otherwise it could
+    /// open a photo inside a library the sandbox denies.
     private static func baseArguments(workDir: URL) -> [String] {
-        ["--json", "--skip-git-repo-check", "--ignore-user-config",
-         "-c", "default_permissions=\"likely\"",
-         "-c", "permissions.likely.extends=\":read-only\"",
-         "-c", "permissions.likely.filesystem=" + AgentSandbox.codexFilesystem(readable: [workDir.path])]
+        let blocked = PrivateDataAccess.blocked()
+        let photosBlocked = blocked.contains(.photos)
+        return ["--json", "--skip-git-repo-check", "--ignore-user-config",
+                "-c", "default_permissions=\"likely\"",
+                "-c", "permissions.likely.extends=\":read-only\"",
+                "-c", "permissions.likely.filesystem=" + AgentSandbox.codexFilesystem(
+                    readable: [workDir.path], blockedAreas: blocked, photoLibraries: photosBlocked ? PhotoLibraries.current : [])]
+            + (photosBlocked ? ["-c", "features.view_image=false"] : [])
     }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
         cancel()
         threadID = nil
+        if PrivateDataAccess.blocked().contains(.photos) { PhotoLibraries.refresh() }   // for the next search
         self.executable = executable
         self.model = model
         self.workDir = workDir
@@ -324,6 +335,37 @@ final class CodexRunner: AgentRunner {
             return inner
         }
         return message
+    }
+}
+
+/// Photos libraries outside the default places (PhotoLibraryScan), for Codex's permission table.
+/// Found in the background at launch (when Codex is the agent) and again at each Codex search; a
+/// search uses what was found by then. Thread-safe.
+enum PhotoLibraries {
+    private static let lock = NSLock()
+    private static var known: [String] = []
+    private static var scanning = false
+
+    static var current: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return known
+    }
+
+    static func refresh() {
+        lock.lock()
+        guard !scanning else { return lock.unlock() }
+        scanning = true
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async {
+            let found = PhotoLibraryScan.find()
+            lock.lock()
+            let changed = found != known
+            known = found
+            scanning = false
+            lock.unlock()
+            if changed { Log.write("codex", "Photos libraries outside the default places: \(found.count)") }
+        }
     }
 }
 
