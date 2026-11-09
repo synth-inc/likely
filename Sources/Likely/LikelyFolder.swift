@@ -1,9 +1,9 @@
 import AppKit
 
-/// Manages ~/Likely: APFS clones of candidate files, plus a "…status…" file whose name is the
-/// current progress message (the "…" sorts it above everything else in Finder and file pickers).
-/// When a picker opens, before anything is searched, it holds the most recently added files under a
-/// "…Recent…" header file (see `showRecent`).
+/// Manages ~/Likely: APFS clones of candidate files, plus a " …status…" file whose name is the
+/// current progress message (the leading space sorts it above everything else in Finder and file
+/// pickers). When a picker opens, before anything is searched, it holds the most recently added files
+/// under a " …Recent…" header file (see `showRecent`).
 /// Only removes files it created itself; anything else the user puts in the folder is left alone.
 final class LikelyFolder {
     static let defaultURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Likely", isDirectory: true)
@@ -71,7 +71,6 @@ final class LikelyFolder {
     /// The recent-file clones and their "…Recent…" header (separate from the agent's suggestions,
     /// which replace them once a search starts).
     private var recent: [URL] = []
-    private var recentSources = Set<String>()
     private var statusURL: URL?
     /// When the picker these copies were made for closed. Copies outlive the picker, because the app
     /// that opened it often reads the file afterwards (browsers upload it, Mail attaches it); they're
@@ -83,9 +82,17 @@ final class LikelyFolder {
 
     var count: Int { added.count }
 
-    /// Heads the recent files. Like the status file, the leading "…" sorts it above them by name;
-    /// its Date Added is set newer than theirs, so it's on top by Date Added too.
-    static let recentHeaderName = "…Recent…"
+    /// Heads the recent files. Its Date Added is set newer than theirs, so it's on top by Date Added.
+    /// By name, Finder's sort (`localizedStandardCompare`) puts a leading space before every
+    /// punctuation mark and symbol ("_", "-", "!", "(", "…"), so it's on top by name too.
+    static let recentHeaderName = " …Recent…"
+    /// Names of earlier versions, removed like the current ones.
+    private static let legacyRecentHeaderName = "…Recent…"
+    private static let statusPrefix = " …"
+
+    /// Likely's status and header files (current and earlier names).
+    private static func isStatusOrHeader(_ name: String) -> Bool { name.hasPrefix("…") || name.hasPrefix(statusPrefix) }
+    private static func isRecentHeader(_ name: String) -> Bool { name == recentHeaderName || name == legacyRecentHeaderName }
 
     private struct Manifest: Codable {
         var paths: [String]
@@ -104,6 +111,8 @@ final class LikelyFolder {
                 added = paths.map { URL(fileURLWithPath: $0) }   // older format
             }
         }
+        // Copies made just before a crash, before they were in the manifest.
+        removeUnlistedCopies()
         // Copies from a picker that closed recently stay for the rest of their time (see
         // `remainingKeepTime`); anything else (a crash with a picker open, old copies) goes now.
         if remainingKeepTime == nil {
@@ -149,7 +158,7 @@ final class LikelyFolder {
             .components(separatedBy: .newlines).joined(separator: " ")
             .trimmingCharacters(in: CharacterSet(charactersIn: " .…"))
         if text.count > 100 { text = String(text.prefix(100)) }
-        let target = Self.url.appendingPathComponent("…\(text)…")
+        let target = Self.url.appendingPathComponent("\(Self.statusPrefix)\(text)…")
         guard target != statusURL else { return }
         do {
             if let statusURL, fm.fileExists(atPath: statusURL.path) {
@@ -166,6 +175,8 @@ final class LikelyFolder {
     /// Copies run here, one at a time, so a big file or folder never stalls the picker or the HUD.
     /// Bookkeeping (`added`, `sources`, the manifest) stays on the main thread.
     private let copyQueue = DispatchQueue(label: "inc.synth.likely.copies", qos: .userInitiated)
+    /// The recent-files query, so it never waits behind a big copy (and vice versa).
+    private let recentQueue = DispatchQueue(label: "inc.synth.likely.recent", qos: .userInitiated)
     /// Bumped whenever the current suggestions are dropped (clear, new feedback, picker closed): a copy
     /// started before that is thrown away instead of being added. Read from the copy queue too.
     private let epochLock = NSLock()
@@ -174,19 +185,59 @@ final class LikelyFolder {
     /// The same for the recent files, which outlive "Not these" but not the start of a search.
     private var _recentEpoch = 0
     private var recentEpoch: Int { epochLock.lock(); defer { epochLock.unlock() }; return _recentEpoch }
+    /// Copies made on the copy queue but not yet handed to the main thread (guarded by `epochLock`).
+    /// Each copy is staged under the lock only if its epoch is still current, and dropping the epoch
+    /// takes and removes whatever is staged, so every copy is removed exactly once: by its own job
+    /// (dropped before it was staged) or by the drop (dropped after).
+    private var staged: [Made] = []
+    private var stagedRecent: [Made] = []
     /// Sources being copied right now (main thread), so a repeated FILE line isn't copied twice.
     private var pending = Set<String>()
 
     private func dropInFlightCopies(includingRecent: Bool = true) {
         epochLock.lock()
         _epoch += 1
-        if includingRecent { _recentEpoch += 1 }
+        var dropped = staged
+        staged.removeAll()
+        if includingRecent {
+            _recentEpoch += 1
+            dropped += stagedRecent
+            stagedRecent.removeAll()
+        }
         epochLock.unlock()
+        dropped.forEach { $0.remove() }
         pending.removeAll()
     }
 
     private func dropInFlightRecent() {
-        epochLock.lock(); _recentEpoch += 1; epochLock.unlock()
+        epochLock.lock()
+        _recentEpoch += 1
+        let dropped = stagedRecent
+        stagedRecent.removeAll()
+        epochLock.unlock()
+        dropped.forEach { $0.remove() }
+    }
+
+    /// Copy queue: hands `made` to the main thread if `ticket` is still current. False if it was
+    /// dropped meanwhile; the caller removes it then.
+    private func stage(_ made: Made, ticket: Int, recent: Bool) -> Bool {
+        epochLock.lock(); defer { epochLock.unlock() }
+        guard (recent ? _recentEpoch : _epoch) == ticket else { return false }
+        if recent { stagedRecent.append(made) } else { staged.append(made) }
+        return true
+    }
+
+    /// Main thread: takes a staged copy over. False if a drop already took (and removed) it.
+    private func unstage(_ made: Made, recent: Bool) -> Bool {
+        epochLock.lock(); defer { epochLock.unlock() }
+        if recent {
+            guard let index = stagedRecent.firstIndex(of: made) else { return false }
+            stagedRecent.remove(at: index)
+        } else {
+            guard let index = staged.firstIndex(of: made) else { return false }
+            staged.remove(at: index)
+        }
+        return true
     }
 
     /// Waits for the copy in progress (at quit, so a half-written copy isn't left behind; a copy
@@ -226,19 +277,16 @@ final class LikelyFolder {
         let copier = Copier(likelyURL: likelyURL, home: home, supportPath: Self.supportPath,
                             isCurrent: { [weak self] in self?.epoch == ticket })
         copyQueue.async { [weak self] in
-            let copied = copier.isCurrent() ? copier.copy(source) : nil
-            // Dropped while copying: remove it here rather than leave it in the folder.
-            if let copied, !copier.isCurrent() { try? FileManager.default.removeItem(at: copied) }
+            let made = (copier.isCurrent() ? copier.copy(source) : nil).flatMap(Made.init)
+            let kept = made.map { self?.stage($0, ticket: ticket, recent: false) == true } ?? false
+            // Dropped while copying: remove it here, the only place that will.
+            if let made, !kept { made.remove() }
             DispatchQueue.main.async {
                 guard let self else { return }
-                guard self.epoch == ticket else {
-                    if let copied { self.copyQueue.async { try? FileManager.default.removeItem(at: copied) } }
-                    return completion(false)
-                }
-                self.pending.remove(source.path)
-                guard let copied else { return completion(false) }
+                if self.epoch == ticket { self.pending.remove(source.path) }
+                guard let made, kept, self.unstage(made, recent: false) else { return completion(false) }
                 self.sources.insert(source.path)
-                self.added.append(copied)
+                self.added.append(made.url)
                 self.saveManifest()
                 completion(true)
             }
@@ -264,7 +312,6 @@ final class LikelyFolder {
         added.removeAll()
         sources.removeAll()
         recent.removeAll()
-        recentSources.removeAll()
         statusURL = nil
         releasedAt = nil
         saveManifest()
@@ -276,14 +323,27 @@ final class LikelyFolder {
         statusURL = nil
     }
 
-    /// The current status file, plus strays from a crash ("…" names are only ever Likely's status files
-    /// and the "…Recent…" header, which stays unless `includingRecentHeader`).
+    /// The current status file, plus strays from a crash (" …" and "…" names are only ever Likely's
+    /// status files and the recent-files header, which stays unless `includingRecentHeader`).
     private func removeStatusFiles(includingRecentHeader: Bool = false) {
         if let statusURL { try? fm.removeItem(at: statusURL) }
         if let names = try? fm.contentsOfDirectory(atPath: Self.url.path) {
-            for name in names where name.hasPrefix("…") && (includingRecentHeader || name != Self.recentHeaderName) {
+            for name in names where Self.isStatusOrHeader(name) && (includingRecentHeader || !Self.isRecentHeader(name)) {
                 try? fm.removeItem(at: Self.url.appendingPathComponent(name))
             }
+        }
+    }
+
+    /// Copies Likely made (see `Copier.tag`) that the manifest doesn't list: made just before a crash
+    /// or quit, before the main thread recorded them.
+    private func removeUnlistedCopies() {
+        let listed = Set((added + recent).map { $0.standardizedFileURL.path })
+        guard let names = try? fm.contentsOfDirectory(atPath: Self.url.path) else { return }
+        for name in names {
+            let url = Self.url.appendingPathComponent(name)
+            guard Copier.isTagged(url), !listed.contains(url.standardizedFileURL.path) else { continue }
+            try? fm.removeItem(at: url)
+            Log.write("likely", "removed unlisted copy \(name)")
         }
     }
 
@@ -299,33 +359,43 @@ final class LikelyFolder {
         let likelyURL = Self.url
         let home = fm.homeDirectoryForCurrentUser.path
         let ticket = recentEpoch
-        let skip = recentSources   // already shown for this picker
         let copier = Copier(likelyURL: likelyURL, home: home, supportPath: Self.supportPath,
                             isCurrent: { [weak self] in self?.recentEpoch == ticket })
-        copyQueue.async { [weak self] in
-            let result = RecentFiles.find(limit: limit, roots: roots, excluding: [likelyURL.path, Self.supportPath], home: home)
-            var copies: [(source: String, copy: URL)] = []
-            for file in result.files where copier.isCurrent() && !skip.contains(file.path) {
-                if let copy = copier.copy(URL(fileURLWithPath: file.path)) { copies.append((file.path, copy)) }
+        recentQueue.async { [weak self] in
+            let result = RecentFiles.find(limit: limit, roots: roots, excluding: [likelyURL.path, Self.supportPath], home: home,
+                                          sameVolumeAs: likelyURL.path)
+            guard copier.isCurrent(), let queue = self?.copyQueue else {
+                return DispatchQueue.main.async { completion(result, []) }
             }
-            var made = copies.map(\.copy)
-            if !copies.isEmpty, copier.isCurrent(),
-               let header = Copier.makeHeader(named: Self.recentHeaderName, in: likelyURL,
-                                              newerThan: result.files.map(\.added).max() ?? Date()) {
-                made.append(header)
-            }
-            // Dropped meanwhile (picker closed, search started): take it all back out.
-            if !copier.isCurrent() { made.forEach { try? FileManager.default.removeItem(at: $0) } }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard self.recentEpoch == ticket else {
-                    self.copyQueue.async { made.forEach { try? FileManager.default.removeItem(at: $0) } }
-                    return completion(result, [])
+            queue.async { [weak self] in
+                // Each copy is staged as soon as it's made (see `stage`); once one is refused, the
+                // rest would be too.
+                func keep(_ url: URL) -> Made? {
+                    guard let made = Made(url) else { return nil }
+                    if self?.stage(made, ticket: ticket, recent: true) == true { return made }
+                    made.remove()
+                    return nil
                 }
-                self.recent += made
-                self.recentSources.formUnion(copies.map(\.source))
-                self.saveManifest()
-                completion(result, copies.map(\.source))
+                var copies: [(source: String, made: Made)] = []
+                for file in result.files where copier.isCurrent() {
+                    guard let copy = copier.copy(URL(fileURLWithPath: file.path)) else { continue }
+                    guard let made = keep(copy) else { break }
+                    copies.append((file.path, made))
+                }
+                var header: Made?
+                if !copies.isEmpty, copier.isCurrent(),
+                   let url = Copier.makeHeader(named: Self.recentHeaderName, in: likelyURL,
+                                               newerThan: result.files.map(\.added).max() ?? Date()) {
+                    header = keep(url)
+                }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    let kept = copies.filter { self.unstage($0.made, recent: true) }
+                    self.recent += kept.map(\.made.url)
+                    if let header, self.unstage(header, recent: true) { self.recent.append(header.url) }
+                    self.saveManifest()
+                    completion(result, kept.map(\.source))
+                }
             }
         }
     }
@@ -335,10 +405,7 @@ final class LikelyFolder {
     func clearRecent() {
         dropInFlightRecent()
         for url in recent { try? fm.removeItem(at: url) }
-        let header = Self.url.appendingPathComponent(Self.recentHeaderName)
-        if fm.fileExists(atPath: header.path) { try? fm.removeItem(at: header) }
         recent.removeAll()
-        recentSources.removeAll()
         saveManifest()
     }
 
@@ -482,7 +549,7 @@ extension LikelyFolder {
             var attempt = 1
             while true {
                 let destination = folder.appendingPathComponent(unique ? Self.numbered(name, attempt) : name)
-                if fclonefileat(item.fd, AT_FDCWD, destination.path, 0) == 0 { return destination }
+                if fclonefileat(item.fd, AT_FDCWD, destination.path, 0) == 0 { return tagged(destination, unique) }
                 let cloneError = errno
                 if cloneError == EEXIST && unique && attempt < 1000 { attempt += 1; continue }
                 if cloneError == EEXIST { return nil }
@@ -501,7 +568,7 @@ extension LikelyFolder {
                         if !copied { unlink(destination.path) }
                     }
                 }
-                if copied { return destination }
+                if copied { return tagged(destination, unique) }
                 let copyError = errno
                 if copyError == EEXIST && unique && attempt < 1000 { attempt += 1; continue }
                 Log.write("likely", "copy failed \(item.realPath): \(String(cString: strerror(copyError)))")
@@ -513,13 +580,41 @@ extension LikelyFolder {
         private func makeUniqueFolder(named name: String) -> URL? {
             for attempt in 1..<1000 {
                 let destination = likelyURL.appendingPathComponent(Self.numbered(name, attempt))
-                if mkdir(destination.path, 0o755) == 0 { return destination }
+                if mkdir(destination.path, 0o755) == 0 { return Self.tag(destination) }
                 if errno != EEXIST {
                     Log.write("likely", "couldn't create \(destination.path): \(String(cString: strerror(errno)))")
                     return nil
                 }
             }
             return nil
+        }
+
+        /// Top-level copies (`unique`) are tagged; files inside a copied folder go with the folder.
+        private func tagged(_ url: URL, _ topLevel: Bool) -> URL { topLevel ? Self.tag(url) : url }
+
+        private static let tagName = "inc.synth.likely.copy"
+
+        /// Marks something Likely made in the Likely folder, so a copy made just before a crash (not
+        /// yet in the manifest) is recognized and removed at the next launch. The value is the item's
+        /// inode, so a Finder duplicate of it (which keeps extended attributes) isn't mistaken for one.
+        @discardableResult
+        static func tag(_ url: URL) -> URL {
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else { return url }
+            let value = Array(String(info.st_ino).utf8)
+            if setxattr(url.path, tagName, value, value.count, 0, XATTR_NOFOLLOW) != 0 {
+                Log.write("likely", "couldn't tag \(url.lastPathComponent): \(String(cString: strerror(errno)))")
+            }
+            return url
+        }
+
+        static func isTagged(_ url: URL) -> Bool {
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else { return false }
+            var buffer = [UInt8](repeating: 0, count: 32)
+            let length = getxattr(url.path, tagName, &buffer, buffer.count, 0, XATTR_NOFOLLOW)
+            guard length > 0 else { return false }
+            return String(decoding: buffer.prefix(length), as: UTF8.self) == String(info.st_ino)
         }
 
         /// "Report.pdf", then "Report 2.pdf", "Report 3.pdf"…
@@ -538,17 +633,18 @@ extension LikelyFolder {
         }
 
         /// An empty placeholder file (like the status file) whose Date Added is just after `date`, so it
-        /// lists above files added up to then when a picker sorts by Date Added.
+        /// lists above files added up to then when a picker sorts by Date Added. Never reuses an
+        /// existing file (O_EXCL), so it only ever returns a file this call made.
         static func makeHeader(named name: String, in folder: URL, newerThan date: Date) -> URL? {
             let url = folder.appendingPathComponent(name)
-            let fd = open(url.path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
+            let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
             guard fd >= 0 else {
                 Log.write("likely", "couldn't create \(name): \(String(cString: strerror(errno)))")
                 return nil
             }
             close(fd)
             setDateAdded(max(Date(), date.addingTimeInterval(1)), on: url)
-            return url
+            return tag(url)
         }
 
         static func setDateAdded(_ date: Date, on destination: URL) {
@@ -560,6 +656,29 @@ extension LikelyFolder {
             if setattrlist(destination.path, &list, &time, MemoryLayout<timespec>.size, UInt32(FSOPT_NOFOLLOW)) != 0 {
                 Log.write("likely", "couldn't set Date Added on \(destination.lastPathComponent): \(String(cString: strerror(errno)))")
             }
+        }
+    }
+
+    /// A copy (or header) as made: its path and which file it is (device and inode), so removing it
+    /// later can't remove a same-named file made since, e.g. by the next picker.
+    struct Made: Equatable {
+        let url: URL
+        let device: dev_t
+        let inode: ino_t
+
+        init?(_ url: URL) {
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else { return nil }
+            self.url = url
+            device = info.st_dev
+            inode = info.st_ino
+        }
+
+        /// Removes it if the path still holds this very file.
+        func remove() {
+            var info = stat()
+            guard lstat(url.path, &info) == 0, info.st_dev == device, info.st_ino == inode else { return }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 

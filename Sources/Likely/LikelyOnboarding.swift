@@ -653,7 +653,7 @@ struct ScreenshotExplainerSheet: View {
                 example(withAccess: true)
             }
 
-            EditableText("Screenshots are only used when you search from a file picker, and only sent to the agent you chose.")
+            EditableText("To see past the picker, Likely keeps the window you clicked in memory. A screenshot is only saved and sent, to the agent you chose, when you search from a file picker. You can turn it off in Settings.")
                 .font(.system(size: 12))
                 .foregroundColor(Color(NSColor.secondaryLabelColor))
                 .multilineTextAlignment(.center)

@@ -15,10 +15,14 @@ let package = Package(
         // Reusable onboarding UI + permission helpers (from DockLock / Onit). Meant to move to its own
         // package once a second app adopts it.
         .target(name: "OnboardingKit", path: "Sources/OnboardingKit"),
+        // Foundation-only rules for picking recent files (batches, files apps write in the background),
+        // split out so they can be unit tested.
+        .target(name: "RecentFilesCore", path: "Sources/RecentFilesCore"),
         .executableTarget(
             name: "Likely",
-            dependencies: ["OnboardingKit", .product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["OnboardingKit", "RecentFilesCore", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Likely",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
+        .testTarget(name: "RecentFilesCoreTests", dependencies: ["RecentFilesCore"], path: "Tests/RecentFilesCoreTests"),
     ]
 )

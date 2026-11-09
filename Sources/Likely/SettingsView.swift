@@ -74,6 +74,9 @@ private struct GeneralSettings: View {
     @AppStorage("verbose") private var verbose = false
     @AppStorage("showRecentFiles") private var showRecentFiles = true
     @AppStorage("recentFileCount") private var recentFileCount = 3
+    /// Settings.sendScreenshot (migrated from "autoSuggest" at launch).
+    @AppStorage("sendScreenshot") private var sendScreenshot = true
+    private var screenshotsAllowed: Bool { CGPreflightScreenCaptureAccess() }
     @State private var folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
     @State private var pinned = SidebarFavorites.contains(LikelyFolder.url)
 
@@ -127,6 +130,16 @@ private struct GeneralSettings: View {
                 Stepper("Recent files: \(recentFileCount)", value: $recentFileCount, in: Settings.recentFileCountRange)
                     .disabled(!showRecentFiles)
                 Text("Your newest downloads, screenshots and saved files, ready in the Likely folder under …Recent…. Likely searches with your agent when you type in the bar above the picker.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("When you search") {
+                Toggle("Send a screenshot with searches", isOn: $sendScreenshot)
+                    .disabled(!screenshotsAllowed)
+                Text(!screenshotsAllowed
+                     ? "Needs the optional Screenshots permission (Permissions tab). Without it, your agent gets what you type, the app name and the window title."
+                     : sendScreenshot
+                     ? "Your agent also gets a screenshot of the window behind the picker. It's taken when you search, never just because a picker opened."
+                     : "Your agent gets only what you type, the app name and the window title. No screenshots are taken.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if Updater.isEnabled { UpdatesSection() }

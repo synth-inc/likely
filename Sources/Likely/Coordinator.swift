@@ -20,8 +20,14 @@ final class Coordinator {
     private var searchStarted = false
     /// Whether this picker was already pointed at the Likely folder (at most once per picker).
     private var navigated = false
-    /// The screenshot for this picker's search, if Screen Recording is allowed, taken when it opened.
+    /// The window the user clicked from to open this picker (see PrePickerSnapshotter), in memory only.
+    private var openSnapshot: Task<WindowCapture.Snapshot?, Never>?
+    /// The screenshot for this picker's search, written when the user submits it (with "Send a
+    /// screenshot with searches" on and Screen Recording allowed).
     private var captureTask: Task<WindowCapture.Result?, Never>?
+    /// This picker's screenshot file, removed when it closes. One per run, so a late capture can't
+    /// overwrite another picker's.
+    private var screenshotURL: URL?
 
     enum State { case idle, searching, done }
 
@@ -66,6 +72,8 @@ final class Coordinator {
         supportDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely", isDirectory: true)
         try? FileManager.default.createDirectory(at: supportDirectory.appendingPathComponent("run"), withIntermediateDirectories: true)
+        Self.removeScreenshots(in: supportDirectory.appendingPathComponent("run"))
+        Settings.migrate()
         folder = LikelyFolder(supportDirectory: supportDirectory)
 
         axWatcher.onEvent = { [weak self] pid, notification, element in
@@ -81,8 +89,16 @@ final class Coordinator {
         if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
         // No click-time snapshots at all unless the user opted into screenshots.
         snapshotter.isSuspended = { [weak self] in
-            self?.paused == true || self?.active != nil || !CGPreflightScreenCaptureAccess()
+            self?.paused == true || self?.active != nil || !Settings.sendScreenshot || !CGPreflightScreenCaptureAccess()
                 || self?.isLicensed() != true
+        }
+    }
+
+    /// Screenshots left from earlier runs (a crash, or the fixed `context.png` of older versions).
+    private static func removeScreenshots(in folder: URL) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in names where name.hasPrefix("context") && name.hasSuffix(".png") {
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
         }
     }
 
@@ -222,7 +238,8 @@ final class Coordinator {
         pendingFeedback = []
         searchStarted = false
         navigated = false
-        captureTask = nil
+        // Keeps the snapshotter's snapshot: it's of the click that opened this picker.
+        cancelScreenshot(forgetSnapshot: false)
         Log.write("picker", "OPENED in \(picker.appName) via \(picker.source) frame=\(picker.frame.map { "\($0)" } ?? "?")")
 
         // The previous picker's copies were kept for its app; a new picker replaces them.
@@ -252,20 +269,36 @@ final class Coordinator {
         hud.model.working = false
         onStateChange?(.idle, "Waiting for a description")
 
-        // With Screen Recording, the window behind the picker goes along with the description.
-        guard CGPreflightScreenCaptureAccess() else { return }
-        let screenshotURL = supportDirectory.appendingPathComponent("run/context.png")
+        // The window the opening click came from is kept (in memory) in case the user searches;
+        // the picker covers it from now on.
+        guard Settings.sendScreenshot, CGPreflightScreenCaptureAccess() else { return snapshotter.discard() }
+        let pid = picker.pid
+        openSnapshot = Task { @MainActor [weak self] in await self?.snapshotter.awaitSnapshot(for: pid) }
+    }
+
+    /// The screenshot that goes along with the search: the snapshot from when the picker opened, or a
+    /// live capture without it. Written only now, to this run's own file, and only if the picker is
+    /// still the one the search is for.
+    private func captureForSearch(picker: Picker) {
+        guard Settings.sendScreenshot, CGPreflightScreenCaptureAccess(), let debugRun else { return }
+        let generation = generation
+        let snapshot = openSnapshot
+        let url = supportDirectory.appendingPathComponent("run/context-\(debugRun.id.uuidString).png")
         captureTask = Task { @MainActor [weak self] in
-            guard let self else { return nil }
             do {
-                let capture: WindowCapture.Result
-                if let snapshot = await self.snapshotter.awaitSnapshot(for: picker.pid) {
-                    capture = try WindowCapture.save(snapshot, to: screenshotURL)
+                let image: WindowCapture.Image
+                if let snapshot = await snapshot?.value {
+                    image = WindowCapture.image(from: snapshot)
                 } else {
-                    capture = try await WindowCapture.captureNow(pid: picker.pid, pickerFrame: picker.frame, to: screenshotURL)
+                    image = try await WindowCapture.captureNow(pid: picker.pid, pickerFrame: picker.frame)
                 }
+                // Closed, replaced or turned off meanwhile: nothing is written.
+                guard let self, !Task.isCancelled, self.generation == generation, self.active != nil,
+                      Settings.sendScreenshot else { return nil }
+                let capture = try WindowCapture.save(image, to: url)
+                self.screenshotURL = url
                 Log.write("capture", "\(capture.mode) title=\(capture.windowTitle ?? "-")")
-                DebugStore.shared.attachScreenshot(screenshotURL, mode: capture.mode, to: debugRun)
+                DebugStore.shared.attachScreenshot(url, mode: capture.mode, to: debugRun)
                 debugRun.log("Screenshot: \(capture.mode)")
                 return capture
             } catch {
@@ -275,6 +308,18 @@ final class Coordinator {
                 return nil
             }
         }
+    }
+
+    /// Stops a capture still running, removes the screenshot file and (unless a picker is opening)
+    /// forgets the in-memory snapshot.
+    private func cancelScreenshot(forgetSnapshot: Bool = true) {
+        captureTask?.cancel()
+        captureTask = nil
+        openSnapshot?.cancel()
+        openSnapshot = nil
+        if forgetSnapshot { snapshotter.discard() }
+        if let screenshotURL { try? FileManager.default.removeItem(at: screenshotURL) }
+        screenshotURL = nil
     }
 
     /// The most recently added files, cloned into the Likely folder right away (no agent involved).
@@ -301,7 +346,11 @@ final class Coordinator {
         let debugRun = debugRun
         debugRun?.log("Jumping to the Likely folder (\(reason))")
         PickerNavigator.selectLikelyInSidebar(of: window, isCurrent: { [weak self] in self?.generation == generation && self?.active != nil },
-                                              onResult: { debugRun?.log("Sidebar: \($0)") })
+                                              onResult: { [weak self] outcome, noSidebar in
+            debugRun?.log("Sidebar: \(outcome)")
+            // The sidebar wasn't there (yet): try again when the user submits a search.
+            if noSidebar, let self, self.generation == generation { self.navigated = false }
+        })
     }
 
     private func pickerClosed(reason: String) {
@@ -312,6 +361,7 @@ final class Coordinator {
         hud.hide()
         if runner.isBusy { debugRun?.log("Picker closed, \(agentName) cancelled") }
         runner.cancel()
+        cancelScreenshot()
         // Keep the copies: the app that opened the picker often reads the file after it closes
         // (browsers upload it, Mail attaches it). They go when the next picker opens or after a while.
         folder.release()
@@ -402,6 +452,8 @@ final class Coordinator {
             return
         }
         prepareRunner(for: agent)
+        // Turned off while the capture ran: no screenshot.
+        let capture = Settings.sendScreenshot ? capture : nil
         var prompt = Self.prompt(picker: picker, capture: capture, imageAttached: agent.takesImages)
         lastPrompt = prompt
         lastImage = agent.takesImages ? capture?.url : nil
@@ -456,6 +508,7 @@ final class Coordinator {
             hud.model.status = "Looking for \"\(text)\""
             hud.model.working = true
             onStateChange?(.searching, "Searching")
+            captureForSearch(picker: picker)
             let capture = captureTask
             let generation = generation
             Task { @MainActor [weak self] in
@@ -622,6 +675,23 @@ enum Settings {
     static var extraSearchFolders: [String] {
         get { UserDefaults.standard.stringArray(forKey: "extraSearchFolders") ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: "extraSearchFolders") }
+    }
+    /// Send a screenshot of the window behind the picker along with a search (needs Screen Recording).
+    /// Replaces "autoSuggest" (suggest as soon as a picker opens, which used the screenshot), so anyone
+    /// who turned that off keeps screenshots off.
+    static var sendScreenshot: Bool {
+        get {
+            UserDefaults.standard.object(forKey: "sendScreenshot") as? Bool
+                ?? UserDefaults.standard.object(forKey: "autoSuggest") as? Bool ?? true
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "sendScreenshot") }
+    }
+    /// Carries "autoSuggest" over to "sendScreenshot" once. Runs at launch, before Settings is shown.
+    static func migrate() {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "sendScreenshot") == nil, let old = defaults.object(forKey: "autoSuggest") as? Bool {
+            defaults.set(old, forKey: "sendScreenshot")
+        }
     }
     /// Put the most recently added files in the Likely folder when a picker opens.
     static var showRecentFiles: Bool {
