@@ -122,6 +122,15 @@ final class EvalScoringTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(EvalCase.self, from: Data(line.utf8)), cases[0])
     }
 
+    func testContextUserName() throws {
+        let line = #"{"id":"c","query":"my lease","context":{"userName":"Sam Lee"},"expect":{"anyOf":["a.pdf"]}}"#
+        let c = try JSONDecoder().decode(EvalCase.self, from: Data(line.utf8))
+        XCTAssertEqual(c.context?.userName, "Sam Lee")
+        XCTAssertEqual(c.context?.isEmpty, false)
+        XCTAssertTrue(EvalCaseFile.encodeLine(c).contains("\"userName\":\"Sam Lee\""))
+        XCTAssertNil(EvalCase.Context(app: "Safari").userName)
+    }
+
     func testPathResolution() {
         let base = URL(fileURLWithPath: "/repo/evals/fixtures")
         XCTAssertEqual(EvalPath.resolve("files/a.pdf", relativeTo: base), "/repo/evals/fixtures/files/a.pdf")

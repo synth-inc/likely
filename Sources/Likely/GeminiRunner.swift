@@ -6,8 +6,9 @@ import Foundation
 ///
 /// Read-only: headless Gemini runs in the default approval mode, where anything that would need
 /// confirmation is denied (write_file/replace aren't even registered, save_memory and web_fetch are
-/// refused). Shell commands only run if every segment of a pipeline starts with an allowlisted
-/// command; redirections, `;` chains and `$(…)` are refused. `find` (-delete/-exec), `sort` (-o) and
+/// refused). Shell commands are split on `;`, `&&`, `||` and `|`, and the whole command runs only if
+/// every part starts with an allowlisted command (Gemini CLI 0.27.3); redirections and `$(…)` are
+/// refused. `find` (-delete/-exec), `sort` (-o) and
 /// `file` (-C) can write, so they're left out; mdfind and Gemini's list_directory cover them.
 ///
 /// Gemini can't take messages mid-turn, so feedback stops the current turn and continues the same

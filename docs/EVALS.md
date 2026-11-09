@@ -78,6 +78,7 @@ One JSON object per line. Blank lines and lines starting with `#` or `//` are ig
 | `context.windowTitle` | optional | title of the window behind the picker |
 | `context.screenshot` | optional | path to a screenshot of that window. With one, the case runs like automatic mode (screenshot + "the user already added: …"); without, input-first (typed description only) |
 | `context.button` | optional | the picker's confirm button ("Open", "Upload", …) |
+| `context.userName` | optional | the name sent as `{{userName}}` ("The user is …"). Unset: none for personal cases (evals never send your real name), "Jordan Rivera" for `source: "fixture"` cases |
 | `expect` | required | one of the three forms below; `{}` means "not filled in yet" (skipped) |
 | `tags` | optional | free-form; filter with `--tags`, broken down in the report |
 | `source` | optional | `manual`, `captured` or `fixture` |
