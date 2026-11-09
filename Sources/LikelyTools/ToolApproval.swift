@@ -61,8 +61,8 @@ public enum ToolApproval {
         /// A short diff for the banner, e.g. `+ rclip -n`, `- cd`, `instructions changed`.
         public var summary: [String] {
             addedCommands.map { "+ \($0)" } + removedCommands.map { "- \($0)" }
-                + addedNeeds.map { "+ needs access to \(PrivateDataArea(id: $0)?.title ?? $0)" }
-                + removedNeeds.map { "- needs \(PrivateDataArea(id: $0)?.title ?? $0)" }
+                + addedNeeds.map { "+ needs access to \(ToolApproval.phrase(need: $0))" }
+                + removedNeeds.map { "- needs access to \(ToolApproval.phrase(need: $0))" }
                 + (instructionsChanged ? [isNew ? "new instructions" : "instructions changed"] : [])
         }
     }
@@ -86,6 +86,20 @@ public enum ToolApproval {
             return Pending(tool: tool, addedCommands: added, removedCommands: removed,
                            instructionsChanged: instructionsChanged, addedNeeds: addedNeeds, removedNeeds: removedNeeds, isNew: false)
         }
+    }
+
+    /// "your Photos", or the raw id for an unknown one.
+    static func phrase(need: String) -> String { PrivateDataArea(id: need)?.phrase ?? need }
+
+    /// Approvals after the user flips a tool's switch (Settings → Tools, or Allow on its needs). Being
+    /// enabled isn't part of what's approved, so the switch never approves anything: a record that
+    /// already matches the tool is refreshed (e.g. one made before `needs` existed), any other is left
+    /// as it is, so a tool changed outside Likely stays pending until the user clicks Approve.
+    public static func afterToggle(_ tool: CustomTool, approvals: Approvals) -> Approvals {
+        guard isApproved(tool, in: approvals) else { return approvals }
+        var updated = approvals
+        updated[tool.id] = record(for: tool)
+        return updated
     }
 
     /// The tools the agent may use: enabled, valid and approved.

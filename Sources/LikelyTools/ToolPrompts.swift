@@ -102,7 +102,8 @@ public enum ToolPrompts {
         \(PrivateDataArea.allCases.map { "\"\($0.rawValue)\" (\($0.title))" }.joined(separator: ", ")). For example, \
         a Photos library tool:
         \(json(photosLibraryExample))
-        Likely asks me before the tool can read there (and macOS asks too); until I allow it, the tool stays off.
+        Likely asks me before the tool can read there (macOS asks too, except for mail, messages and safari, which \
+        need Full Disk Access for Likely); until I allow it, the tool stays off.
 
         Rules (Likely checks them and disables a tool that breaks one):
         - The search agent runs these commands unattended, without asking me, so allow only read-only commands: \

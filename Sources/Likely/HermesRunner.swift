@@ -359,25 +359,41 @@ extension HermesRunner {
             return "Your Hermes gateway is serving the \(profileName) profile; restart it with: hermes gateway restart"
         }
         if options.isEval, let problem = prepareEvalGateway(executable: executable, rules: gatewayRules(options, workDir: workDir)) { return problem }
-        if !options.isEval { restartGatewayIfAreasChanged() }
+        if !options.isEval, let problem = restartGatewayIfAreasChanged() { return problem }
         return nil
     }
 
     /// The private data areas the app's gateway was started with (its sandbox is fixed at start).
+    /// Only recorded once no gateway with other rules can be running.
     private static var appGatewayAreas: [PrivateDataArea]?
 
     /// A Private data toggle changed since the gateway started (or it's left from an earlier session,
-    /// rules unknown): stop it, so the next client starts one with the current rules.
-    private static func restartGatewayIfAreasChanged() {
+    /// rules unknown): stop it, so the next client starts one with the current rules. Fails closed: if
+    /// the gateway doesn't stop, the search doesn't start (it would run with the old rules, e.g. an
+    /// area the user just turned off still open), and the next search tries again.
+    private static func restartGatewayIfAreasChanged() -> String? {
         evalGatewayLock.lock()
         defer { evalGatewayLock.unlock() }
         let areas = PrivateDataAccess.blocked()
-        defer { appGatewayAreas = areas }
-        guard appGatewayAreas != areas, let pid = gatewayPID(profileDir), pid > 1, kill(pid, 0) == 0, isSandboxed(pid) else { return }
+        guard appGatewayAreas != areas else { return nil }
+        guard let pid = gatewayPID(profileDir), pid > 1, kill(pid, 0) == 0 else {
+            appGatewayAreas = areas   // none running: the next client starts one with these rules
+            return nil
+        }
+        // An unsandboxed gateway was stopped (or refused) in `prepare` already; never adopt one.
+        guard isSandboxed(pid) else {
+            return "An unsandboxed Hermes gateway is serving the \(profileName) profile; run: hermes -p \(profileName) gateway stop"
+        }
         Log.write("hermes", "restarting gateway pid=\(pid) for the current private data settings")
         kill(pid, SIGTERM)
         let deadline = Date().addingTimeInterval(10)
         while kill(pid, 0) == 0, Date() < deadline { usleep(100_000) }
+        guard kill(pid, 0) != 0 else {
+            Log.write("hermes", "gateway pid=\(pid) didn't stop; not searching with its old private data rules")
+            return "Couldn't restart the Hermes gateway (pid \(pid)) for your Private data settings. Try again, or run: hermes -p \(profileName) gateway stop"
+        }
+        appGatewayAreas = areas
+        return nil
     }
 
     // MARK: Evals

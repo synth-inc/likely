@@ -8,11 +8,19 @@ import Foundation
 /// apps") in the middle of an unrelated search. Likely itself never needs these. So every agent sandbox
 /// denies reading them (`sandboxRules`, `AgentSandbox.codexFilesystem`) unless the user turns an area
 /// on in Settings → Permissions → Private data, or approves a tool that declares it in `needs`.
+///
+/// Each area has its own folders (`homeRelativePaths`) and its folders inside other apps' containers
+/// (`containerNames`, matched by name under ~/Library/Containers and ~/Library/Group Containers), so
+/// turning an area on opens its containers even while "Other apps' private data" is off, and turning
+/// that one on doesn't open an area that's still off. Stores only Full Disk Access opens, which no
+/// toggle is about (call history, Biome, the TCC database, …), are always denied
+/// (`alwaysDeniedPaths`).
 public enum PrivateDataArea: String, CaseIterable, Codable, Identifiable, Hashable {
     case photos
     case mail
     case messages
     case contacts
+    case notes
     case safari
     case appData = "app-data"
 
@@ -24,6 +32,7 @@ public enum PrivateDataArea: String, CaseIterable, Codable, Identifiable, Hashab
         case .mail: return "Mail"
         case .messages: return "Messages"
         case .contacts: return "Contacts & Calendars"
+        case .notes: return "Notes"
         case .safari: return "Safari"
         case .appData: return "Other apps' private data"
         }
@@ -44,32 +53,74 @@ public enum PrivateDataArea: String, CaseIterable, Codable, Identifiable, Hashab
         case .mail: return "Mail's messages and attachments."
         case .messages: return "Messages history and attachments."
         case .contacts: return "Contacts, Calendar and Reminders data."
-        case .safari: return "Safari history, bookmarks and cookies."
+        case .notes: return "Notes and their attachments."
+        case .safari: return "Safari history and bookmarks."
         case .appData: return "Other apps' containers (~/Library/Containers, Group Containers)."
         }
     }
 
-    /// Folders under the home folder (relative paths). Areas that live partly inside other apps'
-    /// containers list those too, so allowing "Other apps' private data" doesn't open Mail.
+    /// The area's own folders under the home folder (relative paths): what the permission probe reads.
+    /// Its folders inside other apps' containers are `containerNames`.
     public var homeRelativePaths: [String] {
         switch self {
-        case .photos:
-            return ["Library/Photos", "Pictures/Photos Library.photoslibrary",
-                    "Library/Containers/com.apple.Photos", "Library/Group Containers/group.com.apple.photos"]
-        case .mail:
-            return ["Library/Mail", "Library/Containers/com.apple.mail", "Library/Group Containers/group.com.apple.mail"]
-        case .messages:
-            return ["Library/Messages", "Library/Containers/com.apple.MobileSMS", "Library/Containers/com.apple.iChat"]
-        case .contacts:
-            return ["Library/Application Support/AddressBook", "Library/Calendars", "Library/Reminders",
-                    "Library/Containers/com.apple.AddressBook", "Library/Containers/com.apple.iCal",
-                    "Library/Containers/com.apple.reminders", "Library/Group Containers/group.com.apple.calendar",
-                    "Library/Group Containers/group.com.apple.reminders"]
-        case .safari:
-            return ["Library/Safari", "Library/Cookies", "Library/Containers/com.apple.Safari", "Library/WebKit/com.apple.Safari"]
-        case .appData:
-            return ["Library/Containers", "Library/Group Containers"]
+        case .photos: return ["Library/Photos", "Pictures/Photos Library.photoslibrary"]
+        case .mail: return ["Library/Mail"]
+        case .messages: return ["Library/Messages"]
+        case .contacts: return ["Library/Application Support/AddressBook", "Library/Calendars", "Library/Reminders"]
+        case .notes: return ["Library/Group Containers/group.com.apple.notes"]
+        case .safari: return ["Library/Safari", "Library/WebKit/com.apple.Safari"]
+        case .appData: return ["Library/Containers", "Library/Group Containers"]
         }
+    }
+
+    /// Anchored regexes (ICU and Seatbelt alike) over the names of the area's folders in
+    /// ~/Library/Containers and ~/Library/Group Containers. Covers the names found on macOS 26.3.
+    public var containerNames: [String] {
+        switch self {
+        case .photos:
+            return [#"com\.apple\.photolibraryd"#, #"com\.apple\.photoanalysisd"#, #"com\.apple\.mediaanalysisd"#,
+                    #"com\.apple\.Photos(\..+)?"#, #"com\.apple\.CloudPhotosConfiguration"#,
+                    #"group\.com\.apple\.photolibraryd\.private"#, #"group\.com\.apple\.Photos\.PhotosFileProvider"#,
+                    #"group\.com\.apple\.mobileslideshow\.PhotosFileProvider"#, #"group\.com\.apple\.photos"#]
+        case .mail:
+            return [#"com\.apple\.mail(\..+)?"#, #"com\.apple\.MailPersonaStorage"#, #"com\.apple\.MailCacheDelete"#,
+                    #"group\.com\.apple\.mail"#]
+        case .messages:
+            return [#"com\.apple\.messages(\..+)?"#, #"com\.apple\.MessagesLegacyTransferArchive"#,
+                    #"com\.apple\.MobileSMS(\..+)?"#, #"com\.apple\.iChat"#, #"group\.com\.apple\.messages"#]
+        case .contacts:
+            return [#"group\.com\.apple\.contacts"#, #"com\.apple\.AddressBook(\..+)?"#, #"com\.apple\.iCal(\..+)?"#,
+                    #"com\.apple\.reminders(\..+)?"#, #"group\.com\.apple\.calendar"#, #"group\.com\.apple\.reminders"#]
+        case .notes:
+            return [#"group\.com\.apple\.notes"#, #"com\.apple\.Notes"#]
+        case .safari:
+            return [#"com\.apple\.Safari(\..+)?"#]
+        case .appData:
+            return []
+        }
+    }
+
+    /// One alternation of `containerNames`, or nil.
+    var containerNamePattern: String? {
+        containerNames.isEmpty ? nil : "(" + containerNames.joined(separator: "|") + ")"
+    }
+
+    /// The Seatbelt regex for the area's container folders under `home` (a real path), or nil.
+    public func containerRegex(home: String) -> String? {
+        containerNamePattern.map {
+            "^" + NSRegularExpression.escapedPattern(for: home) + "/Library/(Group )?Containers/" + $0 + "(/|$)"
+        }
+    }
+
+    /// Whether a folder in ~/Library/Containers or Group Containers belongs to this area.
+    public func ownsContainer(named name: String) -> Bool {
+        guard let pattern = containerNamePattern else { return false }
+        return name.range(of: "^" + pattern + "$", options: .regularExpression) != nil
+    }
+
+    /// The area that owns a container folder, if any (other than app data).
+    public static func owner(ofContainer name: String) -> PrivateDataArea? {
+        allCases.first { $0.ownsContainer(named: name) }
     }
 
     /// Seatbelt regexes for stores that can be anywhere: a Photos library can be on an external drive
@@ -81,8 +132,9 @@ public enum PrivateDataArea: String, CaseIterable, Codable, Identifiable, Hashab
         }
     }
 
-    /// Whether macOS has a permission alert for it. Mail, Messages and Safari data are only ever
-    /// readable with Full Disk Access: macOS never asks, it just refuses.
+    /// Whether only Full Disk Access opens it: macOS has no permission alert for Mail, Messages and
+    /// Safari data, it just refuses. Full Disk Access is granted to Likely, and agents run as Likely, so
+    /// once it's on, turning one of these areas on lets the agents read it too.
     public var needsFullDiskAccess: Bool {
         switch self {
         case .mail, .messages, .safari: return true
@@ -102,6 +154,7 @@ public enum PrivateDataArea: String, CaseIterable, Codable, Identifiable, Hashab
         case "mail", "email": self = .mail
         case "messages", "imessage": self = .messages
         case "contacts", "calendars", "calendar", "reminders", "contacts-calendars": self = .contacts
+        case "notes", "apple-notes": self = .notes
         case "safari": self = .safari
         case "app-data", "appdata", "containers": self = .appData
         default: return nil
@@ -129,25 +182,97 @@ public enum PrivateDataAccess {
         PrivateDataArea.allCases.filter { !isAllowed($0, defaults: defaults) }
     }
 
-    /// `(deny file-read* …)` for `blocked`, or "" when every area is allowed. Paths are real paths
-    /// (seatbelt matches those). Allowed areas get no rule at all, so a container another area keeps
-    /// closed (e.g. Mail's) stays closed even with "Other apps' private data" on.
-    public static func sandboxRules(blocked: [PrivateDataArea], home: String) -> String {
-        guard !blocked.isEmpty else { return "" }
-        let realHome = AgentSandbox.realPath(home)
-        var filters: [String] = []
-        for area in blocked {
-            filters += area.paths(home: realHome).map { "(subpath \(AgentSandbox.quoted($0)))" }
-            filters += area.regexes.map { "(regex \(AgentSandbox.quoted($0)))" }
-        }
-        return "(deny file-read* \(filters.joined(separator: " ")))"
+    /// Stores only Full Disk Access opens, denied to every agent whatever the toggles say: none of the
+    /// areas is about them, and with Full Disk Access granted to Likely the agents could otherwise read
+    /// them (call history, the TCC database, Biome and Knowledge activity, iPhone backups, accounts,
+    /// cookies, …). Relative to the home folder.
+    public static let alwaysDeniedRelativePaths = [
+        "Library/Application Support/com.apple.TCC", "Library/Application Support/CallHistoryDB",
+        "Library/Application Support/Knowledge", "Library/Biome", "Library/Suggestions",
+        "Library/Application Support/MobileSync/Backup", "Library/Accounts", "Library/IdentityServices",
+        "Library/HomeKit", "Library/Metadata/CoreSpotlight", "Library/Application Support/FaceTime", "Library/Cookies",
+    ]
+
+    /// ~/Library/Keychains: the login keychain file itself stays readable to sandbox-exec agents
+    /// (Claude Code reads its sign-in from it in-process; it's encrypted with the login password), its
+    /// subfolders don't (the data-protection keychain, which holds Likely's data key). Codex's
+    /// commands get none of it (Codex itself runs outside its sandbox).
+    public static func keychainSubfoldersRegex(home: String) -> String {
+        "^" + NSRegularExpression.escapedPattern(for: home + "/Library/Keychains/") + "[^/]+/"
     }
 
-    /// Codex's permission table entries ("none") for `blocked`. Codex can't express the
-    /// `.photoslibrary`-anywhere regex; the default library locations are listed instead.
-    public static func codexPaths(blocked: [PrivateDataArea], home: String) -> [String] {
+    public static func alwaysDeniedPaths(home: String) -> [String] {
+        alwaysDeniedRelativePaths.map { home + "/" + $0 }
+    }
+
+    /// The Seatbelt rules for `blocked` (last match wins, so the order matters):
+    /// 1. while "Other apps' private data" is off: deny ~/Library/Containers and Group Containers,
+    ///    except the containers of the areas that are on (a `require-not`, rather than an `allow`
+    ///    after it, which would also undo an eval's isolation rules that come before these);
+    /// 2. deny each blocked area: its folders, its containers (also when app data is on), and for
+    ///    Photos any `.photoslibrary`;
+    /// 3. always deny the Full-Disk-Access-only stores and the keychain's subfolders.
+    /// Paths are real paths (Seatbelt matches those).
+    public static func sandboxRules(blocked: [PrivateDataArea], home: String) -> String {
         let realHome = AgentSandbox.realPath(home)
-        return blocked.flatMap { $0.paths(home: realHome) }
+        var rules: [String] = []
+        if blocked.contains(.appData) {
+            let containers = PrivateDataArea.appData.paths(home: realHome).map { "(subpath \(AgentSandbox.quoted($0)))" }.joined(separator: " ")
+            let open = PrivateDataArea.allCases.filter { $0 != .appData && !blocked.contains($0) }
+                .compactMap { $0.containerRegex(home: realHome) }
+            if open.isEmpty {
+                rules.append("(deny file-read* \(containers))")
+            } else {
+                let exceptions = open.map { "(require-not (regex \(AgentSandbox.quoted($0))))" }.joined(separator: " ")
+                rules.append("(deny file-read* (require-all (require-any \(containers)) \(exceptions)))")
+            }
+        }
+        var filters: [String] = []
+        for area in blocked where area != .appData {
+            filters += area.paths(home: realHome).map { "(subpath \(AgentSandbox.quoted($0)))" }
+            filters += [area.containerRegex(home: realHome)].compactMap { $0 }.map { "(regex \(AgentSandbox.quoted($0)))" }
+            filters += area.regexes.map { "(regex \(AgentSandbox.quoted($0)))" }
+        }
+        if !filters.isEmpty { rules.append("(deny file-read* \(filters.joined(separator: " ")))") }
+        let always = alwaysDeniedPaths(home: realHome).map { "(subpath \(AgentSandbox.quoted($0)))" }
+            + ["(regex \(AgentSandbox.quoted(keychainSubfoldersRegex(home: realHome))))"]
+        rules.append("(deny file-read* \(always.joined(separator: " ")))")
+        return rules.joined(separator: "\n")
+    }
+
+    /// Codex's permission table entries for `blocked`: path → "none" or "read" (the more specific path
+    /// wins). Codex has no regexes, so container folders are found by listing ~/Library/Containers and
+    /// Group Containers (free: only reading inside one is protected), and Photos libraries outside the
+    /// default places come from `photoLibraries` (PhotoLibraryScan, found at launch).
+    public static func codexEntries(blocked: [PrivateDataArea], home: String, photoLibraries: [String] = []) -> [(path: String, access: String)] {
+        let realHome = AgentSandbox.realPath(home)
+        let containers = PrivateDataArea.appData.paths(home: realHome)
+        var found: [(path: String, owner: PrivateDataArea?)] = []
+        for root in containers {
+            for name in ((try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []).sorted() {
+                found.append((root + "/" + name, PrivateDataArea.owner(ofContainer: name)))
+            }
+        }
+        var entries: [(path: String, access: String)] = []
+        func add(_ path: String, _ access: String) {
+            if let i = entries.firstIndex(where: { $0.path == path }) {
+                if access == "none" { entries[i].access = "none" }   // a deny never loses to a read
+            } else {
+                entries.append((path, access))
+            }
+        }
+        if blocked.contains(.appData) {
+            containers.forEach { add($0, "none") }
+            for (path, owner) in found { if let owner, !blocked.contains(owner) { add(path, "read") } }
+        }
+        for area in blocked where area != .appData {
+            area.paths(home: realHome).forEach { add($0, "none") }
+            for (path, owner) in found where owner == area { add(path, "none") }
+            if area == .photos { photoLibraries.map(AgentSandbox.realPath).forEach { add($0, "none") } }
+        }
+        alwaysDeniedPaths(home: realHome).forEach { add($0, "none") }
+        add(realHome + "/Library/Keychains", "none")
+        return entries
     }
 
     /// Needs from tools.json that aren't an area id.
@@ -157,6 +282,66 @@ public enum PrivateDataAccess {
 
     /// The areas a tool needs that are still blocked.
     public static func unmetNeeds(of tool: CustomTool, defaults: UserDefaults = .standard) -> [PrivateDataArea] {
-        tool.neededAreas.filter { !isAllowed($0, defaults: defaults) }
+        unmetNeeds(of: tool) { isAllowed($0, defaults: defaults) }
+    }
+
+    public static func unmetNeeds(of tool: CustomTool, allowed: (PrivateDataArea) -> Bool) -> [PrivateDataArea] {
+        tool.neededAreas.filter { !allowed($0) }
+    }
+
+    /// The tools the agent gets: enabled, valid, approved, and every area they need turned on. A tool
+    /// whose areas are still off isn't used: its commands would fail in the sandbox, and the user
+    /// hasn't agreed to open them.
+    public static func activeTools(_ tools: [CustomTool], approvals: ToolApproval.Approvals,
+                                   allowed: (PrivateDataArea) -> Bool) -> [CustomTool] {
+        ToolApproval.usable(tools, approvals: approvals).filter { unmetNeeds(of: $0, allowed: allowed).isEmpty }
+    }
+}
+
+/// Photos libraries outside the default places (a `.photoslibrary` package in any folder, or on an
+/// external drive), for Codex, whose permission table can't say "any `.photoslibrary`". Found by
+/// walking the home folder a few levels deep and each volume shallowly, without entering packages,
+/// hidden folders, ~/Library (its libraries are under ~/Library/Photos, denied as a whole) or
+/// cloud and network storage.
+public enum PhotoLibraryScan {
+    public static let homeDepth = 3
+    public static let volumeDepth = 2
+    static let skippedNames: Set<String> = ["Library", "node_modules", ".git", "Applications"]
+
+    public static func find(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                            volumes: String = "/Volumes") -> [String] {
+        var found: [String] = []
+        walk(home, depth: homeDepth, into: &found)
+        let fm = FileManager.default
+        for name in ((try? fm.contentsOfDirectory(atPath: volumes)) ?? []).sorted() where !name.hasPrefix(".") {
+            let volume = URL(fileURLWithPath: volumes).appendingPathComponent(name)
+            // Local volumes only (the boot volume's link to / is skipped as a link).
+            let values = try? volume.resourceValues(forKeys: [.isSymbolicLinkKey, .volumeIsLocalKey])
+            guard values?.isSymbolicLink != true, values?.volumeIsLocal != false else { continue }
+            walk(volume.path, depth: volumeDepth, into: &found)
+        }
+        return found
+    }
+
+    static func walk(_ folder: String, depth: Int, into found: inout [String]) {
+        guard depth > 0 else { return }
+        let fm = FileManager.default
+        for name in ((try? fm.contentsOfDirectory(atPath: folder)) ?? []).sorted() where !name.hasPrefix(".") {
+            let path = folder + "/" + name
+            var st = stat()
+            guard lstat(path, &st) == 0, st.st_mode & S_IFMT == S_IFDIR else { continue }   // no links
+            if name.lowercased().hasSuffix(".photoslibrary") {
+                found.append(path)
+            } else if !skippedNames.contains(name), !isPackage(name) {
+                walk(path, depth: depth - 1, into: &found)
+            }
+        }
+    }
+
+    /// Packages (apps, bundles, other libraries) aren't entered.
+    static func isPackage(_ name: String) -> Bool {
+        let ext = (name as NSString).pathExtension.lowercased()
+        return ["app", "bundle", "framework", "photoslibrary", "musiclibrary", "tvlibrary", "imovielibrary",
+                "fcpbundle", "logicx", "band", "noindex", "xcodeproj", "xcworkspace", "pkg", "plugin"].contains(ext)
     }
 }

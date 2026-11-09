@@ -426,7 +426,7 @@ private struct PrivateDataSection: View {
                     Toggle(isOn: binding(area)) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(area.title)
-                            Text(area.detail + (area.needsFullDiskAccess ? " Needs Full Disk Access." : ""))
+                            Text(area.detail + (area.needsFullDiskAccess ? " Only readable with Full Disk Access for Likely, which then applies to the search agents too." : ""))
                                 .font(.caption).foregroundStyle(.secondary)
                             let users = tools.tools.filter { $0.neededAreas.contains(area) }.map(\.name)
                             if !users.isEmpty {
@@ -448,7 +448,7 @@ private struct PrivateDataSection: View {
                     }
                 }
             }
-            Text("Turning one on asks macOS for access now. Turning it off blocks the agents again, but the permission macOS gave stays in System Settings → Privacy & Security until you remove it there.")
+            Text("Turning one on asks macOS for access now (Mail, Messages and Safari: macOS doesn't ask; add Likely to Full Disk Access yourself). Turning it off blocks the agents again, but the permission macOS gave stays in System Settings → Privacy & Security until you remove it there. Stores only Full Disk Access opens (call history, Keychains, cookies, iPhone backups, …) are always off.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -484,6 +484,8 @@ private struct ToolsSettings: View {
     /// A tool being turned on whose private data areas are still off: "<Tool> needs access to … Allow?"
     @State private var askingNeeds: CustomTool?
     @State private var needsProblem: String?
+    /// The tool whose areas are being turned on (macOS may be showing its alert): its row waits.
+    @State private var working: String?
 
     private var photoState: PhotoSearch.State { PhotoSearch.state(tools: store.tools, rclipInstalled: rclipInstalled) }
 
@@ -524,13 +526,17 @@ private struct ToolsSettings: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(store.tools) { tool in
+                    // A tool waiting for approval can't be switched on or have its needs allowed here: only
+                    // Approve (with the full change list above) makes it usable.
                     ToolRow(tool: tool, results: testResults[tool.id],
-                            waitingForApproval: store.pending.contains { $0.tool.id == tool.id },
+                            waitingForApproval: store.isPending(tool),
                             unmetNeeds: store.unmetNeeds(of: tool),
+                            working: working == tool.id,
                             setEnabled: { on in
+                                guard !store.isPending(tool) else { return }
                                 if on, !store.unmetNeeds(of: tool).isEmpty { askingNeeds = tool } else { store.setEnabled(on, id: tool.id) }
                             },
-                            allow: { askingNeeds = tool },
+                            allow: { if !store.isPending(tool) { askingNeeds = tool } },
                             agentNote: ["codex", "hermes"].contains(agentID) && tool.isActive ? ToolPermissions.agentNotes[agentID] : nil,
                             edit: { editing = ToolDraft(tool, isNew: false) },
                             test: { testResults[tool.id] = ToolCheck.run(tool.cleanedCommands, agentID: agentID) },
@@ -631,7 +637,7 @@ private struct ToolsSettings: View {
             }
             Button("Cancel", role: .cancel) { askingNeeds = nil }
         } message: {
-            Text("Searches can then read there. macOS will ask you too. You can turn it off again in Settings → Permissions → Private data.")
+            Text(askingNeeds.map { Self.allowMessage(store.unmetNeeds(of: $0)) } ?? "")
         }
         .alert("Delete \(deleting?.name ?? "tool")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete", role: .destructive) {
@@ -644,6 +650,19 @@ private struct ToolsSettings: View {
         }
     }
 
+    /// What Allow does, per kind of area: macOS asks for some; Mail, Messages and Safari only open with
+    /// Full Disk Access, which then applies to the agents too.
+    static func allowMessage(_ areas: [PrivateDataArea]) -> String {
+        let asking = areas.filter { !$0.needsFullDiskAccess }
+        let fullDisk = areas.filter(\.needsFullDiskAccess)
+        var text = "Searches can then read there."
+        if !asking.isEmpty { text += " macOS asks you too for \(list(asking.map(\.title)))." }
+        if !fullDisk.isEmpty {
+            text += " \(list(fullDisk.map(\.title))) can only be read with Full Disk Access for Likely, which macOS doesn't ask for: you add it in System Settings → Privacy & Security, and it applies to the search agents too."
+        }
+        return text + " You can turn it off again in Settings → Permissions → Private data."
+    }
+
     static func list(_ items: [String]) -> String {
         items.count <= 1 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last!
     }
@@ -651,16 +670,21 @@ private struct ToolsSettings: View {
     /// Turns on each area the tool needs (one macOS alert at a time), then the tool. Stops at the
     /// first area macOS refuses; the tool stays off and says why.
     private func allowNeeds(of tool: CustomTool) {
+        guard !store.isPending(tool), working == nil else { return }
         needsProblem = nil
+        working = tool.id
         var remaining = store.unmetNeeds(of: tool)
         func next() {
             guard let area = remaining.first else {
-                store.setEnabled(true, id: tool.id)
+                working = nil
+                // Never approves: a tool that became pending meanwhile stays off (see ToolStore.setEnabled).
+                if !store.isPending(tool) { store.setEnabled(true, id: tool.id) }
                 return
             }
             remaining.removeFirst()
             PrivateDataPermission.enable(area) { outcome in
                 if case .denied(let message) = outcome {
+                    working = nil
                     needsProblem = "\(tool.name) stays off: \(message)"
                 } else {
                     next()
@@ -683,6 +707,8 @@ private struct ToolRow: View {
     let waitingForApproval: Bool
     /// Private data areas it needs that are still off: it isn't used until they're on.
     let unmetNeeds: [PrivateDataArea]
+    /// Its areas are being turned on.
+    let working: Bool
     let setEnabled: (Bool) -> Void
     let allow: () -> Void
     let agentNote: String?
@@ -703,7 +729,8 @@ private struct ToolRow: View {
                     }
                 }
                 .toggleStyle(.switch)
-                .disabled(!problems.isEmpty)
+                .disabled(!problems.isEmpty || waitingForApproval || working)
+                if working { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Test", action: test).controlSize(.small)
                 Button("Edit…", action: edit).controlSize(.small)
@@ -719,11 +746,11 @@ private struct ToolRow: View {
                 HStack(spacing: 6) {
                     Text("Off: needs access to \(ToolsSettings.list(unmetNeeds.map(\.phrase))), which is off in Settings → Permissions → Private data")
                         .font(.caption).foregroundStyle(.orange)
-                    Button("Allow…", action: allow).controlSize(.small)
+                    Button("Allow…", action: allow).controlSize(.small).disabled(working)
                 }
             }
             if !tool.neededAreas.isEmpty {
-                Text("Reads " + ToolsSettings.list(tool.neededAreas.map(\.phrase))).font(.caption).foregroundStyle(.secondary)
+                Text("Needs access to " + ToolsSettings.list(tool.neededAreas.map(\.phrase))).font(.caption).foregroundStyle(.secondary)
             }
             if let agentNote { Text(agentNote).font(.caption).foregroundStyle(.secondary) }
             if let results { ToolCheckList(results: results) }

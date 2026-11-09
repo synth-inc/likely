@@ -85,14 +85,23 @@ public enum AgentSandbox {
     public static func codexFilesystem(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
                                        readable: [String],
                                        blockedAreas: [PrivateDataArea] = PrivateDataAccess.blocked(),
+                                       photoLibraries: [String] = [],
                                        denied extra: [String] = []) -> String {
-        var denied: [String] = []
-        for path in dataDeniedPaths(home: home) + AgentSessions.deniedPaths(home: home, except: nil)
-            + PrivateDataAccess.codexPaths(blocked: blockedAreas, home: home) + extra
-        where !denied.contains(path) { denied.append(path) }
-        let entries = denied.map { "\(tomlString($0)) = \"none\"" }
-            + readable.map { "\(tomlString(realPath($0))) = \"read\"" }
-        return "{ " + entries.joined(separator: ", ") + " }"
+        var entries: [(path: String, access: String)] = []
+        func add(_ path: String, _ access: String) {
+            // A path appears once (a TOML table can't repeat a key); a deny never loses to a read.
+            if let i = entries.firstIndex(where: { $0.path == path }) {
+                if access == "none" { entries[i].access = "none" }
+            } else {
+                entries.append((path, access))
+            }
+        }
+        for path in dataDeniedPaths(home: home) + AgentSessions.deniedPaths(home: home, except: nil) + extra { add(path, "none") }
+        for entry in PrivateDataAccess.codexEntries(blocked: blockedAreas, home: home, photoLibraries: photoLibraries) {
+            add(entry.path, entry.access)
+        }
+        for path in readable { add(realPath(path), "read") }
+        return "{ " + entries.map { "\(tomlString($0.path)) = \"\($0.access)\"" }.joined(separator: ", ") + " }"
     }
 
     static func tomlString(_ s: String) -> String {

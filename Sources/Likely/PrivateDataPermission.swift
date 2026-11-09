@@ -56,17 +56,26 @@ enum PrivateDataPermission {
         ToolStore.shared.privateDataChanged()
     }
 
-    /// Reads the area's folders (one listing each, plus one level into a container for app data).
-    /// Blocks while macOS shows its alert, so it runs off the main thread.
+    /// Reads the area's own folders (one listing each), not its containers: those are the stores macOS
+    /// guards for it. For app data: one third-party container's Data folder (listing
+    /// ~/Library/Containers is free; reading inside another app's container is what's protected),
+    /// never one that belongs to another area. Blocks while macOS shows its alert, so it runs off the
+    /// main thread.
     private static func probe(_ area: PrivateDataArea) -> Outcome {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        var targets = area.paths(home: home).filter { FileManager.default.fileExists(atPath: $0) }
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        var targets = area == .appData ? [] : area.paths(home: home).filter { fm.fileExists(atPath: $0) }
         if area == .appData {
-            // Listing ~/Library/Containers is free; reading inside another app's container is what's protected.
             let containers = home + "/Library/Containers"
-            let other = ((try? FileManager.default.contentsOfDirectory(atPath: containers)) ?? [])
-                .filter { !$0.hasPrefix("inc.synth.") && !$0.hasPrefix(".") }.sorted().first
-            if let other { targets.append(containers + "/" + other + "/Data") }
+            let names = ((try? fm.contentsOfDirectory(atPath: containers)) ?? []).sorted()
+            let candidates = names.filter { name in
+                !name.hasPrefix(".") && !name.hasPrefix("inc.synth.") && PrivateDataArea.owner(ofContainer: name) == nil
+                    && fm.fileExists(atPath: containers + "/" + name + "/Data")
+            }
+            // A third-party app's container if there is one (Apple's own may be guarded differently).
+            if let pick = candidates.first(where: { !$0.hasPrefix("com.apple.") }) ?? candidates.first {
+                targets.append(containers + "/" + pick + "/Data")
+            }
         }
         for path in targets {
             guard let dir = opendir(path) else {

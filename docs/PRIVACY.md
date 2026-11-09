@@ -133,8 +133,11 @@ done, and if an earlier version did split a folder (both names real folders), th
 merged into the `.noindex` one and it's replaced by the link.
 
 **Other apps' private data.** The agents are also kept out of macOS's protected stores (Photos libraries,
-Mail, Messages, Contacts & Calendars, Safari, other apps' containers) unless you turn one on in Settings →
-Permissions → Private data, or allow it for a tool that needs it. See [TOOLS.md](TOOLS.md#private-data-needs).
+Mail, Messages, Contacts & Calendars, Notes, Safari, other apps' containers) unless you turn one on in
+Settings → Permissions → Private data, or allow it for a tool that needs it. Stores only Full Disk Access
+opens (call history, the TCC database, Biome, iPhone backups, cookies, the data-protection keychain, …)
+are always denied, even with every area on. See [TOOLS.md](TOOLS.md#private-data-needs), which also lists
+what's left for Codex.
 
 ### Why tools.json and cases.jsonl stay plaintext
 

@@ -22,7 +22,9 @@ isn't used until you click **Approve** in Settings → Tools. The tab shows whic
 diff of their commands; the menu bar icon gets a dot and its menu shows "Approve Tool Changes…" (plus a
 notification, if Likely is allowed to post them). Likely stores a SHA-256 of each approved tool's commands,
 instructions and `needs` in its preferences, which no agent can write. So a tool planted or edited outside
-Likely can't quietly ask for your Mail: a changed `needs` waits for approval like a new command.
+Likely can't quietly ask for your Mail: a changed `needs` waits for approval like a new command. While a
+tool waits, its switch and its **Allow…** button are off: only Approve, which shows the whole change,
+makes it usable. Switching a tool on or off never approves anything.
 
 ## Schema
 
@@ -50,15 +52,33 @@ Likely can't quietly ask for your Mail: a changed `needs` waits for approval lik
 | `commands` | [string] | Command prefixes the agent may run (a single string is accepted too). |
 | `instructions` | string | Added to the agent's prompt: when to use the tool, the exact command line, what it prints. |
 | `setup` | string | Optional. How it was installed and how to maintain it. Not sent to the agent. |
-| `needs` | [string] | Optional. Private data areas the tool reads (see below): `photos`, `mail`, `messages`, `contacts`, `safari`, `app-data`. |
+| `needs` | [string] | Optional. Private data areas the tool reads (see below): `photos`, `mail`, `messages`, `contacts`, `notes`, `safari`, `app-data`. |
 
 ## Private data (`needs`)
 
 Search agents are kept out of macOS's protected stores by default (Settings → Permissions → Private
 data, all off): Photos libraries (`~/Library/Photos`, `~/Pictures/Photos Library.photoslibrary` and any
-`*.photoslibrary`), Mail, Messages, Contacts & Calendars (and Reminders), Safari, and other apps'
+`*.photoslibrary`), Mail, Messages, Contacts & Calendars (and Reminders), Notes, Safari, and other apps'
 containers (`~/Library/Containers`, `~/Library/Group Containers`). Otherwise a search for a tax form that
 walks through ~ ends with macOS asking whether "Likely" may access your Photos.
+
+Each area also covers its own folders inside those containers, matched by name (for example
+`com.apple.photoanalysisd`, `com.apple.MobileSMS.*`, `com.apple.mail.*`, `group.com.apple.contacts`,
+`com.apple.Safari.*`, `group.com.apple.notes`). Turning Contacts on opens Contacts' containers even while
+"Other apps' private data" is off; turning that one on doesn't open Mail's.
+
+Some stores only Full Disk Access opens, and no area is about them: the TCC database, call history,
+Knowledge and Biome activity, Suggestions, iPhone backups, Accounts, IdentityServices, HomeKit, Core
+Spotlight's index, FaceTime, cookies and the data-protection keychain (`~/Library/Keychains/*/`). They're
+always denied, so granting Likely Full Disk Access for Mail doesn't open them to the agents. Mail, Messages
+and Safari themselves can only be read with Full Disk Access, which macOS never asks for: you add Likely
+in System Settings → Privacy & Security, and the agents then get it too wherever the area is on.
+
+Codex can't use patterns, so for Codex Likely lists the containers at each search, and finds Photos
+libraries outside the default places in the background (the home folder 3 levels deep, outside
+~/Library, and each local volume 2 levels deep). A library deeper than that, or added since the last
+scan, isn't denied to Codex. Codex's `view_image` tool opens an image itself, outside its sandbox, so
+it's turned off while Photos is off.
 
 A tool that reads one of them declares it:
 
@@ -75,7 +95,8 @@ A tool that reads one of them declares it:
 ```
 
 - Turning on a tool whose areas are off asks "Photos library (osxphotos) needs access to your Photos.
-  Allow?". Allow turns the area on and triggers macOS's own permission alert in one step.
+  Allow?". Allow turns the area on and triggers macOS's own permission alert in one step (for Mail,
+  Messages and Safari there's no alert: they need Full Disk Access, see above).
 - Until every area it needs is on, the tool isn't used: its row says which area is off, with an
   **Allow…** button.
 - An unknown id in `needs` makes the tool invalid (it's disabled, and the row says why).
