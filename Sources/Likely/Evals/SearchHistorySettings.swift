@@ -1,11 +1,17 @@
 import AppKit
 import LikelyEvalKit
+import LikelyStorage
 import SwiftUI
 
-/// Every search Likely ran (History/history.jsonl next to the evals folder, last 500), so any of them
-/// can be made into an eval case later. On this Mac only; never sent anywhere, and the agents' sandboxes
-/// can't read it (AgentSandbox.historyRules, CodexRunner). "Save search history" in Settings → History,
-/// on by default, independent of "Automatically save picks as tests".
+/// Every search Likely ran (in History/ next to the evals folder, last 500), so any of them can be made
+/// into an eval case later. On this Mac only; never sent anywhere, and the agents' sandboxes can't read
+/// it (AgentSandbox.protectionRules, CodexRunner). Builds with encryption keep it in history.enc.jsonl,
+/// each line encrypted with the data key in the Keychain (SearchHistoryFile, DataProtection.cipher), and
+/// move plaintext history into it at launch; builds without keep it in history.jsonl and leave
+/// history.enc.jsonl alone. A build with encryption whose Keychain doesn't answer never falls back to
+/// plaintext: searches wait in memory (`pending`), Settings → History says so, and they're saved once
+/// the Keychain answers (the next search, or EncryptionStatus's retry). "Save search history" in Settings → History, on by default, independent of
+/// "Automatically save picks as tests".
 ///
 /// All file access goes through one serial background queue, so recording a search never blocks the
 /// main thread when a picker closes and writes can't interleave. The list is only read and decoded
@@ -25,22 +31,52 @@ final class SearchHistoryStore: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
     }
 
-    let url = SearchHistoryFile.defaultURL
+    private let cipher = DataProtection.cipher
+    /// Searches not saved yet (the Keychain isn't answering). Only used on `queue`.
+    private let pending = PendingSearchHistory()
+    /// How many searches are waiting in `pending`, for Settings.
+    @Published private(set) var waitingCount = 0
+    /// history.enc.jsonl with encryption, history.jsonl without.
+    let url = SearchHistoryFile.url(encrypted: DataProtection.cipher != nil)
+    static let unreadableMessage = "History can't be read by this build"
+    static let encryptedElsewhereMessage = "History is encrypted by another build of Likely"
     private let queue = DispatchQueue(label: "inc.synth.likely.history", qos: .utility)
     /// Newest first. Only kept current while the History tab is visible.
     @Published private(set) var entries: [SearchHistoryEntry] = []
-    /// Whether history.jsonl exists, even if none of its lines decode (Clear and Show File use this).
+    /// Whether the history file exists, even if none of its lines decode (Clear and Show File use this).
     @Published private(set) var fileExists = false
     @Published var lastError: String?
+    /// Saved searches this build can't open (encrypted by another build of Likely, or its key is
+    /// unavailable), with why. They're kept in the file, never wiped.
+    @Published private(set) var unreadableNote: String?
     /// History tabs on screen (Settings may be closed and reopened).
     private var visibleCount = 0
 
     private init() {
-        queue.async { [url] in
+        queue.async {
             do {
-                try SearchHistoryFile.migrate(from: SearchHistoryFile.legacyURL, to: url)
+                try SearchHistoryFile.migrate(from: SearchHistoryFile.legacyURL, to: SearchHistoryFile.plaintextURL)
             } catch {
                 Log.write("history", "couldn't move history.jsonl into History/: \(error)")
+            }
+        }
+    }
+
+    /// Plaintext history (older versions, or a build without encryption): moved into the encrypted
+    /// file. Without encryption, nothing changes (history.enc.jsonl included). Run at launch, and
+    /// again when the Keychain answers after an error.
+    func convertPlaintext() {
+        queue.async { [cipher] in
+            guard let cipher else { return }
+            do {
+                let count = try SearchHistoryFile.convertPlaintext(from: SearchHistoryFile.plaintextURL, to: SearchHistoryFile.encryptedURL, cipher: cipher)
+                if count > 0 {
+                    DataProtection.noteKeyResult(nil)
+                    Log.write("history", "encrypted \(count) saved search(es)")
+                }
+            } catch {
+                DataProtection.noteKeyResult(error)
+                Log.write("history", "couldn't encrypt saved searches, left as they are: \(error)")
             }
         }
     }
@@ -59,42 +95,92 @@ final class SearchHistoryStore: ObservableObject {
 
     /// Reads the file in the background and publishes it, if the tab is still visible.
     func reload() {
-        queue.async { [url] in
+        queue.async { [url, cipher] in
             let exists = FileManager.default.fileExists(atPath: url.path)
-            let result = Result { try SearchHistoryFile.load(url) }
+            let result = Result { try SearchHistoryFile.read(url, cipher: cipher) }
+            // Without encryption, history.enc.jsonl is another build's: left alone, but mentioned.
+            let encryptedElsewhere = cipher == nil && FileManager.default.fileExists(atPath: SearchHistoryFile.encryptedURL.path)
             DispatchQueue.main.async {
                 guard self.visibleCount > 0 else { return }
                 self.fileExists = exists
                 switch result {
-                case .success(let list):
-                    self.entries = list.reversed()
+                case .success(let contents):
+                    self.entries = contents.entries.reversed()
+                    self.unreadableNote = Self.note(for: contents, encryptedElsewhere: encryptedElsewhere)
                     if self.lastError?.hasPrefix("Couldn't read") == true { self.lastError = nil }
                 case .failure(let error):
                     self.entries = []
+                    self.unreadableNote = nil
                     self.lastError = "Couldn't read the history file: \(error.localizedDescription)"
                 }
             }
         }
     }
 
+    static func note(for contents: SearchHistoryFile.Contents, encryptedElsewhere: Bool = false) -> String? {
+        if encryptedElsewhere {
+            return encryptedElsewhereMessage + ". It's kept as it is; that build can still read it. This build saves its own history unencrypted."
+        }
+        guard contents.unreadable > 0 else { return nil }
+        if case .keyUnavailable? = contents.problem {
+            // This build's own key, which the Keychain isn't handing over right now.
+            return "\(contents.unreadable) saved search\(contents.unreadable == 1 ? "" : "es") can't be opened right now: the Keychain isn't answering. They're kept, encrypted, and show again once it does."
+        }
+        let why = contents.problem.map { " (\($0))" } ?? ""
+        if contents.entries.isEmpty {
+            return unreadableMessage + why + ". It's kept as it is; the build that saved it can still read it."
+        }
+        return "\(contents.unreadable) saved search\(contents.unreadable == 1 ? "" : "es") can't be read by this build\(why). They're kept as they are."
+    }
+
     // MARK: Writes
 
     /// Appends one search in the background, if history is on. If the existing file can't be read,
     /// nothing is written (SearchHistoryFile.append throws first), so a bad read never wipes it.
+    /// A search that can't be saved (no key from the Keychain, or a file that can't be read) waits in
+    /// memory with any earlier ones, and they're all saved with the next write that works.
     func record(_ entry: SearchHistoryEntry) {
         guard Self.isEnabled else { return }
-        queue.async { [url] in
-            do {
-                try SearchHistoryFile.append(entry, to: url)
-                Log.write("history", "saved search (\(entry.suggested.count) suggested, \(entry.picked.isEmpty ? "no pick" : "picked"))")
-                DispatchQueue.main.async {
-                    let defaults = UserDefaults.standard
-                    if defaults.object(forKey: Self.firstRecordedKey) == nil { defaults.set(Date().timeIntervalSince1970, forKey: Self.firstRecordedKey) }
-                    if self.visibleCount > 0 { self.reload() }
-                }
-            } catch {
-                Log.write("history", "couldn't save search, history left as is: \(error)")
-                DispatchQueue.main.async { self.lastError = "Couldn't save the last search: \(error.localizedDescription)" }
+        queue.async { self.writePending(adding: entry) }
+    }
+
+    /// Saves the searches waiting in memory, if any (the Keychain answers again).
+    func flushPending() {
+        queue.async { self.writePending(adding: nil) }
+    }
+
+    /// On `queue`.
+    private func writePending(adding entry: SearchHistoryEntry?) {
+        guard entry != nil || !pending.isEmpty else { return }
+        let count = pending.entries.count + (entry == nil ? 0 : 1)
+        do {
+            try pending.write(adding: entry, to: url, cipher: cipher)
+            if cipher != nil { DataProtection.noteKeyResult(nil) }
+            let saved = entry.map { "saved search (\($0.suggested.count) suggested, \($0.picked.isEmpty ? "no pick" : "picked"))" } ?? "saved"
+            let waited = entry == nil ? count : count - 1
+            Log.write("history", saved + (waited > 0 ? " and \(waited) that waited in memory" : ""))
+            DispatchQueue.main.async {
+                let defaults = UserDefaults.standard
+                if defaults.object(forKey: Self.firstRecordedKey) == nil { defaults.set(Date().timeIntervalSince1970, forKey: Self.firstRecordedKey) }
+                self.waitingCount = 0
+                if self.lastError?.hasPrefix("Couldn't save") == true { self.lastError = nil }
+                if self.visibleCount > 0 { self.reload() }
+            }
+        } catch {
+            if cipher != nil { DataProtection.noteKeyResult(error) }
+            let waiting = pending.entries.count
+            Log.write("history", "couldn't save search, \(waiting) waiting in memory, history left as is: \(error)")
+            let why: String
+            if case .keyUnavailable? = error as? DataCipher.CipherError {
+                why = "the Keychain isn't answering, so the encryption key can't be read"
+            } else {
+                why = (error as? DataCipher.CipherError).map { "\($0)" } ?? error.localizedDescription
+            }
+            let message = "Couldn't save \(waiting == 1 ? "the last search" : "the last \(waiting) searches"): \(why). "
+                + "\(waiting == 1 ? "It's" : "They're") kept in memory (never written unencrypted) and saved once that works; quitting Likely drops \(waiting == 1 ? "it" : "them")."
+            DispatchQueue.main.async {
+                self.waitingCount = waiting
+                self.lastError = message
             }
         }
     }
@@ -109,10 +195,15 @@ final class SearchHistoryStore: ObservableObject {
     }
 
     func clear() {
-        let result = queue.sync { [url] in Result { try SearchHistoryFile.clear(url) } }
+        let result = queue.sync { [url, pending] in
+            pending.removeAll()
+            return Result { try SearchHistoryFile.clear(url) }
+        }
+        waitingCount = 0
         switch result {
         case .success:
             lastError = nil
+            unreadableNote = nil
             entries = []
             fileExists = false
         case .failure(let error):
@@ -123,7 +214,7 @@ final class SearchHistoryStore: ObservableObject {
     /// Marks the entry as made into `caseID`. Returns an error message if it couldn't be (including
     /// when the entry is no longer in the file, e.g. it aged out or history was cleared meanwhile).
     func markEval(entryID: String, caseID: String) -> String? {
-        let result = queue.sync { [url] in Result { try SearchHistoryFile.update(id: entryID, in: url) { $0.evalCaseID = caseID } } }
+        let result = queue.sync { [url] in Result { try SearchHistoryFile.update(id: entryID, in: url, cipher: cipher) { $0.evalCaseID = caseID } } }
         let message: String?
         switch result {
         case .success(let updated?):
@@ -167,6 +258,7 @@ struct HistorySettings: View {
                 Text("Keeps your last \(SearchHistoryFile.defaultLimit) searches (what you typed, the app, what Likely suggested and what you picked) on this Mac only, so you can turn any of them into a test. Nothing is uploaded.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            EncryptionStatusView()
             if enabled && firstRecorded != 0 && !noticeDismissed {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "info.circle").foregroundStyle(.secondary)
@@ -190,6 +282,7 @@ struct HistorySettings: View {
                             .multilineTextAlignment(.center).foregroundStyle(.secondary).padding(30)
                     }
                 }
+            if let note = store.unreadableNote { Text(note).font(.caption).foregroundStyle(.orange) }
             if let error = store.lastError { Text(error).font(.caption).foregroundStyle(.orange) }
             HStack {
                 Button("Clear History…") { confirmingClear = true }.disabled(!store.fileExists)
@@ -398,5 +491,36 @@ struct MakeEvalSheet: View {
     private func isFolder(_ path: String) -> Bool {
         var isDir: ObjCBool = false
         return FileManager.default.fileExists(atPath: (path as NSString).expandingTildeInPath, isDirectory: &isDir) && isDir.boolValue
+    }
+}
+
+/// Whether this build encrypts history and saved test screenshots (DataProtection.status), with
+/// how to turn it on when it's off, and the Keychain error state when it can't encrypt right now.
+struct EncryptionStatusView: View {
+    @ObservedObject private var status = DataProtection.status
+
+    var body: some View {
+        let state = status.state
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            switch state {
+            case .on:
+                Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                Text("Encryption: on").font(.caption).foregroundStyle(.secondary)
+            case .keychainError:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(state.summary + ".").font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .off:
+                Image(systemName: "lock.open").foregroundStyle(.secondary)
+                Text(state.summary + ".").font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("How to turn it on", destination: DataProtection.buildingGuideURL).font(.caption)
+            }
+        }
+        .help(state.isOn
+              ? "Search history and saved test screenshots are encrypted with a key in your Keychain."
+              : state.encrypts
+              ? "This build encrypts, but the Keychain isn't handing over the key right now. New searches wait in memory and test screenshots aren't saved until it does; nothing is written unencrypted. Likely tries again every minute."
+              : "Search history and saved test screenshots are kept unencrypted, readable only by your user account, and hidden from Likely's agents and Spotlight.")
     }
 }

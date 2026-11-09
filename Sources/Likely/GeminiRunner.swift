@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// Runs Google's Gemini CLI: `gemini -p … -o stream-json`, authenticated through Vertex AI with the
@@ -13,7 +15,10 @@ import LikelyTools
 /// `file` (-C) can write, so they're left out; mdfind and Gemini's list_directory cover them.
 ///
 /// Gemini can't take messages mid-turn, so feedback stops the current turn and continues the same
-/// conversation with `--resume <session_id>` (sessions are stored per working directory).
+/// conversation with `--resume <session_id>` (sessions are stored per working directory). That needs
+/// the session on disk (Gemini has no way to turn it off), so when the picker closes the work
+/// folder's whole session folder (~/.gemini/tmp/<sha256 of the folder>: the chats, with the
+/// screenshot, and logs.json) and shell history are deleted (`deleteSessions`).
 final class GeminiRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -53,7 +58,7 @@ final class GeminiRunner: AgentRunner {
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         // `@path` attaches the file as model input; it must be inside the workspace (see baseArguments).
@@ -72,9 +77,24 @@ final class GeminiRunner: AgentRunner {
 
     func cancel() {
         stopProcess()
+        if sessionID != nil, let workDir { Self.deleteSessions(workDir: workDir) }
         sessionID = nil
         try? transcript?.close()
         transcript = nil
+    }
+
+    /// Gemini keeps a project's sessions in ~/.gemini/tmp/<sha256 of its path> and its shell history
+    /// in ~/.gemini/history/<same>. The project is Likely's work folder, used by nothing else, so both
+    /// go entirely. Both spellings of the path (Gemini uses the resolved one).
+    static func deleteSessions(workDir: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
+        let gemini = URL(fileURLWithPath: home).appendingPathComponent(".gemini")
+        for path in Set([workDir.path, AgentSandbox.realPath(workDir.path)]) {
+            let hash = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+            for folder in ["tmp", "history"] {
+                let url = gemini.appendingPathComponent(folder).appendingPathComponent(hash)
+                if (try? FileManager.default.removeItem(at: url)) != nil { Log.write("gemini", "deleted its session files for this search") }
+            }
+        }
     }
 
     /// `-e none` skips the user's extensions. The workspace (where read_file/glob may look) is the
@@ -116,7 +136,8 @@ final class GeminiRunner: AgentRunner {
         // With user tools enabled, also no writes outside ~/.gemini and temp folders.
         let profile = launchOptions.toolCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.geminiProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
-                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path], agent: .gemini)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -133,7 +154,7 @@ final class GeminiRunner: AgentRunner {
         env["GOOGLE_CLOUD_LOCATION"] = Self.vertexLocation
         // Our own settings layer (overrides ~/.gemini/settings.json without touching it).
         let settingsURL = workDir.appendingPathComponent("gemini-settings.json")
-        try? Self.settings.write(to: settingsURL)
+        try? OwnerOnly.write(Self.settings, to: settingsURL)
         env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = settingsURL.path
         process.environment = env
 

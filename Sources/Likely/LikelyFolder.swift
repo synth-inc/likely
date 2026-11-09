@@ -1,4 +1,5 @@
 import AppKit
+import LikelyStorage
 import LikelyTools
 
 /// Manages ~/Likely: APFS clones of candidate files, plus a " …status…" file whose name is the
@@ -62,8 +63,9 @@ final class LikelyFolder {
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
+    /// No trailing slash: also matches the real folder, …/Likely.noindex (see SpotlightExclusion).
     private static let supportPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/Likely").path + "/"
+        .appendingPathComponent("Library/Application Support/Likely").path
 
     private let fm = FileManager.default
     private let manifestURL: URL
@@ -464,7 +466,7 @@ final class LikelyFolder {
     private func saveManifest() {
         if let data = try? JSONEncoder().encode(Manifest(paths: added.map(\.path), releasedAt: releasedAt,
                                                           recent: recent.map(\.path))) {
-            try? data.write(to: manifestURL)
+            try? OwnerOnly.write(data, to: manifestURL)   // 0600
         }
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import LikelyEvalKit
+import LikelyStorage
 import SwiftUI
 
 /// Record of one picker → claude run, for the debug window.
@@ -9,6 +10,9 @@ final class DebugRun: ObservableObject, Identifiable {
     let appName: String
     let detectedVia: String
     @Published var captureMode: String?
+    /// The screenshot sent with the search, in memory.
+    @Published var screenshotPNG: Data?
+    /// Its copy on disk (debug/<id>.png): dev builds only, 0600.
     @Published var screenshotURL: URL?
     @Published var image: NSImage?
     @Published var prompt: String?
@@ -35,14 +39,16 @@ final class DebugRun: ObservableObject, Identifiable {
     func log(_ message: String) { events.append((Date(), message)) }
 }
 
-/// Keeps the most recent runs, with a copy of each run's screenshot (the live one is overwritten).
+/// Keeps the most recent runs, with each run's screenshot: in memory only in release builds; dev
+/// builds (LIKELY_DEV) also write it to debug/<run id>.png (0600) for "Open in Preview".
 final class DebugStore: ObservableObject {
     static let shared = DebugStore()
     static let maxRuns = 15
 
     @Published private(set) var runs: [DebugRun] = []
-    private let directory: URL = FileManager.default.homeDirectoryForCurrentUser
+    static let defaultDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Likely/debug", isDirectory: true)
+    private let directory = DebugStore.defaultDirectory
 
     func begin(appName: String, detectedVia: String) -> DebugRun {
         let run = DebugRun(appName: appName, detectedVia: detectedVia)
@@ -54,14 +60,22 @@ final class DebugStore: ObservableObject {
         return run
     }
 
-    func attachScreenshot(_ source: URL, mode: String, to run: DebugRun) {
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let copy = directory.appendingPathComponent("\(run.id.uuidString).png")
-        try? FileManager.default.removeItem(at: copy)
-        guard (try? FileManager.default.copyItem(at: source, to: copy)) != nil else { return }
-        run.screenshotURL = copy
-        run.image = NSImage(contentsOf: copy)
+    func attachScreenshot(_ png: Data, mode: String, to run: DebugRun) {
+        run.screenshotPNG = png
+        run.image = NSImage(data: png)
         run.captureMode = mode
+        #if LIKELY_DEV
+        let copy = directory.appendingPathComponent("\(run.id.uuidString).png")
+        if (try? OwnerOnly.write(png, to: copy)) != nil { run.screenshotURL = copy }
+        #endif
+    }
+
+    /// Release builds keep debug screenshots in memory only: remove any an earlier version wrote.
+    static func removeSavedScreenshots(in directory: URL = DebugStore.defaultDirectory) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names where name.lowercased().hasSuffix(".png") {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
     }
 }
 

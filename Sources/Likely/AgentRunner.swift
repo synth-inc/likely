@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// A coding agent run headless for one picker. Implementations parse the agent's streamed output into
@@ -31,6 +32,9 @@ struct AgentLaunchOptions {
     /// Append to last-run.jsonl instead of starting it over (evals keep every turn of a case,
     /// including relaunches).
     var appendTranscript = false
+    /// Where the raw JSON stream goes. nil: `transcripts/last-run.jsonl` next to the work folder
+    /// (AgentTranscript.url). Never inside the work folder: agents may read that one.
+    var transcriptURL: URL?
     /// Launched by `--eval`: Hermes then never reuses a gateway it didn't start with these rules.
     var isEval = false
     /// The user's tools this launch may use (allowlist and sandbox profile). nil: the ones the app
@@ -38,14 +42,19 @@ struct AgentLaunchOptions {
     var tools: [CustomTool]?
 }
 
-/// The raw JSON stream each runner saves to <workDir>/last-run.jsonl.
+/// The raw JSON stream each runner saves (last-run.jsonl). It holds the queries, everything the agent
+/// read and the files it found, so it's kept outside the work folder: that folder is the one part of
+/// Likely's data an agent may read (its screenshot and config files), and Codex's sandbox can't deny
+/// a file pattern inside it. Next to it instead (…/Likely/transcripts for searches; an eval case's
+/// own folder, whose `agent` subfolder is the work folder), which every agent is denied.
 enum AgentTranscript {
+    static func url(workDir: URL, options: AgentLaunchOptions) -> URL {
+        options.transcriptURL ?? workDir.deletingLastPathComponent().appendingPathComponent("transcripts/last-run.jsonl")
+    }
+
+    /// Owner-only (0600) from creation.
     static func open(_ url: URL, append: Bool) -> FileHandle? {
-        let fm = FileManager.default
-        if !append || !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
-        if append { _ = try? handle.seekToEnd() }
-        return handle
+        try? OwnerOnly.openForWriting(url, truncate: !append)
     }
 }
 
@@ -126,20 +135,16 @@ final class CodexRunner: AgentRunner {
     /// Run without the user's ~/.codex/config.toml (their default model may not be available to
     /// ChatGPT sign-ins, and their MCP servers/hooks would slow things down). Auth is unaffected.
     /// Sandbox: a permission profile that extends Codex's built-in read-only one and also makes
-    /// Likely's search history unreadable (same paths as AgentSandbox.historyRules). Equivalent to
-    /// `sandbox_mode="read-only"` otherwise; the two can't be combined. Verified with
-    /// `codex sandbox` (codex-cli 0.153): reads under the denied paths fail with EPERM.
-    private static let baseArguments: [String] = {
-        let denied = AgentSandbox.historyDeniedPaths
-        let entries = (denied.folders + denied.files).map { "\(tomlString($0)) = \"none\"" }.joined(separator: ", ")
-        return ["--json", "--skip-git-repo-check", "--ignore-user-config",
-                "-c", "default_permissions=\"likely\"",
-                "-c", "permissions.likely.extends=\":read-only\"",
-                "-c", "permissions.likely.filesystem={ \(entries) }"]
-    }()
-
-    private static func tomlString(_ s: String) -> String {
-        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    /// Likely's data unreadable, except the run's work folder (same paths as
+    /// AgentSandbox.protectionRules). Equivalent to `sandbox_mode="read-only"` otherwise; the two
+    /// can't be combined. Verified with `codex sandbox` (codex-cli 0.153): reads under the denied
+    /// paths fail with EPERM, the more specific "read" entry for the work folder wins.
+    /// The screenshot is attached with `-i`, which Codex itself reads (outside the sandbox).
+    private static func baseArguments(workDir: URL) -> [String] {
+        ["--json", "--skip-git-repo-check", "--ignore-user-config",
+         "-c", "default_permissions=\"likely\"",
+         "-c", "permissions.likely.extends=\":read-only\"",
+         "-c", "permissions.likely.filesystem=" + AgentSandbox.codexFilesystem(readable: [workDir.path])]
     }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
@@ -148,28 +153,58 @@ final class CodexRunner: AgentRunner {
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var arguments = ["exec"] + Self.baseArguments + ["-m", model, prompt]
+        var arguments = ["exec"] + Self.baseArguments(workDir: workDir) + ["-m", model, prompt]
         if let image { arguments += ["-i", image.path] }   // after the prompt: -i takes several values
         launch(arguments)
     }
 
     @discardableResult
     func send(_ text: String) -> Bool {
-        guard let threadID, executable != nil else { return false }
+        guard let threadID, executable != nil, let workDir else { return false }
         // No mid-turn input: stop the current turn (the conversation so far is kept) and resume.
         stopProcess()
-        launch(["exec", "resume"] + Self.baseArguments + ["-m", model, threadID, text])
+        launch(["exec", "resume"] + Self.baseArguments(workDir: workDir) + ["-m", model, threadID, text])
         return true
     }
 
     func cancel() {
         stopProcess()
+        if let threadID { Self.deleteSession(threadID) }
         threadID = nil
         try? transcript?.close()
         transcript = nil
+    }
+
+    /// Codex keeps each conversation in ~/.codex/sessions/<yyyy>/<MM>/<dd>/rollout-<time>-<thread>.jsonl
+    /// (the queries and the attached screenshot, in plaintext). `codex exec --ephemeral` would keep
+    /// none, but then a follow-up couldn't `resume` it, so instead the file is deleted when the picker
+    /// closes. Looked for in the folders of the last few days (local and UTC dates can differ).
+    static func deleteSession(_ threadID: String, codexHome: URL = CodexRunner.codexHome, now: Date = Date()) {
+        guard threadID.range(of: #"^[A-Za-z0-9-]+$"#, options: .regularExpression) != nil else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let fm = FileManager.default
+            let sessions = codexHome.appendingPathComponent("sessions")
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy/MM/dd"
+            let days = Set((-2...1).map { formatter.string(from: now.addingTimeInterval(Double($0) * 86_400)) })
+            for day in days {
+                let folder = sessions.appendingPathComponent(day)
+                for name in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasSuffix("-\(threadID).jsonl") {
+                    if (try? fm.removeItem(at: folder.appendingPathComponent(name))) != nil {
+                        Log.write("codex", "deleted its session file for this search")
+                    }
+                }
+            }
+        }
+    }
+
+    static var codexHome: URL {
+        if let home = ProcessInfo.processInfo.environment["CODEX_HOME"], !home.isEmpty { return URL(fileURLWithPath: home) }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
     }
 
     private func stopProcess() {

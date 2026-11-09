@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import LikelyTools
+import LikelyStorage
 
 final class ToolsFileTests: XCTestCase {
     func testDecodesFullEntry() throws {
@@ -324,6 +325,197 @@ final class SecurityTests: XCTestCase {
             XCTAssertNotEqual(process.terminationStatus, 0)
             XCTAssertFalse(FileManager.default.fileExists(atPath: probe.path))
         }
+    }
+}
+
+/// Layer 2: no agent can read Likely's data, except the run's own work folder. Real sandbox-exec runs
+/// against a fake home folder (never the real ~/Library/Application Support/Likely).
+final class DataSandboxTests: XCTestCase {
+    private var home: URL!
+    private var support: URL { home.appendingPathComponent("Library/Application Support/Likely") }
+    private var logs: URL { home.appendingPathComponent("Library/Logs/Likely") }
+
+    override func setUpWithError() throws {
+        home = URL(fileURLWithPath: AgentSandbox.realPath(NSTemporaryDirectory()))
+            .appendingPathComponent("likely-home-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: home)
+    }
+
+    private func put(_ relative: String, in root: URL) throws {
+        let url = root.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("data".utf8).write(to: url)
+    }
+
+    private func populate() throws {
+        for path in ["History/history.jsonl", "history.jsonl", "evals/cases.jsonl", "evals/drafts.jsonl",
+                     "evals/screenshots/case.png.enc", "evals/runs/r1/report.html", "evals/runs/r1/cases/001-a/prompt.txt",
+                     "evals/runs/r1/cases/001-a/agent/screenshot-1.png", "evals/runs/r1/cases/001-a/transcript.jsonl",
+                     "evals/runs/r1/cases/001-a/last-run.jsonl", "transcripts/last-run.jsonl",
+                     "debug/run.png", "tools.json", "likely-manifest.json",
+                     "run/context-ABC.png", "run/last-run.jsonl", "run/gemini-settings.json",
+                     "run/opencode-config/opencode/opencode.jsonc", "run/hermes-bin/launchctl"] {
+            try put(path, in: support)
+        }
+        try put("likely.log", in: logs)
+    }
+
+    /// Exit status of `command` under `profile` + Likely's data rules for the fake home.
+    private func run(_ command: [String], profile: String, readable: [String], agent: AgentSessions? = nil) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+        process.arguments = ["-p", profile + "\n" + AgentSandbox.protectionRules(home: home.path, readable: readable, agent: agent)] + command
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    private func checkReads(profile: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let runDir = support.appendingPathComponent("run").path
+        let denied = ["History/history.jsonl", "history.jsonl", "evals/cases.jsonl", "evals/drafts.jsonl",
+                      "evals/screenshots/case.png.enc", "evals/runs/r1/report.html", "debug/run.png", "tools.json",
+                      "likely-manifest.json", "run/last-run.jsonl", "transcripts/last-run.jsonl"].map { support.appendingPathComponent($0).path }
+            + [logs.appendingPathComponent("likely.log").path]
+        for path in denied {
+            XCTAssertNotEqual(try run(["/bin/cat", path], profile: profile, readable: [runDir]), 0, "readable: \(path)", file: file, line: line)
+        }
+        XCTAssertNotEqual(try run(["/bin/ls", support.path + "/"], profile: profile, readable: [runDir]), 0, "listing", file: file, line: line)
+        XCTAssertNotEqual(try run(["/bin/ls", logs.path + "/"], profile: profile, readable: [runDir]), 0, "listing logs", file: file, line: line)
+        for path in ["run/context-ABC.png", "run/gemini-settings.json", "run/opencode-config/opencode/opencode.jsonc",
+                     "run/hermes-bin/launchctl"].map({ support.appendingPathComponent($0).path }) {
+            XCTAssertEqual(try run(["/bin/cat", path], profile: profile, readable: [runDir]), 0, "not readable: \(path)", file: file, line: line)
+        }
+        // Writing stays denied, even in the readable work folder.
+        XCTAssertNotEqual(try run(["/usr/bin/touch", runDir + "/new.txt"], profile: profile, readable: [runDir]), 0, file: file, line: line)
+        XCTAssertNotEqual(try run(["/usr/bin/touch", logs.path + "/new.log"], profile: profile, readable: [runDir]), 0, file: file, line: line)
+
+        // An eval case's agent reads its `agent` folder (the decrypted screenshot), not the case's prompt,
+        // transcripts or the run's report.
+        let caseDir = support.appendingPathComponent("evals/runs/r1/cases/001-a").path
+        let agentDir = caseDir + "/agent"
+        XCTAssertEqual(try run(["/bin/cat", agentDir + "/screenshot-1.png"], profile: profile, readable: [agentDir]), 0, file: file, line: line)
+        for name in ["prompt.txt", "transcript.jsonl", "last-run.jsonl"] {
+            XCTAssertNotEqual(try run(["/bin/cat", caseDir + "/" + name], profile: profile, readable: [agentDir]), 0, name, file: file, line: line)
+        }
+        XCTAssertNotEqual(try run(["/bin/cat", support.path + "/evals/runs/r1/report.html"], profile: profile, readable: [agentDir]), 0, file: file, line: line)
+        XCTAssertNotEqual(try run(["/bin/cat", runDir + "/context-ABC.png"], profile: profile, readable: [agentDir]), 0, file: file, line: line)
+        // Something outside Likely's folders is still readable.
+        XCTAssertEqual(try run(["/bin/cat", "/etc/hosts"], profile: profile, readable: [runDir]), 0, file: file, line: line)
+    }
+
+    func testAgentsCantReadLikelysData() throws {
+        try populate()
+        for profile in [AgentSandbox.privacyOnlyProfile, AgentSandbox.claudeProfile(home: home.path, tempFolder: "/private/tmp"),
+                        AgentSandbox.confinedProfile(writable: ["/private/tmp"])] {
+            try checkReads(profile: profile)
+        }
+    }
+
+    /// The same after the folders moved to `.noindex` names behind links (SpotlightExclusion).
+    func testAgentsCantReadLikelysDataBehindTheNoindexLink() throws {
+        try populate()
+        for folder in [support, logs] {
+            XCTAssertEqual(try SpotlightExclusion.exclude(folder), .excluded)
+        }
+        try checkReads(profile: AgentSandbox.privacyOnlyProfile)
+        // And through the real path too.
+        let real = support.path + ".noindex"
+        XCTAssertNotEqual(try run(["/bin/cat", real + "/History/history.jsonl"], profile: AgentSandbox.privacyOnlyProfile,
+                                  readable: [support.path + "/run"]), 0)
+        XCTAssertEqual(try run(["/bin/cat", real + "/run/context-ABC.png"], profile: AgentSandbox.privacyOnlyProfile,
+                               readable: [support.path + "/run"]), 0)
+    }
+
+    /// Renaming a folder above Likely's data (or the data's own folders and links) would move it to a
+    /// path no deny rule names. Those entries can't be renamed or deleted, under any profile, while
+    /// files can still be made and renamed inside them where the profile allows writes.
+    func testAgentsCantMoveLikelysDataOutFromUnderTheRules() throws {
+        try populate()
+        for folder in [support, logs] { XCTAssertEqual(try SpotlightExclusion.exclude(folder), .excluded) }
+        let fm = FileManager.default
+        let library = home.appendingPathComponent("Library").path
+        let appSupport = library + "/Application Support"
+        let history = "/Likely.noindex/History/history.jsonl"
+        let runDir = support.appendingPathComponent("run").path
+        // privacyOnlyProfile allows every write; a confined profile with the home folder writable is the
+        // most an agent could get (Claude Code / Gemini with tools write only their own folders).
+        for profile in [AgentSandbox.privacyOnlyProfile, AgentSandbox.confinedProfile(writable: [home.path, "/private/tmp"])] {
+            let moves = [(appSupport, library + "/AS2", library + "/AS2" + history),
+                         (library, home.path + "/Lib2", home.path + "/Lib2/Application Support" + history),
+                         (home.path, home.path + "-moved", home.path + "-moved/Library/Application Support" + history),
+                         (library + "/Logs", library + "/Logs2", library + "/Logs2/Likely.noindex/likely.log"),
+                         (support.path, appSupport + "/Elsewhere", appSupport + "/Elsewhere/History/history.jsonl"),
+                         (support.path + ".noindex", appSupport + "/Elsewhere.noindex", appSupport + "/Elsewhere.noindex/History/history.jsonl"),
+                         (logs.path, library + "/Logs/Other", library + "/Logs/Other/likely.log")]
+            for (from, to, moved) in moves {
+                XCTAssertNotEqual(try run(["/bin/mv", from, to], profile: profile, readable: [runDir]), 0, "renamed \(from)")
+                XCTAssertNotEqual(try run(["/bin/cat", moved], profile: profile, readable: [runDir]), 0, "read \(moved)")
+                XCTAssertFalse(fm.fileExists(atPath: to), to)
+            }
+            for path in [support.path, logs.path] {
+                XCTAssertNotEqual(try run(["/bin/rm", path], profile: profile, readable: [runDir]), 0, "removed the link \(path)")
+            }
+            XCTAssertTrue(fm.fileExists(atPath: support.path + history.replacingOccurrences(of: "/Likely.noindex", with: "")))
+            // Ordinary work in those folders still works.
+            XCTAssertEqual(try run(["/usr/bin/touch", home.path + "/new.txt"], profile: profile, readable: [runDir]), 0)
+            XCTAssertEqual(try run(["/bin/mv", home.path + "/new.txt", home.path + "/renamed.txt"], profile: profile, readable: [runDir]), 0)
+            XCTAssertEqual(try run(["/bin/mkdir", library + "/Caches"], profile: profile, readable: [runDir]), 0)
+            XCTAssertEqual(try run(["/usr/bin/touch", appSupport + "/other-app.json"], profile: profile, readable: [runDir]), 0)
+            for path in [home.path + "/renamed.txt", library + "/Caches", appSupport + "/other-app.json"] { try fm.removeItem(atPath: path) }
+        }
+    }
+
+    /// Agents' own session stores (queries, screenshots) are unreadable to the other agents, and to
+    /// none of them their own (they need it to run).
+    func testAgentsCantReadEachOthersSessions() throws {
+        let stores: [AgentSessions: String] = [
+            .claude: ".claude/projects/-Users-me-Library-Application-Support-Likely-run/abc.jsonl",
+            .codex: ".codex/sessions/2026/11/09/rollout-2026-11-09T10-00-00-abc.jsonl",
+            .gemini: ".gemini/tmp/0123abcd/logs.json",
+            .opencode: ".local/share/opencode/opencode.db",
+            .hermes: ".hermes/profiles/likely/state.db",
+        ]
+        for (_, path) in stores { try put(path, in: home) }
+        try put(".codex/state_5.sqlite", in: home)
+        try put(".claude/history.jsonl", in: home)
+        try put(".claude/settings.json", in: home)
+        for agent in [AgentSessions.claude, .gemini, .opencode, .hermes] {
+            for (owner, path) in stores {
+                let status = try run(["/bin/cat", home.appendingPathComponent(path).path], profile: AgentSandbox.privacyOnlyProfile,
+                                     readable: [], agent: agent)
+                if owner == agent {
+                    XCTAssertEqual(status, 0, "\(agent) can't read its own \(path)")
+                } else {
+                    XCTAssertNotEqual(status, 0, "\(agent) read \(path)")
+                }
+            }
+        }
+        XCTAssertNotEqual(try run(["/bin/cat", home.path + "/.codex/state_5.sqlite"], profile: AgentSandbox.privacyOnlyProfile, readable: [], agent: .claude), 0)
+        XCTAssertNotEqual(try run(["/bin/cat", home.path + "/.claude/history.jsonl"], profile: AgentSandbox.privacyOnlyProfile, readable: [], agent: .gemini), 0)
+        XCTAssertEqual(try run(["/bin/cat", home.path + "/.claude/settings.json"], profile: AgentSandbox.privacyOnlyProfile, readable: [], agent: .gemini), 0,
+                       "only the session stores")
+        // Codex's commands get none of them, its own included (Codex reads those outside its sandbox).
+        let table = AgentSandbox.codexFilesystem(home: home.path, readable: [])
+        for (_, path) in stores {
+            let denied = AgentSessions.allCases.flatMap { $0.paths(home: home.path) }.first { home.appendingPathComponent(path).path.hasPrefix($0) }
+            XCTAssertNotNil(denied, path)
+            XCTAssertTrue(table.contains("\"\(denied!)\" = \"none\""), "\(denied!) in \(table)")
+        }
+        XCTAssertTrue(table.contains("\"\(home.path)/.codex/state_5.sqlite\" = \"none\""), "databases found by listing ~/.codex")
+    }
+
+    func testCodexFilesystemTable() {
+        let table = AgentSandbox.codexFilesystem(home: "/Users/someone", readable: ["/Users/someone/Library/Application Support/Likely/run"])
+        XCTAssertTrue(table.contains(#""/Users/someone/Library/Application Support/Likely" = "none""#), table)
+        XCTAssertTrue(table.contains(#""/Users/someone/Library/Application Support/Likely.noindex" = "none""#), table)
+        XCTAssertTrue(table.contains(#""/Users/someone/Library/Logs/Likely" = "none""#), table)
+        XCTAssertTrue(table.contains(#""/Users/someone/Library/Application Support/Likely/run" = "read""#), table)
+        XCTAssertTrue(table.hasPrefix("{ ") && table.hasSuffix(" }"))
     }
 }
 

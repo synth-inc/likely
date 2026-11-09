@@ -59,6 +59,9 @@ final class ClaudeRunner: AgentRunner {
             // Skip the user's settings (hooks etc.) and MCP servers: faster startup, no side effects.
             "--setting-sources", "local",
             "--strict-mcp-config",
+            // No transcript in ~/.claude/projects (the queries and the screenshot, in plaintext, where
+            // later agents could read them). Follow-ups go to this same process, so nothing needs resuming.
+            "--no-session-persistence",
             "--tools", "Read,Glob,Grep,Bash",
             "--permission-mode", "dontAsk",
             "--add-dir", FileManager.default.homeDirectoryForCurrentUser.path,
@@ -70,7 +73,8 @@ final class ClaudeRunner: AgentRunner {
         // a tool read-only, the sandbox can.
         let profile = userCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.claudeProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
-                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path], agent: .claude)
         process.executableURL = launcher
         process.arguments = launchArguments
 
@@ -88,7 +92,7 @@ final class ClaudeRunner: AgentRunner {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in

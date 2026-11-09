@@ -1,3 +1,4 @@
+import LikelyStorage
 import Foundation
 import LikelyTools
 
@@ -178,7 +179,7 @@ final class ToolStore: ObservableObject {
     private func write(_ list: [CustomTool]) {
         let fm = FileManager.default
         do {
-            try fm.createDirectory(at: Self.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try OwnerOnly.createDirectory(Self.fileURL.deletingLastPathComponent())
             if loadError != nil, fm.fileExists(atPath: Self.fileURL.path) {
                 // Don't silently replace a file someone was editing by hand: keep the broken one beside it.
                 let backup = Self.fileURL.deletingLastPathComponent().appendingPathComponent("tools.invalid.json")
@@ -186,7 +187,7 @@ final class ToolStore: ObservableObject {
                 try? fm.moveItem(at: Self.fileURL, to: backup)
                 Log.write("tools", "kept the unreadable tools.json as tools.invalid.json")
             }
-            try ToolsFile(tools: list).encoded().write(to: Self.fileURL, options: .atomic)
+            try OwnerOnly.write(try ToolsFile(tools: list).encoded(), to: Self.fileURL)   // 0600, atomic
         } catch {
             Log.write("tools", "couldn't write tools.json: \(error)")
         }
@@ -201,7 +202,7 @@ final class ToolStore: ObservableObject {
     /// agents usually write a new file and rename it), the file itself for in-place writes.
     private func startWatching() {
         let directory = Self.fileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? OwnerOnly.createDirectory(directory)
         let fd = open(directory.path, O_EVTONLY)
         if fd >= 0 {
             let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
