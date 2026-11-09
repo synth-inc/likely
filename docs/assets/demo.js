@@ -49,7 +49,7 @@
     recent: 1.15,     // first dialog: the recent files
     bar: 1.7,         // typing in Likely's search bar
     list: 1.5,        // the agent working: status files and results popping into the list
-    follow: 1.4,      // selecting files and clicking Open: the camera trails the pointer
+    follow: 1.25,     // selecting files and clicking Open: a steady shot of the rows and Open button
     ql: 1.6,          // Quick Look of the meme
     followLag: 0.42,  // follow: seconds of pointer history the camera averages (more = lazier)
     followMargin: 70, // follow: keep the pointer at least this many points inside the frame
@@ -117,7 +117,9 @@
     // The file list (header + rows), with the bar above it so its status line is in view too.
     list: { x: SHEET.x + 196 - 6, y: HUD.y - 4, w: 580, h: ROWS_TOP + 7.5 * ROW_H - HUD.y + 4 },
     ql: { x: 540, y: 200, w: 450, h: 328 },          // the Quick Look panel, and the selected row's pointer
-    open: { x: OPEN_BTN.x - 150, y: OPEN_BTN.y - 90, w: 200, h: 120 }
+    open: { x: OPEN_BTN.x - 150, y: OPEN_BTN.y - 90, w: 200, h: 120 },
+    // Selecting files and clicking Open: one steady shot of the rows and the Open button (no pointer following).
+    pick: { x: SHEET.x + 196 - 6, y: ROWS_TOP - 40, w: OPEN_BTN.x + 50 - (SHEET.x + 196 - 6), h: OPEN_BTN.y + 26 - (ROWS_TOP - 40) }
   };
 
   // ---- Icons ------------------------------------------------------------------------------------
@@ -368,7 +370,7 @@
       wait(TIMING.afterFound);
     }
     function pickAndOpen(files) {
-      cam('follow', CAMERA.follow);
+      cam('pick', CAMERA.follow);
       moveTo(560, rowY(0), TIMING.move); click(); add({ type: 'sel', ids: [files[0].n] });
       if (files.length > 1) {
         wait(TIMING.clickGap);
@@ -397,7 +399,7 @@
       submit(s);
       found(s.found);
       if (s.quickLook) {
-        cam('follow', CAMERA.follow);
+        cam('pick', CAMERA.follow);
         moveTo(560, rowY(0), TIMING.move); click(); add({ type: 'sel', ids: [s.found[0].n] });
         wait(0.25); add({ type: 'ql', on: true }); cam('ql', CAMERA.ql);
         wait(1.7); add({ type: 'ql', on: false }); wait(0.3);
