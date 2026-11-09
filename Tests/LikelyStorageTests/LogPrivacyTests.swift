@@ -218,6 +218,8 @@ final class LogPrivacySourceTests: XCTestCase {
     /// constants passed through String parameters (close reasons, pick methods, capture modes, refusal
     /// reasons), license/update server paths and states.
     static let reviewedMeta: [String: Int] = [
+        "Likely/PrivateDataPermission.swift: Log.write(\"privacy\", \"\\(meta: area.rawValue): \\(public: outcome == .granted ? \"allowed\" : \"not allowed\")\")": 1,
+        "Likely/PrivateDataPermission.swift: Log.write(\"privacy\", \"\\(meta: area.rawValue): blocked for agents again\")": 1,
         "Likely/AX.swift: if let id = string(element, kAXIdentifierAttribute) { line = \"\\(line) id=\\(meta: id)\" }": 1,
         "Likely/AX.swift: if let subrole = string(element, kAXSubroleAttribute) { line = \"\\(line) subrole=\\(meta: subrole)\" }": 1,
         "Likely/AX.swift: var line: LogMessage = \"\\(meta: string(element, kAXRoleAttribute) ?? \"?\")\"": 1,
