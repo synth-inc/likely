@@ -75,6 +75,7 @@
 
   var INV_OCT = f('Hosting invoice – October 2026.pdf', 'Oct 3, 2026 at 9:12 AM', '88 KB', 'PDF document', 'invoice');
   var INV_AUG = f('Hosting invoice – August 2026.pdf', 'Aug 3, 2026 at 9:10 AM', '87 KB', 'PDF document', 'invoice');
+  var INV_SEP = f('Hosting invoice – September 2026.pdf', 'Sep 3, 2026 at 9:11 AM', '88 KB', 'PDF document', 'invoice');
   var INV_MAR = f('Hosting invoice – March 2026.pdf', 'Mar 3, 2026 at 9:08 AM', '86 KB', 'PDF document', 'invoice');
 
   var SEARCHES = [
@@ -94,8 +95,8 @@
       quickLook: true },
     { cap: 3, query: 'the invoice from the hosting company',
       status: ['Searching Documents and Mail Downloads…', 'Reading PDFs…'],
-      found: [INV_OCT, INV_AUG, INV_MAR],
-      refine: { query: 'not that one, the one from March', status: ['Checking dates…'], keep: [INV_MAR] } }
+      found: [INV_OCT, INV_SEP, INV_AUG],
+      refine: { query: 'no, the one from March', status: ['Checking dates…'], keep: [INV_MAR] } }
   ];
 
   // The frame shown when the visitor prefers reduced motion: the tax forms, selected.
@@ -409,7 +410,7 @@
         cam('bar', CAMERA.bar);
         type(s.refine.query);
         submit({ status: s.refine.status }, s.found);
-        add({ type: 'rows', files: s.refine.keep, pop: false });
+        add({ type: 'rows', files: s.refine.keep, pop: true });   // the March invoice is new: it pops in
         lastStatus = null;
         add({ type: 'working', on: false });
         add({ type: 'status', s: s.refine.keep.length + ' found · <u>Not these</u>', tone: 'found' });
