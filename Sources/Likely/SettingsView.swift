@@ -19,6 +19,7 @@ struct SettingsView: View {
             AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }
             PromptSettings().tabItem { Label("Prompt", systemImage: "text.alignleft") }
             PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }
+            HistorySettings().tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
             #if LIKELY_DEV
             EvalsSettings().tabItem { Label("Evals", systemImage: "checklist") }
             #endif

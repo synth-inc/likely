@@ -46,6 +46,20 @@ final class EvalCaseStore: ObservableObject {
         write(EvalStorage.casesURL, id: oldID ?? c.id, with: c, released: old)
     }
 
+    /// Appends a case to cases.jsonl (EvalCaseFile.append, so lines this version can't read are kept).
+    @discardableResult
+    func append(_ c: EvalCase) -> Bool {
+        do {
+            try EvalCaseFile.append(c, to: EvalStorage.casesURL)
+            reload()
+            lastError = nil
+            return true
+        } catch {
+            lastError = "Couldn't save: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func delete(_ c: EvalCase) {
         write(EvalStorage.casesURL, id: c.id, with: nil, released: c)
     }

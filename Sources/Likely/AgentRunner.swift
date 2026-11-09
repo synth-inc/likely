@@ -117,8 +117,22 @@ final class CodexRunner: AgentRunner {
 
     /// Run without the user's ~/.codex/config.toml (their default model may not be available to
     /// ChatGPT sign-ins, and their MCP servers/hooks would slow things down). Auth is unaffected.
-    private static let baseArguments = ["--json", "--skip-git-repo-check", "--ignore-user-config",
-                                        "-c", "sandbox_mode=\"read-only\""]
+    /// Sandbox: a permission profile that extends Codex's built-in read-only one and also makes
+    /// Likely's search history unreadable (same paths as AgentSandbox.historyRules). Equivalent to
+    /// `sandbox_mode="read-only"` otherwise; the two can't be combined. Verified with
+    /// `codex sandbox` (codex-cli 0.153): reads under the denied paths fail with EPERM.
+    private static let baseArguments: [String] = {
+        let denied = AgentSandbox.historyDeniedPaths
+        let entries = (denied.folders + denied.files).map { "\(tomlString($0)) = \"none\"" }.joined(separator: ", ")
+        return ["--json", "--skip-git-repo-check", "--ignore-user-config",
+                "-c", "default_permissions=\"likely\"",
+                "-c", "permissions.likely.extends=\":read-only\"",
+                "-c", "permissions.likely.filesystem={ \(entries) }"]
+    }()
+
+    private static func tomlString(_ s: String) -> String {
+        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
         cancel()
