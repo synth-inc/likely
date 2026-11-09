@@ -20,12 +20,7 @@
 
 /* Desktop */
 .ld-wall { position: absolute; inset: 0;
-  background:
-    radial-gradient(60% 55% at 12% 18%, rgba(56, 125, 245, 0.55) 0%, rgba(56, 125, 245, 0) 70%),
-    radial-gradient(55% 60% at 88% 78%, rgba(124, 82, 230, 0.50) 0%, rgba(124, 82, 230, 0) 72%),
-    radial-gradient(45% 40% at 70% 15%, rgba(40, 170, 200, 0.30) 0%, rgba(40, 170, 200, 0) 70%),
-    radial-gradient(50% 45% at 25% 90%, rgba(220, 90, 150, 0.22) 0%, rgba(220, 90, 150, 0) 70%),
-    linear-gradient(160deg, #101A3A 0%, #141233 55%, #0C0F24 100%); }
+  background: radial-gradient(60% 60% at 20% 20%, #9B8CF2, transparent 70%), radial-gradient(60% 60% at 80% 80%, #F2A2C8, transparent 70%), linear-gradient(160deg, #3B2F6E, #6A4A9C); }
 .ld-menubar { position: absolute; left: 0; right: 0; top: 0; height: 25px;
   font-size: 13.1px; font-weight: 500; letter-spacing: 0; color: #fff; }
 .ld-menubar .ld-mi { position: absolute; top: 4.1px; line-height: 16px; white-space: nowrap; }

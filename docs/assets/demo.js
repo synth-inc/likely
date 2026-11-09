@@ -606,7 +606,8 @@
     var wall = host.querySelector('.ld-wall');
     var KEY = 'likely-demo-wall';
     var i = 0;
-    try { i = Math.min(WALLS.length - 1, Math.max(0, +localStorage.getItem(KEY) || 0)); } catch (e) {}
+    i = 6;   // Lavender haze, the chosen default
+    try { var saved = localStorage.getItem(KEY); if (saved !== null) i = Math.min(WALLS.length - 1, Math.max(0, +saved)); } catch (e) {}
     var bar = document.createElement('div');
     bar.className = 'ld-wallpicker';
     bar.innerHTML = '<button type="button" data-d="-1" aria-label="Previous background">‹</button><span></span><button type="button" data-d="1" aria-label="Next background">›</button>';
