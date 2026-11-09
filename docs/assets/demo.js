@@ -390,7 +390,7 @@
     // 1. The dialog opens on the Likely folder: recent files, newest screenshot first.
     cam('wide', 1);
     add({ type: 'cap', i: 0 });
-    open(TIMING.recentHold, TIMING.camIntroAt, function () { cam('list', CAMERA.recent, TIMING.camIntro); });
+    open(TIMING.recentHold, TIMING.camIntroAt, function () {});   // the first dialog stays wide (no intro drift)
     SEARCHES.forEach(function (s, n) {
       if (n > 0) { wait(TIMING.betweenSearches); open(TIMING.focusDelay, TIMING.camBarLead, function () { cam('bar', CAMERA.bar); }); }
       else cam('bar', CAMERA.bar);
