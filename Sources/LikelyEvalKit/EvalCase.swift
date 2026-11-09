@@ -11,7 +11,7 @@ public struct EvalCase: Codable, Identifiable, Hashable {
     public var context: Context?
     public var expect: Expectation
     public var tags: [String]
-    /// "manual", "captured" or "fixture".
+    /// "manual", "captured", "history" or "fixture".
     public var source: String?
     public var notes: String?
     /// ISO 8601.
@@ -29,15 +29,20 @@ public struct EvalCase: Codable, Identifiable, Hashable {
         public var screenshot: String?
         /// The picker's confirm button ("Open", "Upload", …), if known.
         public var button: String?
+        /// The user's name, sent as `{{userName}}`. Unset: personal cases send no name; fixture cases
+        /// (`source: "fixture"`) use the synthetic persona, "Jordan Rivera".
+        public var userName: String?
 
-        public init(app: String? = nil, windowTitle: String? = nil, screenshot: String? = nil, button: String? = nil) {
+        public init(app: String? = nil, windowTitle: String? = nil, screenshot: String? = nil, button: String? = nil,
+                    userName: String? = nil) {
             self.app = app
             self.windowTitle = windowTitle
             self.screenshot = screenshot
             self.button = button
+            self.userName = userName
         }
 
-        public var isEmpty: Bool { app == nil && windowTitle == nil && screenshot == nil && button == nil }
+        public var isEmpty: Bool { app == nil && windowTitle == nil && screenshot == nil && button == nil && userName == nil }
     }
 
     public init(id: String, query: [String], context: Context? = nil, expect: Expectation, tags: [String] = [],
@@ -214,7 +219,7 @@ public enum EvalCaseFile {
     public static func parse(_ text: String) -> (cases: [EvalCase], errors: [LoadError]) {
         var cases: [EvalCase] = []
         var errors: [LoadError] = []
-        for (index, raw) in text.components(separatedBy: .newlines).enumerated() {
+        for (index, raw) in splitLines(text).enumerated() {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") || line.hasPrefix("//") { continue }
             do {
@@ -224,6 +229,12 @@ public enum EvalCaseFile {
             }
         }
         return (cases, errors)
+    }
+
+    /// Lines split on "\n" only, with a trailing "\r" dropped. Not `.newlines`: JSONEncoder leaves
+    /// U+2028, U+2029 and U+0085 unescaped inside strings, so splitting on those would cut a line in half.
+    public static func splitLines(_ text: String) -> [String] {
+        text.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
     }
 
     public static func encodeLine(_ c: EvalCase) -> String {

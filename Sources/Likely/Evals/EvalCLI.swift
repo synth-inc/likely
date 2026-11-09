@@ -9,6 +9,9 @@ import LikelyEvalKit
 /// Likely folder: FILE lines go to a dry-run sink that records what Likely would have shown.
 /// See docs/EVALS.md.
 enum EvalCLI {
+    /// The made-up person the fixture files belong to (evals/fixtures/generate.py).
+    static let fixturePersona = "Jordan Rivera"
+
     static let usage = """
     Usage: Likely --eval <fixtures|personal|all|cases.jsonl> [options]
 
@@ -492,8 +495,11 @@ final class EvalCaseRun {
     func firstPrompt() -> String {
         applyEnvironment()
         let context = evalCase.context
+        // Never the real user's name: the case's own, the fixture persona, or none.
+        let userName = context?.userName ?? (evalCase.source == "fixture" ? EvalCLI.fixturePersona : nil)
         let base = PromptBuilder.initial(PromptBuilder.Context(appName: context?.app ?? "an app", windowTitle: context?.windowTitle,
-                                                               buttonTitle: context?.button, screenshot: screenshot),
+                                                               buttonTitle: context?.button, screenshot: screenshot,
+                                                               userName: userName),
                                          imageAttached: agent.takesImages, template: template)
         var prompt = base
         if wantsIsolation, let folders = searchFolders {
@@ -506,7 +512,7 @@ final class EvalCaseRun {
         }
         lastPrompt = prompt
         let typed = evalCase.query.first.map { $0.isEmpty ? [] : [$0] } ?? []
-        return PromptBuilder.withTyped(prompt, typed: typed, autoMode: screenshot != nil)
+        return PromptBuilder.withTyped(prompt, typed: typed)
     }
 
     /// Search folders are process-wide (read synchronously while building the prompt and launching);

@@ -46,6 +46,20 @@ final class EvalCaseStore: ObservableObject {
         write(EvalStorage.casesURL, id: oldID ?? c.id, with: c, released: old)
     }
 
+    /// Appends a case to cases.jsonl (EvalCaseFile.append, so lines this version can't read are kept).
+    @discardableResult
+    func append(_ c: EvalCase) -> Bool {
+        do {
+            try EvalCaseFile.append(c, to: EvalStorage.casesURL)
+            reload()
+            lastError = nil
+            return true
+        } catch {
+            lastError = "Couldn't save: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func delete(_ c: EvalCase) {
         write(EvalStorage.casesURL, id: c.id, with: nil, released: c)
     }
@@ -393,7 +407,8 @@ struct EvalCaseEditor: View {
         c.id = typedID.isEmpty ? EvalCase.slug(queryList.first ?? "", fallback: "case") : typedID
         c.query = queryList
         let context = EvalCase.Context(app: app.isEmpty ? nil : app, windowTitle: windowTitle.isEmpty ? nil : windowTitle,
-                                       screenshot: screenshot.isEmpty ? nil : screenshot, button: c.context?.button)
+                                       screenshot: screenshot.isEmpty ? nil : screenshot, button: c.context?.button,
+                                       userName: c.context?.userName)
         c.context = context.isEmpty ? nil : context
         c.expect = Expectation.make(kind: paths.isEmpty ? .none : kind, paths: kind == .folder ? Array(paths.prefix(1)) : paths)
         c.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }

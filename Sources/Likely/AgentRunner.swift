@@ -1,4 +1,5 @@
 import Foundation
+import LikelyTools
 
 /// A coding agent run headless for one picker. Implementations parse the agent's streamed output into
 /// `STATUS:` progress, `FILE:` candidates and turn results, and accept follow-up feedback.
@@ -98,6 +99,10 @@ extension String {
 /// Unlike the other runners it isn't wrapped in AgentSandbox: Codex runs every command under its own
 /// Seatbelt policy (deny-by-default, no Apple Events, WindowServer or AX services), and macOS doesn't
 /// allow a sandboxed process to apply another sandbox, so an outer one would break Codex's.
+///
+/// Codex has no per-command allowlist: in `exec` mode it runs whatever command the model asks for,
+/// inside that read-only sandbox (no writes, no network). So the user's tools (ToolStore) need no
+/// permission here; they reach Codex through the prompt only.
 final class CodexRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -117,8 +122,22 @@ final class CodexRunner: AgentRunner {
 
     /// Run without the user's ~/.codex/config.toml (their default model may not be available to
     /// ChatGPT sign-ins, and their MCP servers/hooks would slow things down). Auth is unaffected.
-    private static let baseArguments = ["--json", "--skip-git-repo-check", "--ignore-user-config",
-                                        "-c", "sandbox_mode=\"read-only\""]
+    /// Sandbox: a permission profile that extends Codex's built-in read-only one and also makes
+    /// Likely's search history unreadable (same paths as AgentSandbox.historyRules). Equivalent to
+    /// `sandbox_mode="read-only"` otherwise; the two can't be combined. Verified with
+    /// `codex sandbox` (codex-cli 0.153): reads under the denied paths fail with EPERM.
+    private static let baseArguments: [String] = {
+        let denied = AgentSandbox.historyDeniedPaths
+        let entries = (denied.folders + denied.files).map { "\(tomlString($0)) = \"none\"" }.joined(separator: ", ")
+        return ["--json", "--skip-git-repo-check", "--ignore-user-config",
+                "-c", "default_permissions=\"likely\"",
+                "-c", "permissions.likely.extends=\":read-only\"",
+                "-c", "permissions.likely.filesystem={ \(entries) }"]
+    }()
+
+    private static func tomlString(_ s: String) -> String {
+        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
         cancel()
@@ -172,9 +191,7 @@ final class CodexRunner: AgentRunner {
         process.currentDirectoryURL = workDir
         process.arguments = arguments
         var env = ProcessInfo.processInfo.environment
-        let dir = (executable as NSString).deletingLastPathComponent   // npm installs need `node` beside them
-        env["PATH"] = [dir, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env["PATH"] ?? ""]
-            .joined(separator: ":")
+        env["PATH"] = AgentPath.value(agentExecutable: executable, inherited: env["PATH"])
         process.environment = env
 
         let stdout = Pipe()

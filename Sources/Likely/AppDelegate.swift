@@ -2,11 +2,13 @@ import AppKit
 import ApplicationServices
 import OnboardingKit
 import SwiftUI
+import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
-    private let pauseItem = NSMenuItem(title: "Pause", action: #selector(togglePause), keyEquivalent: "")
+    private let jumpItem = NSMenuItem(title: "Jump to Likely Folder When a Picker Opens", action: #selector(toggleJump), keyEquivalent: "")
+    private let improveItem = NSMenuItem(title: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "")
 
     private let coordinator = Coordinator()
     private var debugWindow: NSWindow?
@@ -20,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The login-shell part of the lookup runs in the background (it can take seconds).
         ClaudeLocator.resolve { Log.write("app", "claude: \(ClaudeLocator.path ?? "not found")") }
         buildStatusItem()
+        toolApprovalChanged()   // loads tools.json; anything changed while Likely was closed shows up now
         if Updater.isEnabled { MainActor.assumeIsolated { Updater.shared.start() } }
 
         coordinator.verbose = Settings.verbose
@@ -70,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard Settings.onboarded else { return }
         if !started {
             startWhenTrusted()
-        } else if !coordinator.paused {
+        } else {
             stateItem.title = Self.watchingTitle
         }
         setIcon(.idle)
@@ -112,21 +115,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.setIcon(self.iconState)
         }
 
+        NotificationCenter.default.addObserver(forName: ToolStore.approvalNeeded, object: nil, queue: .main) { [weak self] _ in
+            self?.toolApprovalChanged()
+        }
+
         let menu = NSMenu()
         stateItem.isEnabled = false
         menu.addItem(stateItem)
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Open Likely Folder", action: #selector(openFolder), keyEquivalent: "").target = self
-        pauseItem.target = self
-        menu.addItem(pauseItem)
+        jumpItem.target = self
+        menu.addItem(jumpItem)
+        menu.delegate = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Make Last Search a Test…", action: #selector(makeLastSearchATest), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Debug View…", action: #selector(showDebugView), keyEquivalent: "d").target = self
+        improveItem.target = self
+        menu.addItem(improveItem)
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
         if Updater.isEnabled {
             menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
         }
         if MenuBarGlyph.isDebugEnabled {
+            menu.addItem(withTitle: "Debug View…", action: #selector(showDebugView), keyEquivalent: "d").target = self
             // Dev builds only: flip through the candidate menu bar glyphs in place.
             let debug = NSMenu()
             debug.addItem(withTitle: "Next Glyph", action: #selector(nextGlyph), keyEquivalent: "").target = self
@@ -151,26 +159,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .searching: symbol = "sparkle.magnifyingglass"
         case .done: symbol = "checkmark.circle"
         }
-        statusItem.button?.image = MenuBarGlyph.image(badge: state == .searching ? .dot : .none,
+        let approvalNeeded = !ToolStore.shared.pending.isEmpty
+        statusItem.button?.image = MenuBarGlyph.image(badge: state == .searching || approvalNeeded ? .dot : .none,
                                                       dimmed: Settings.onboarded && !License.isActive, fallbackSymbol: symbol)
+    }
+
+    /// tools.json changed outside Likely: badge the menu bar, retitle the Tools item, and post a
+    /// notification if Likely is allowed to (it never asks for that permission just for this).
+    private func toolApprovalChanged() {
+        let pending = ToolStore.shared.pending
+        improveItem.title = pending.isEmpty ? "Improve Results…" : "Approve Tool Changes…"
+        setIcon(iconState)
+        guard !pending.isEmpty, Bundle.main.bundleURL.pathExtension == "app" else { return }
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Approve tool changes"
+            content.body = "tools.json changed outside Likely: \(pending.map(\.tool.name).joined(separator: ", ")). Open Settings → Tools to review."
+            center.add(UNNotificationRequest(identifier: "tool-approval", content: content, trigger: nil))
+        }
     }
 
     @objc private func nextGlyph() { MenuBarGlyph.cycle(by: 1) }
     @objc private func previousGlyph() { MenuBarGlyph.cycle(by: -1) }
 
-    @objc private func openFolder() {
-        try? LikelyFolder.create()
-        NSWorkspace.shared.open(LikelyFolder.url)
-    }
-
     @objc private func checkForUpdates() {
         MainActor.assumeIsolated { Updater.shared.checkForUpdates() }
     }
 
-    @objc private func togglePause() {
-        coordinator.paused.toggle()
-        pauseItem.state = coordinator.paused ? .on : .off
-        stateItem.title = coordinator.paused ? "Paused" : Self.watchingTitle
+    /// Settings has the same switch, so the check mark is refreshed each time the menu opens.
+    func menuWillOpen(_ menu: NSMenu) {
+        jumpItem.state = Settings.openToLikely ? .on : .off
+    }
+
+    @objc private func toggleJump() {
+        Settings.openToLikely.toggle()
+        jumpItem.state = Settings.openToLikely ? .on : .off
+        Log.write("app", "jump to Likely folder when a picker opens: \(Settings.openToLikely)")
     }
 
     @objc private func showDebugView() {
@@ -185,18 +211,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         debugWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    @objc private func makeLastSearchATest() {
-        guard let run = DebugStore.shared.runs.first(where: { $0.prompt != nil }) else {
-            let alert = NSAlert()
-            alert.messageText = "No search yet"
-            alert.informativeText = "Open a file picker and let Likely search first. Then you can save that search as a test."
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
-            return
-        }
-        showTestEditor(for: run)
     }
 
     /// The eval test editor in its own small window, prefilled from a run.
@@ -214,6 +228,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         testWindow = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Settings on the Tools tab: extra tools such as photo search give the agent better results.
+    @objc private func showToolSettings() {
+        SettingsNavigation.shared.tab = .tools
+        showSettings()
     }
 
     @objc private func showSettings() {
