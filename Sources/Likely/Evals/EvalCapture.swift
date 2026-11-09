@@ -20,7 +20,7 @@ enum EvalCapture {
 
     /// Saves a case (or, without a known pick, a draft). Nothing is saved if there's nothing to replay
     /// (no typed query and no screenshot).
-    static func saveCaptured(app: String, windowTitle: String?, button: String?, queries: [String], screenshot: URL?,
+    static func saveCaptured(app: String, windowTitle: String?, button: String?, queries: [String], screenshot: Data?,
                           picked: [String], how: String, suggested: [String]) {
         guard !queries.isEmpty || screenshot != nil else {
             Log.write("evals", "picked without typing or a screenshot, not saved")
@@ -31,15 +31,9 @@ enum EvalCapture {
         let stamp = Self.stamp()
         let id = EvalCaseFile.uniqueID(EvalCase.slug(queries.first ?? app, fallback: "captured") + "-" + stamp, existing: existing + cases)
 
-        var screenshotPath: String?
-        if let screenshot {
-            // The live screenshot is overwritten by the next picker: keep a copy with the case.
-            let copy = EvalStorage.screenshotsURL.appendingPathComponent("\(id).png")
-            try? FileManager.default.createDirectory(at: EvalStorage.screenshotsURL, withIntermediateDirectories: true)
-            // copyItem fails if the file exists (a leftover from a case that was removed by hand).
-            try? FileManager.default.removeItem(at: copy)
-            if (try? FileManager.default.copyItem(at: screenshot, to: copy)) != nil { screenshotPath = copy.path }
-        }
+        // The live screenshot is deleted when the picker closes: keep an encrypted copy with the case
+        // (evals/screenshots/<id>.png.enc).
+        let screenshotPath = screenshot.flatMap { EvalCaseStore.keepScreenshot(png: $0, id: id) }
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let tilde: (String) -> String = { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 }
@@ -55,7 +49,7 @@ enum EvalCapture {
         } else {
             tags.append(EvalCase.needsExpectedTag)
         }
-        if screenshot != nil { tags.append("screenshot") }
+        if screenshotPath != nil { tags.append("screenshot") }
         if queries.count > 1 { tags.append("multi-turn") }
 
         var notes = "Captured \(how)."

@@ -70,7 +70,8 @@ final class ClaudeRunner: AgentRunner {
         // a tool read-only, the sandbox can.
         let profile = userCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.claudeProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
-                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path])
         process.executableURL = launcher
         process.arguments = launchArguments
 

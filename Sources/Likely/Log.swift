@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 import os
 
 /// Appends timestamped lines to ~/Library/Logs/Likely/likely.log, the unified log, and stderr.
@@ -6,7 +7,7 @@ enum Log {
     static let fileURL: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/Likely", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? OwnerOnly.createDirectory(dir)   // 0700; the file is 0600 (see `write`)
         return dir.appendingPathComponent("likely.log")
     }()
 
@@ -27,12 +28,10 @@ enum Log {
         let data = Data(line.utf8)
         if echoToStderr { FileHandle.standardError.write(data) }
         queue.async {
-            if let handle = try? FileHandle(forWritingTo: fileURL) {
-                handle.seekToEndOfFile()
+            // Created owner-only (0600); appends go to the end.
+            if let handle = try? OwnerOnly.openForWriting(fileURL, truncate: false) {
                 handle.write(data)
                 try? handle.close()
-            } else {
-                try? data.write(to: fileURL)
             }
         }
     }

@@ -1,10 +1,12 @@
 import AppKit
 import LikelyEvalKit
+import LikelyStorage
 import SwiftUI
 
 /// Every search Likely ran (History/history.jsonl next to the evals folder, last 500), so any of them
 /// can be made into an eval case later. On this Mac only; never sent anywhere, and the agents' sandboxes
-/// can't read it (AgentSandbox.historyRules, CodexRunner). "Save search history" in Settings → History,
+/// can't read it (AgentSandbox.protectionRules, CodexRunner). Each line is encrypted with the data key
+/// in the Keychain (SearchHistoryFile, DataProtection.cipher). "Save search history" in Settings → History,
 /// on by default, independent of "Automatically save picks as tests".
 ///
 /// All file access goes through one serial background queue, so recording a search never blocks the
@@ -26,21 +28,33 @@ final class SearchHistoryStore: ObservableObject {
     }
 
     let url = SearchHistoryFile.defaultURL
+    private let cipher = DataProtection.cipher
+    static let unreadableMessage = "History can't be read by this build"
     private let queue = DispatchQueue(label: "inc.synth.likely.history", qos: .utility)
     /// Newest first. Only kept current while the History tab is visible.
     @Published private(set) var entries: [SearchHistoryEntry] = []
     /// Whether history.jsonl exists, even if none of its lines decode (Clear and Show File use this).
     @Published private(set) var fileExists = false
     @Published var lastError: String?
+    /// Saved searches this build can't open (encrypted by another build of Likely, or its key is
+    /// unavailable), with why. They're kept in the file, never wiped.
+    @Published private(set) var unreadableNote: String?
     /// History tabs on screen (Settings may be closed and reopened).
     private var visibleCount = 0
 
     private init() {
-        queue.async { [url] in
+        queue.async { [url, cipher] in
             do {
                 try SearchHistoryFile.migrate(from: SearchHistoryFile.legacyURL, to: url)
             } catch {
                 Log.write("history", "couldn't move history.jsonl into History/: \(error)")
+            }
+            // History saved before encryption: encrypted in place, once (only plaintext lines change).
+            do {
+                let count = try SearchHistoryFile.encryptPlaintext(url, cipher: cipher)
+                if count > 0 { Log.write("history", "encrypted \(count) saved search(es)") }
+            } catch {
+                Log.write("history", "couldn't encrypt saved searches, left as they are: \(error)")
             }
         }
     }
@@ -61,20 +75,31 @@ final class SearchHistoryStore: ObservableObject {
     func reload() {
         queue.async { [url] in
             let exists = FileManager.default.fileExists(atPath: url.path)
-            let result = Result { try SearchHistoryFile.load(url) }
+            let result = Result { try SearchHistoryFile.read(url, cipher: self.cipher) }
             DispatchQueue.main.async {
                 guard self.visibleCount > 0 else { return }
                 self.fileExists = exists
                 switch result {
-                case .success(let list):
-                    self.entries = list.reversed()
+                case .success(let contents):
+                    self.entries = contents.entries.reversed()
+                    self.unreadableNote = Self.note(for: contents)
                     if self.lastError?.hasPrefix("Couldn't read") == true { self.lastError = nil }
                 case .failure(let error):
                     self.entries = []
+                    self.unreadableNote = nil
                     self.lastError = "Couldn't read the history file: \(error.localizedDescription)"
                 }
             }
         }
+    }
+
+    static func note(for contents: SearchHistoryFile.Contents) -> String? {
+        guard contents.unreadable > 0 else { return nil }
+        let why = contents.problem.map { " (\($0))" } ?? ""
+        if contents.entries.isEmpty {
+            return unreadableMessage + why + ". It's kept as it is; the build that saved it can still read it."
+        }
+        return "\(contents.unreadable) saved search\(contents.unreadable == 1 ? "" : "es") can't be read by this build\(why). They're kept as they are."
     }
 
     // MARK: Writes
@@ -83,9 +108,9 @@ final class SearchHistoryStore: ObservableObject {
     /// nothing is written (SearchHistoryFile.append throws first), so a bad read never wipes it.
     func record(_ entry: SearchHistoryEntry) {
         guard Self.isEnabled else { return }
-        queue.async { [url] in
+        queue.async { [url, cipher] in
             do {
-                try SearchHistoryFile.append(entry, to: url)
+                try SearchHistoryFile.append(entry, to: url, cipher: cipher)
                 Log.write("history", "saved search (\(entry.suggested.count) suggested, \(entry.picked.isEmpty ? "no pick" : "picked"))")
                 DispatchQueue.main.async {
                     let defaults = UserDefaults.standard
@@ -94,7 +119,9 @@ final class SearchHistoryStore: ObservableObject {
                 }
             } catch {
                 Log.write("history", "couldn't save search, history left as is: \(error)")
-                DispatchQueue.main.async { self.lastError = "Couldn't save the last search: \(error.localizedDescription)" }
+                let message = (error as? DataCipher.CipherError).map { "Couldn't save the last search: \($0)." }
+                    ?? "Couldn't save the last search: \(error.localizedDescription)"
+                DispatchQueue.main.async { self.lastError = message }
             }
         }
     }
@@ -113,6 +140,7 @@ final class SearchHistoryStore: ObservableObject {
         switch result {
         case .success:
             lastError = nil
+            unreadableNote = nil
             entries = []
             fileExists = false
         case .failure(let error):
@@ -123,7 +151,7 @@ final class SearchHistoryStore: ObservableObject {
     /// Marks the entry as made into `caseID`. Returns an error message if it couldn't be (including
     /// when the entry is no longer in the file, e.g. it aged out or history was cleared meanwhile).
     func markEval(entryID: String, caseID: String) -> String? {
-        let result = queue.sync { [url] in Result { try SearchHistoryFile.update(id: entryID, in: url) { $0.evalCaseID = caseID } } }
+        let result = queue.sync { [url] in Result { try SearchHistoryFile.update(id: entryID, in: url, cipher: cipher) { $0.evalCaseID = caseID } } }
         let message: String?
         switch result {
         case .success(let updated?):
@@ -190,6 +218,7 @@ struct HistorySettings: View {
                             .multilineTextAlignment(.center).foregroundStyle(.secondary).padding(30)
                     }
                 }
+            if let note = store.unreadableNote { Text(note).font(.caption).foregroundStyle(.orange) }
             if let error = store.lastError { Text(error).font(.caption).foregroundStyle(.orange) }
             HStack {
                 Button("Clear History…") { confirmingClear = true }.disabled(!store.fileExists)

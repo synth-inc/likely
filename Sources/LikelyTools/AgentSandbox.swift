@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import LikelyEvalKit
+import LikelyStorage
 
 /// Seatbelt (`sandbox-exec`) rules shared by the agent runners.
 ///
@@ -17,9 +18,10 @@ import LikelyEvalKit
 /// - Accessibility: no `com.apple.axserver` (the AX client port; without it every AX call fails).
 /// - Screen Recording and synthetic input: no WindowServer, replayd or ScreenCaptureKit services.
 /// - No asking TCC directly either.
-/// - Search history: no reading (or writing) Likely's History folder, nor the file's pre-release
-///   location (`historyRules`). Codex isn't wrapped here; CodexRunner denies the same paths in its
-///   own sandbox.
+/// - Likely's own data: no reading or writing ~/Library/Application Support/Likely (search history,
+///   test cases and screenshots, eval runs, debug captures, tools.json) or ~/Library/Logs/Likely,
+///   except the run's own work folder (`protectionRules`). Codex isn't wrapped here; CodexRunner
+///   applies the same paths through its permission profile (`codexFilesystem`).
 /// Verified with a probe: under these rules AX reads of Finder fail (-25204), `screencapture` can't
 /// create an image, and AXIsProcessTrusted/CGPreflightScreenCaptureAccess report false.
 public enum AgentSandbox {
@@ -41,23 +43,34 @@ public enum AgentSandbox {
         (global-name "com.apple.coreservices.quarantine-resolver") (global-name "com.apple.dock.server")
         (global-name-prefix "com.apple.pasteboard."))
     (deny process-exec \(blockedExecutables.map { "(literal \(quoted($0)))" }.joined(separator: " ")))
-    \(historyRules)
     """
 
-    /// Real paths of what the agents must never read: the whole History folder (history.jsonl and
-    /// anything written next to it while saving) and the pre-release history.jsonl one level up.
-    public static var historyDeniedPaths: (folders: [String], files: [String]) {
-        // The parent folder exists once Likely has run; the History folder may not yet.
-        let support = realPath(SearchHistoryFile.defaultDirectory.deletingLastPathComponent().path)
-        let folder = SearchHistoryFile.defaultDirectory.lastPathComponent
-        let legacy = SearchHistoryFile.legacyURL.lastPathComponent
-        return ([support + "/" + folder], [support + "/" + legacy])
+    /// Every spelling of Likely's data folders seatbelt might see: the path itself, where it really is
+    /// (…/Likely is a link to …/Likely.noindex, see SpotlightExclusion) and the `.noindex` name, so
+    /// the rules hold before and after that move.
+    public static func dataDeniedPaths(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {
+        let realHome = realPath(home)
+        var paths: [String] = []
+        for folder in LikelyDataPaths.all(home: realHome) {
+            for path in [folder.path, realPath(folder.path), folder.path + SpotlightExclusion.suffix] where !paths.contains(path) {
+                paths.append(path)
+            }
+        }
+        return paths
     }
 
-    public static var historyRules: String {
-        let denied = historyDeniedPaths
-        let filters = denied.folders.map { "(subpath \(quoted($0)))" } + denied.files.map { "(literal \(quoted($0)))" }
-        return "(deny file-read* file-write* \(filters.joined(separator: " ")))"
+    /// Codex's equivalent of the data rules: a `permissions.<profile>.filesystem` table (TOML) where
+    /// Likely's folders are "none" and the run's work folder is "read" (the more specific path wins;
+    /// verified with `codex sandbox`, codex-cli 0.153).
+    public static func codexFilesystem(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+                                       readable: [String]) -> String {
+        let entries = dataDeniedPaths(home: home).map { "\(tomlString($0)) = \"none\"" }
+            + readable.map { "\(tomlString(realPath($0))) = \"read\"" }
+        return "{ " + entries.joined(separator: ", ") + " }"
+    }
+
+    static func tomlString(_ s: String) -> String {
+        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     /// For agents with their own write controls (Claude Code, Gemini CLI) while no user tools are
@@ -115,27 +128,50 @@ public enum AgentSandbox {
 
     /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
     /// `extraRules` (evals only, see EvalIsolation) come after the profile, so they win over it.
-    /// Every profile ends with `protectionRules`, so no agent can change Likely's own data or settings.
-    public static func wrap(executable: String, arguments: [String], profile: String, extraRules: String = "") -> (URL, [String]) {
+    /// Every profile ends with `protectionRules`, so no agent can read Likely's data (other than
+    /// `readable`, the run's work folder) or change Likely's data or settings.
+    public static func wrap(executable: String, arguments: [String], profile: String, extraRules: String = "",
+                            readable: [String] = []) -> (URL, [String]) {
         (URL(fileURLWithPath: "/usr/bin/sandbox-exec"),
-         ["-p", profile + (extraRules.isEmpty ? "" : "\n" + extraRules) + "\n" + protectionRules(), executable] + arguments)
+         ["-p", profile + (extraRules.isEmpty ? "" : "\n" + extraRules) + "\n" + protectionRules(readable: readable), executable] + arguments)
     }
 
     // MARK: Likely's own files
 
     public static let bundleID = "inc.synth.likely"
 
-    /// No writes to ~/Library/Application Support/Likely (tools.json, the agents' working folder, which
-    /// holds config some agents read on the next run) or Likely's preferences, neither as a file nor
-    /// through cfprefsd (`defaults write`). Last in the profile, so no earlier allow can override it.
+    /// Likely's data, last in the profile so no earlier allow can override it:
+    /// - No reading or writing ~/Library/Application Support/Likely (search history, test cases and
+    ///   their screenshots, eval runs and reports, debug captures, tools.json, the manifest) or
+    ///   ~/Library/Logs/Likely.
+    /// - Except reading `readable`: the run's work folder (…/Likely/run for searches, the case's own
+    ///   folder for evals), which holds what the agent is meant to see: the screenshot sent with this
+    ///   search (`context-<id>.png`), OpenCode's config dir, Gemini's settings file, Hermes's
+    ///   launchctl stub. Not its transcripts (`*.jsonl`).
+    /// - No writes there at all, nor to Likely's preferences, neither as a file nor through cfprefsd
+    ///   (`defaults write`).
+    ///
+    /// tools.json needs no exception: the agents get the user's tools in their prompt, and only the
+    /// user's own coding agent (not run by Likely) edits the file.
     public static func protectionRules(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                                       bundleID: String = bundleID) -> String {
+                                       bundleID: String = bundleID, readable: [String] = []) -> String {
         let realHome = realPath(home)
-        let support = realHome + "/Library/Application Support/Likely"
+        let data = dataDeniedPaths(home: home).map { "(subpath \(quoted($0)))" }.joined(separator: " ")
         let prefs = "^" + NSRegularExpression.escapedPattern(for: realHome + "/Library/Preferences/")
             + "(ByHost/)?" + NSRegularExpression.escapedPattern(for: bundleID) + #"(\..*)?\.plist"#
-        return """
-        (deny file-write* (subpath \(quoted(support))) (regex \(quoted(prefs))))
+        var rules = "(deny file-read* file-write* \(data))\n"
+        // …/Likely is a link to …/Likely.noindex: following it to the work folder needs the link's
+        // metadata (not a listing of the folder).
+        let roots = LikelyDataPaths.all(home: realHome).map { "(literal \(quoted($0.path)))" }.joined(separator: " ")
+        let allowed = readable.map(realPath)
+        if !allowed.isEmpty {
+            rules += "(allow file-read-metadata \(roots))\n"
+            rules += "(allow file-read* \(allowed.map { "(subpath \(quoted($0)))" }.joined(separator: " ")))\n"
+            let transcripts = allowed.map { "(regex \(quoted("^" + NSRegularExpression.escapedPattern(for: $0) + #"/.*\.jsonl$"#)))" }
+            rules += "(deny file-read* \(transcripts.joined(separator: " ")))\n"
+        }
+        return rules + """
+        (deny file-write* \(data) (regex \(quoted(prefs))))
         (deny user-preference-write (preference-domain \(quoted(bundleID))))
         """
     }

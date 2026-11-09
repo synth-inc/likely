@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// Runs Google's Gemini CLI: `gemini -p … -o stream-json`, authenticated through Vertex AI with the
@@ -116,7 +117,8 @@ final class GeminiRunner: AgentRunner {
         // With user tools enabled, also no writes outside ~/.gemini and temp folders.
         let profile = ToolStore.shared.activeCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.geminiProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
-                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path])
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -133,7 +135,7 @@ final class GeminiRunner: AgentRunner {
         env["GOOGLE_CLOUD_LOCATION"] = Self.vertexLocation
         // Our own settings layer (overrides ~/.gemini/settings.json without touching it).
         let settingsURL = workDir.appendingPathComponent("gemini-settings.json")
-        try? Self.settings.write(to: settingsURL)
+        try? OwnerOnly.write(Self.settings, to: settingsURL)
         env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = settingsURL.path
         process.environment = env
 

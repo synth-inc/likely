@@ -1,5 +1,6 @@
 import AppKit
 import LikelyEvalKit
+import LikelyStorage
 import SwiftUI
 
 /// Personal eval cases and drafts (~/Library/Application Support/Likely/evals), for Settings → Evals
@@ -108,14 +109,23 @@ final class EvalCaseStore: ObservableObject {
         if !used { try? FileManager.default.removeItem(atPath: standardized) }
     }
 
-    /// Copies a screenshot next to the cases (debug-view copies are deleted as runs roll over).
-    static func keepScreenshot(_ url: URL, id: String) -> String? {
-        let fm = FileManager.default
-        if url.path.hasPrefix(EvalStorage.screenshotsURL.path) { return url.path }
-        try? fm.createDirectory(at: EvalStorage.screenshotsURL, withIntermediateDirectories: true)
-        let copy = EvalStorage.screenshotsURL.appendingPathComponent("\(id).png")
-        try? fm.removeItem(at: copy)
-        return (try? fm.copyItem(at: url, to: copy)) != nil ? copy.path : nil
+    /// Keeps a screenshot with the cases, encrypted (evals/screenshots/<id>.png.enc). A path already
+    /// in that folder is kept as it is.
+    static func keepScreenshot(path: String, id: String) -> String? {
+        if URL(fileURLWithPath: path).standardizedFileURL.path.hasPrefix(EvalStorage.screenshotsURL.standardizedFileURL.path + "/") {
+            return path
+        }
+        guard let png = try? EvalScreenshots.load(path, cipher: DataProtection.cipher) else { return nil }
+        return keepScreenshot(png: png, id: id)
+    }
+
+    static func keepScreenshot(png: Data, id: String) -> String? {
+        do {
+            return try EvalScreenshots.save(png, id: id, cipher: DataProtection.cipher)
+        } catch {
+            Log.write("evals", "couldn't save the test's screenshot: \(error)")
+            return nil
+        }
     }
 }
 
@@ -251,6 +261,8 @@ struct EditorRequest: Identifiable {
     var mode: Mode
     /// Files Likely suggested in the run this comes from, offered as checkboxes.
     var suggestions: [String] = []
+    /// The run's screenshot (in memory), saved encrypted with the case if kept.
+    var screenshotPNG: Data?
 
     /// A new test prefilled from a picker run: typed queries, app, window title, screenshot,
     /// Likely's suggestions as checkboxes, and the user's pick (if Accessibility read it) checked.
@@ -261,10 +273,11 @@ struct EditorRequest: Identifiable {
         let c = EvalCase(id: EvalCase.slug(run.queries.first ?? run.appName, fallback: "case"),
                          query: run.queries,
                          context: EvalCase.Context(app: run.appName, windowTitle: run.windowTitle,
-                                                   screenshot: run.screenshotURL?.path, button: run.buttonTitle),
+                                                   screenshot: nil, button: run.buttonTitle),
                          expect: picked.count > 1 ? Expectation(allOf: picked) : Expectation(anyOf: picked.isEmpty ? nil : picked),
-                         tags: run.screenshotURL != nil ? ["screenshot"] : [], source: "manual")
-        return EditorRequest(evalCase: c, mode: .newCase, suggestions: run.files.filter(\.added).map(\.path))
+                         tags: run.screenshotPNG != nil ? ["screenshot"] : [], source: "manual")
+        return EditorRequest(evalCase: c, mode: .newCase, suggestions: run.files.filter(\.added).map(\.path),
+                             screenshotPNG: run.screenshotPNG)
     }
 }
 
@@ -279,6 +292,11 @@ struct EvalCaseEditor: View {
     @State private var app: String
     @State private var windowTitle: String
     @State private var screenshot: String
+    /// The run's screenshot, not saved yet (a new test from a picker run).
+    @State private var pendingPNG: Data?
+    /// The screenshot, decrypted in memory for the preview (nil: none, or it can't be read).
+    @State private var preview: NSImage?
+    @State private var previewProblem: String?
     @State private var kind: Expectation.Kind
     @State private var paths: [String]
     @State private var tags: String
@@ -295,6 +313,7 @@ struct EvalCaseEditor: View {
         _app = State(initialValue: c.context?.app ?? "")
         _windowTitle = State(initialValue: c.context?.windowTitle ?? "")
         _screenshot = State(initialValue: c.context?.screenshot ?? "")
+        _pendingPNG = State(initialValue: request.screenshotPNG)
         _kind = State(initialValue: c.expect.kind == .none ? .anyOf : c.expect.kind)
         _paths = State(initialValue: c.expect.paths)
         _tags = State(initialValue: c.tags.filter { $0 != EvalCase.needsExpectedTag }.joined(separator: ", "))
@@ -333,13 +352,23 @@ struct EvalCaseEditor: View {
                 }
                 TextField("App", text: $app, prompt: Text("Google Chrome"))
                 TextField("Window title", text: $windowTitle, prompt: Text("optional"))
-                if !screenshot.isEmpty {
+                if !screenshot.isEmpty || pendingPNG != nil {
                     LabeledContent("Screenshot") {
-                        HStack {
-                            Text(EvalPath.display(screenshot)).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
-                            Button("Remove") { screenshot = "" }
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let preview {
+                                Image(nsImage: preview).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 110)
+                                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(.separator))
+                            } else if let previewProblem {
+                                Text(previewProblem).font(.caption).foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text(screenshot.isEmpty ? "From this run (saved encrypted with the test)" : EvalPath.display(screenshot))
+                                    .font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                                Button("Remove") { screenshot = ""; pendingPNG = nil; preview = nil; previewProblem = nil }
+                            }
                         }
                     }
+                    .task(id: screenshot + (pendingPNG == nil ? "" : "+run")) { loadPreview() }
                 }
                 Picker("Expected", selection: $kind) {
                     Text("Any of these files").tag(Expectation.Kind.anyOf)
@@ -391,6 +420,26 @@ struct EvalCaseEditor: View {
         .frame(width: 600, height: 500)
     }
 
+    /// Decrypts the screenshot in memory for the preview; nothing decrypted is written anywhere.
+    private func loadPreview() {
+        if let pendingPNG {
+            preview = NSImage(data: pendingPNG)
+            previewProblem = nil
+            return
+        }
+        guard !screenshot.isEmpty else { return }
+        do {
+            preview = NSImage(data: try EvalScreenshots.load((screenshot as NSString).expandingTildeInPath, cipher: DataProtection.cipher))
+            previewProblem = preview == nil ? "Not an image" : nil
+        } catch let error as DataCipher.CipherError {
+            preview = nil
+            previewProblem = "This screenshot can't be read by this build: \(error)."
+        } catch {
+            preview = nil
+            previewProblem = "Can't read the screenshot: \(error.localizedDescription)"
+        }
+    }
+
     /// Suggestions first (best first), then anything else chosen.
     private var candidates: [String] {
         var list = request.suggestions.map(tilde)
@@ -424,7 +473,11 @@ struct EvalCaseEditor: View {
         case .newCase:
             c.id = EvalCaseFile.uniqueID(c.id, existing: store.cases)
             var copied: String?
-            if let shot = c.context?.screenshot, let kept = EvalCaseStore.keepScreenshot(URL(fileURLWithPath: shot), id: c.id) {
+            if let png = pendingPNG, let kept = EvalCaseStore.keepScreenshot(png: png, id: c.id) {
+                copied = kept
+                c.context = c.context ?? EvalCase.Context()
+                c.context?.screenshot = kept
+            } else if let shot = c.context?.screenshot, let kept = EvalCaseStore.keepScreenshot(path: shot, id: c.id) {
                 if kept != shot { copied = kept }
                 c.context?.screenshot = kept
             }

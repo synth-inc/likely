@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// Runs OpenCode: `opencode run --format json`, with the screenshot attached via `-f`. OpenCode has
@@ -43,13 +44,13 @@ final class OpenCodeRunner: AgentRunner {
     /// the agent runs can plant a config for the next run.
     private static func resetConfig(_ configHome: String) {
         let dir = URL(fileURLWithPath: configHome).appendingPathComponent("opencode")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? OwnerOnly.createDirectory(dir)
         let files = ["opencode.jsonc": #"{"$schema": "https://opencode.ai/config.json"}"#,
                      ".gitignore": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore\n"]
         for name in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where files[name] == nil {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
         }
-        for (name, text) in files { try? Data(text.utf8).write(to: dir.appendingPathComponent(name)) }
+        for (name, text) in files { try? OwnerOnly.write(Data(text.utf8), to: dir.appendingPathComponent(name)) }
     }
 
     static func permission(extra commands: [String]) -> String {
@@ -128,7 +129,8 @@ final class OpenCodeRunner: AgentRunner {
         let process = Process()
         // OpenCode keeps tools it downloads (ripgrep) in <data>/bin: runnable, but not writable inside the sandbox.
         let profile = AgentSandbox.confinedProfile(writable: writable, execAllowed: [dataDir + "/bin"])
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments, profile: profile, extraRules: launchOptions.extraSandboxRules)
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments, profile: profile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path])
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir

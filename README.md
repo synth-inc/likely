@@ -79,6 +79,12 @@ picker, Settings → History → Make Eval, Settings → Evals, or automatic sav
 
 Logs: `~/Library/Logs/Likely/likely.log` (menu → Verbose AX Logging logs every AX event).
 
+## Your data
+
+Everything Likely keeps stays on this Mac, owner-only, unreadable to the search agents and out of Spotlight;
+search history and saved test screenshots are encrypted. What's stored, where, and how to delete it:
+[docs/PRIVACY.md](docs/PRIVACY.md).
+
 ## License
 
 Likely is free software under the [GNU General Public License v3.0](LICENSE). The paid builds fund development;

@@ -3,6 +3,7 @@
 import AppKit
 import CryptoKit
 import LikelyEvalKit
+import LikelyStorage
 
 /// `Likely --eval …`: runs eval cases headlessly through the app's own prompt and agent runners, and
 /// writes results.json + report.html. No menu bar item, onboarding, AX watching or copying into the
@@ -343,7 +344,7 @@ final class EvalSession {
 
     func start() {
         do {
-            try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
+            try OwnerOnly.createDirectory(runDir)
         } catch {
             EvalCLI.fail("Can't create \(runDir.path): \(error)")
         }
@@ -358,7 +359,7 @@ final class EvalSession {
             let (index, item, attempt) = queue.removeFirst()
             let folder = EvalStorage.caseFolderName(index: index, id: item.evalCase.id, attempt: attempt, repeated: options.repeatCount > 1)
             let workDir = runDir.appendingPathComponent("cases/\(folder)", isDirectory: true)
-            try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+            try? OwnerOnly.createDirectory(workDir)
             let run = EvalCaseRun(item: item, agent: agent, template: template, options: options, attempt: attempt, workDir: workDir)
             running.append(run)
             run.start { [weak self, weak run] result in
@@ -420,11 +421,10 @@ final class EvalSession {
         var status: Int32 = interruptedBy.map { 128 + $0 } ?? 0
         do {
             try run.write(to: runDir.appendingPathComponent("results.json"))
-            try template.write(to: runDir.appendingPathComponent("prompt-template.txt"), atomically: true, encoding: .utf8)
+            try OwnerOnly.write(template, to: runDir.appendingPathComponent("prompt-template.txt"))
             let report = runDir.appendingPathComponent("report.html")
-            try EvalReport.html(run, previous: previous?.0, previousPath: previous?.1.path).write(to: report, atomically: true, encoding: .utf8)
-            try? FileManager.default.createDirectory(at: EvalStorage.root, withIntermediateDirectories: true)
-            try? report.path.write(to: EvalStorage.lastRunURL, atomically: true, encoding: .utf8)
+            try OwnerOnly.write(EvalReport.html(run, previous: previous?.0, previousPath: previous?.1.path), to: report)
+            try? OwnerOnly.write(report.path, to: EvalStorage.lastRunURL)
             print("")
             print(EvalReport.textSummary(run, previous: previous?.0))
             print("Report: \(report.path)")
@@ -473,9 +473,22 @@ final class EvalCaseRun {
     private var timeoutWork: DispatchWorkItem?
 
     private var evalCase: EvalCase { item.evalCase }
-    private var screenshot: URL? {
-        evalCase.context?.screenshot.map { URL(fileURLWithPath: EvalPath.resolve($0, relativeTo: item.base)) }
-    }
+    /// The case's screenshot as a file the agent can read. Saved test screenshots are encrypted
+    /// (evals/screenshots/*.png.enc, see EvalScreenshots): those are decrypted into a temporary 0600
+    /// file in this case's own folder (the one folder of Likely's its sandbox may read), deleted when
+    /// the case ends. Plain PNGs (the repo's fixtures) are used as they are.
+    private lazy var screenshot: URL? = {
+        guard let path = evalCase.context?.screenshot.map({ EvalPath.resolve($0, relativeTo: item.base) }) else { return nil }
+        do {
+            let file = try EvalScreenshots.materialize(path, in: workDir, cipher: DataProtection.cipher)
+            if file.isTemporary { temporaryScreenshot = file.url }
+            return file.url
+        } catch {
+            Log.write("eval", "\(evalCase.id): can't read the screenshot \(path): \(error)")
+            return nil
+        }
+    }()
+    private var temporaryScreenshot: URL?
     private var searchFolders: [String]? { evalCase.searchFolders?.map { EvalPath.resolve($0, relativeTo: item.base) } }
     /// The case asks for isolation: the prompt points at its folders only.
     private var wantsIsolation: Bool { options.isolate && searchFolders != nil }
@@ -544,7 +557,7 @@ final class EvalCaseRun {
     func start(completion: @escaping (EvalCaseResult) -> Void) {
         self.completion = completion
         let prompt = firstPrompt()
-        try? prompt.write(to: workDir.appendingPathComponent("prompt.txt"), atomically: true, encoding: .utf8)
+        try? OwnerOnly.write(prompt, to: workDir.appendingPathComponent("prompt.txt"))
         if wantsIsolation, !agent.canIsolate {
             Log.write("eval", "\(evalCase.id): Codex runs under its own sandbox, so this case is not isolated (prompt only)")
         }
@@ -606,6 +619,7 @@ final class EvalCaseRun {
         timeoutWork?.cancel()
         runner?.cancel()
         runner = nil
+        if let temporaryScreenshot { try? FileManager.default.removeItem(at: temporaryScreenshot) }
         let total = Date().timeIntervalSince(started)
         let transcript = workDir.appendingPathComponent("last-run.jsonl")
         let transcriptCopy = workDir.appendingPathComponent("transcript.jsonl")

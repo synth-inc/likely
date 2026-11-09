@@ -1,4 +1,5 @@
 import AppKit
+import LikelyStorage
 import ApplicationServices
 import LikelyEvalKit
 
@@ -26,9 +27,15 @@ final class Coordinator {
     /// The screenshot for this picker's search, written when the user submits it (with "Send a
     /// screenshot with searches" on and Screen Recording allowed).
     private var captureTask: Task<WindowCapture.Result?, Never>?
-    /// This picker's screenshot file, removed when it closes. One per run, so a late capture can't
-    /// overwrite another picker's.
+    /// This picker's screenshot file. One per run, so a late capture can't overwrite another picker's.
+    /// It's on disk only while an agent may read it: removed as soon as a turn finishes (the PNG is
+    /// kept in memory, `screenshotPNG`), written again before a follow-up turn (feedback typed while
+    /// the picker is open: the agent may look at it again, and an agent relaunched because its process
+    /// died gets it attached again), and removed for good when the picker closes.
     private var screenshotURL: URL?
+    /// The screenshot's PNG, in memory until the picker closes (for follow-ups, "Save as test" and
+    /// automatic test capture, which encrypts its copy).
+    private var screenshotPNG: Data?
 
     enum State { case idle, searching, done }
 
@@ -79,7 +86,7 @@ final class Coordinator {
     init() {
         supportDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely", isDirectory: true)
-        try? FileManager.default.createDirectory(at: supportDirectory.appendingPathComponent("run"), withIntermediateDirectories: true)
+        try? OwnerOnly.createDirectory(supportDirectory.appendingPathComponent("run"))
         Self.removeScreenshots(in: supportDirectory.appendingPathComponent("run"))
         Settings.migrate()
         folder = LikelyFolder(supportDirectory: supportDirectory)
@@ -314,9 +321,10 @@ final class Coordinator {
                       Settings.sendScreenshot else { return nil }
                 let capture = try WindowCapture.save(image, to: url)
                 self.screenshotURL = url
+                self.screenshotPNG = capture.png
                 Log.write("capture", "\(capture.mode) title=\(capture.windowTitle ?? "-")")
                 if let title = capture.windowTitle { debugRun.windowTitle = title }
-                DebugStore.shared.attachScreenshot(url, mode: capture.mode, to: debugRun)
+                DebugStore.shared.attachScreenshot(capture.png, mode: capture.mode, to: debugRun)
                 debugRun.log("Screenshot: \(capture.mode)")
                 return capture
             } catch {
@@ -338,6 +346,22 @@ final class Coordinator {
         if forgetSnapshot { snapshotter.discard() }
         if let screenshotURL { try? FileManager.default.removeItem(at: screenshotURL) }
         screenshotURL = nil
+        screenshotPNG = nil
+    }
+
+    /// After a turn: the agent has answered, so the file goes (the PNG stays in memory).
+    private func removeScreenshotFile() {
+        if let screenshotURL { try? FileManager.default.removeItem(at: screenshotURL) }
+    }
+
+    /// Before a follow-up turn: puts the file back where the agent was told it is.
+    private func restoreScreenshotFile() {
+        guard let screenshotURL, let screenshotPNG, !FileManager.default.fileExists(atPath: screenshotURL.path) else { return }
+        do {
+            try OwnerOnly.write(screenshotPNG, to: screenshotURL)
+        } catch {
+            Log.write("capture", "couldn't write the screenshot again for a follow-up: \(error)")
+        }
     }
 
     /// The most recently added files, cloned into the Likely folder right away (no agent involved).
@@ -452,7 +476,7 @@ final class Coordinator {
         guard EvalCapture.isEnabled, isLicensed(), how.hasPrefix("confirmed") else { return (picked, how) }
         EvalCapture.saveCaptured(app: picker.appName, windowTitle: debugRun?.windowTitle ?? picker.windowTitle,
                                  button: picker.buttonTitle, queries: typedQueries,
-                                 screenshot: screenshotURL, picked: picked, how: how,
+                                 screenshot: screenshotPNG, picked: picked, how: how,
                                  suggested: debugRun?.files.filter(\.added).map(\.path) ?? [])
         return (picked, how)
     }
@@ -562,8 +586,10 @@ final class Coordinator {
             message = "Done – found \(foundCount) file\(foundCount == 1 ? "" : "s")"
         }
         Log.write("agent", "\(message) cost=\(outcome.costUSD.map { String(format: "$%.4f", $0) } ?? "?")")
-        // Done: drop the status file so only real suggestions are left in the folder.
+        // Done: drop the status file so only real suggestions are left in the folder, and the
+        // screenshot file (kept in memory in case the user follows up).
         folder.removeStatus()
+        removeScreenshotFile()
         debugRun?.outcome = message + (outcome.costUSD.map { String(format: " · $%.4f", $0) } ?? "")
         debugRun?.log(message)
         hud.model.working = false
@@ -622,6 +648,7 @@ final class Coordinator {
         hud.model.working = true
         onStateChange?(.searching, status)
 
+        restoreScreenshotFile()
         if runner.send(message) { return }
         if let lastPrompt, let agent = chosenAgent() {
             // The agent's conversation is gone (crashed or never started); start over with the feedback attached.

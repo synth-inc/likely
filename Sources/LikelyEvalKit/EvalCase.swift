@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 
 /// One eval case: what the user typed (and where), and which file(s) they actually wanted.
 /// Stored one per line in a JSON Lines file. The format is documented in docs/EVALS.md.
@@ -256,8 +257,7 @@ public enum EvalCaseFile {
         let fm = FileManager.default
         let text = fm.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : ""
         let updated = replacing(id: id, with: replacement, in: text)
-        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try updated.write(to: url, atomically: true, encoding: .utf8)
+        try OwnerOnly.write(Data(updated.utf8), to: url)
     }
 
     /// The text of a cases file with one case replaced or removed (see `replace(id:with:in:)`).
@@ -284,12 +284,11 @@ public enum EvalCaseFile {
     /// Adds one case at the end of the file. The file is created only if it doesn't exist; an
     /// existing file is never truncated.
     public static func append(_ c: EvalCase, to url: URL) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if !fm.fileExists(atPath: url.path) {
-            // Fails (rather than truncating) if another writer created it in the meantime.
-            let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL, 0o644)
-            if fd >= 0 { close(fd) } else if errno != EEXIST { throw WriteError("Can't create \(url.path): \(String(cString: strerror(errno)))") }
+        // Owner-only (0600) from creation; never truncates a file another writer created meanwhile.
+        do {
+            try OwnerOnly.createExclusive(url)
+        } catch {
+            throw WriteError("\(error)")
         }
         let handle = try FileHandle(forUpdating: url)
         defer { try? handle.close() }

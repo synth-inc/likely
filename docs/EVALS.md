@@ -150,7 +150,9 @@ model is weak.
 
 With **Settings → Evals → "Automatically save picks as tests"** turned on (off by default in every build),
 each confirmed pick becomes a case in `cases.jsonl` right away, with no approval step: what you typed,
-the app, the window title, the screenshot (if one was taken, copied to `…/evals/screenshots/`), and the
+the app, the window title, the screenshot (if one was taken, saved encrypted as `…/evals/screenshots/<id>.png.enc`;
+the case editor decrypts it in memory for its preview, and an eval run decrypts it into a temporary 0600
+file in the case's own folder for the agent, deleted when the case ends), and the
 file(s) you picked. Captured cases have `"source": "captured"` and the tag `captured`, so they're easy to
 filter, edit or delete in Settings → Evals. Nothing is recorded for cancelled pickers, or when you neither
 typed anything nor had a screenshot. If the pick can't be read, it stays out of your tests: it's logged
@@ -188,9 +190,14 @@ typed in input-first mode, or no license), and a picker still open when Likely q
 **Privacy.** History never leaves the Mac and isn't included in eval runs.
 - The folder is `0700` and the file `0600`. (Pre-release builds kept `history.jsonl` one level up; it's
   moved into `History/` on launch.)
-- No search agent can read it: every `sandbox-exec` profile (`AgentSandbox.historyRules`) denies the
-  `History` folder and the old path, and Codex gets a permission profile that extends its built-in
-  read-only one with the same paths set to `"none"` (`CodexRunner.baseArguments`).
+- No search agent can read it: every `sandbox-exec` profile (`AgentSandbox.protectionRules`) denies all of
+  `~/Library/Application Support/Likely` and `~/Library/Logs/Likely` except the run's work folder, and Codex
+  gets a permission profile that extends its built-in read-only one with the same paths set to `"none"`
+  (`AgentSandbox.codexFilesystem`). See [PRIVACY.md](PRIVACY.md).
+- Each line is encrypted (AES-GCM, with a key in the Keychain): `lk1:<key id>:<base64>`. History saved
+  by an older version is encrypted in place on first launch. A build that can't read the key (a dev build
+  reading a release build's history, or the other way round) says "History can't be read by this build"
+  and leaves those lines alone.
 - The first time a search is recorded, Settings → History shows a short line about it (until you click
   OK), and the next picker's bar shows the same line once: "Likely keeps a private history of your
   searches on this Mac so you can turn them into tests. Turn it off in Settings → History."

@@ -6,6 +6,11 @@ import AppKit
 if EvalCLI.isRequested(CommandLine.arguments) { EvalCLI.main(CommandLine.arguments) }
 #endif
 
+// Owner-only permissions, Spotlight exclusion, release builds' debug screenshots: before the
+// coordinator (created with the delegate) touches the folders. Then encrypt older plaintext data.
+DataProtection.prepareAtLaunch()
+DataProtection.migrateInBackground()
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

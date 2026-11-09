@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 
 /// A FILE: line Likely would not have shown (missing file, sensitive path, Likely's own file, …).
 public struct EvalRefusal: Codable, Hashable {
@@ -168,7 +169,7 @@ public struct EvalRun: Codable {
     public func write(to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try encoder.encode(self).write(to: url, options: .atomic)
+        try OwnerOnly.write(try encoder.encode(self), to: url)
     }
 
     /// What differs between two runs' settings that makes their scores hard to compare

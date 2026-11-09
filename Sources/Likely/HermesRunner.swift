@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// Runs Nous Research's Hermes Agent: `hermes chat -q … --format stream-json` in its own `likely`
@@ -128,7 +129,8 @@ final class HermesRunner: AgentRunner {
 
         let process = Process()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: Self.baseArguments + arguments,
-                                                             profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path])
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -213,7 +215,7 @@ final class HermesRunner: AgentRunner {
             if !textSinceTool { AgentProtocol.parse(text: event["text"] as? String ?? "", onStatus: onStatus, onFile: reportFile) }
             turnEnded = true
             isBusy = false
-            if launchOptions.isEval { Self.noteEvalGateway(rules: launchOptions.extraSandboxRules) }
+            if launchOptions.isEval, let workDir { Self.noteEvalGateway(rules: Self.gatewayRules(launchOptions, workDir: workDir)) }
             let exitCode = event["exit_code"] as? Int ?? 1
             if exitCode == 0 {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
@@ -325,9 +327,8 @@ extension HermesRunner {
         // which makes it start the gateway as a plain child process.
         let stub = stubDir(workDir).appendingPathComponent("launchctl")
         if !fm.isExecutableFile(atPath: stub.path) {
-            try? fm.createDirectory(at: stubDir(workDir), withIntermediateDirectories: true)
-            try? "#!/bin/sh\n[ \"$1\" = print ] && exit 113\nexit 1\n".write(to: stub, atomically: true, encoding: .utf8)
-            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+            // Owner-only, executable (0700) from creation.
+            try? OwnerOnly.write(Data("#!/bin/sh\n[ \"$1\" = print ] && exit 113\nexit 1\n".utf8), to: stub, mode: OwnerOnly.executableMode)
         }
 
         let config = profileDir.appendingPathComponent("config.yaml")
@@ -352,11 +353,17 @@ extension HermesRunner {
            (json["served_profiles"] as? [String])?.contains(profileName) == true {
             return "Your Hermes gateway is serving the \(profileName) profile; restart it with: hermes gateway restart"
         }
-        if options.isEval, let problem = prepareEvalGateway(executable: executable, rules: options.extraSandboxRules) { return problem }
+        if options.isEval, let problem = prepareEvalGateway(executable: executable, rules: gatewayRules(options, workDir: workDir)) { return problem }
         return nil
     }
 
     // MARK: Evals
+
+    /// What makes a gateway's sandbox: the eval's extra rules and the work folder it may read (each
+    /// case has its own, holding its screenshot), so a gateway is only reused by the same case.
+    static func gatewayRules(_ options: AgentLaunchOptions, workDir: URL) -> String {
+        options.extraSandboxRules + "\n; readable " + workDir.path
+    }
 
     /// The gateway inherits the sandbox of the client that started it, extra eval rules included, and
     /// then serves every later client. So an eval only reuses a gateway it started itself with the

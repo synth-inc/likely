@@ -1,4 +1,5 @@
 import AppKit
+import LikelyStorage
 import ScreenCaptureKit
 import UniformTypeIdentifiers
 
@@ -13,6 +14,8 @@ enum WindowCapture {
         let url: URL
         let windowTitle: String?
         let mode: String
+        /// The PNG as written, kept in memory so the file can go as soon as the agent is done with it.
+        let png: Data
     }
 
     struct Snapshot {
@@ -54,9 +57,11 @@ enum WindowCapture {
         return Image(image: snapshot.image, windowTitle: snapshot.title, mode: "pre-picker snapshot of window #\(snapshot.windowID), \(age) old")
     }
 
+    /// Encodes the PNG and writes it owner-only (0600 from creation).
     static func save(_ image: Image, to url: URL) throws -> Result {
-        try write(image.image, to: url)
-        return Result(url: url, windowTitle: image.windowTitle, mode: image.mode)
+        let png = try pngData(image.image)
+        try OwnerOnly.write(png, to: url)
+        return Result(url: url, windowTitle: image.windowTitle, mode: image.mode, png: png)
     }
 
     /// Fallback when there's no fresh snapshot. The picker may show up in the image.
@@ -98,12 +103,14 @@ enum WindowCapture {
         return config
     }
 
-    private static func write(_ image: CGImage, to url: URL) throws {
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+    private static func pngData(_ image: CGImage) throws -> Data {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.png.identifier as CFString, 1, nil) else {
             throw CaptureError.writeFailed
         }
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else { throw CaptureError.writeFailed }
+        return data as Data
     }
 }
 

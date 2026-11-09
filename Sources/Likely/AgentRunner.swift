@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// A coding agent run headless for one picker. Implementations parse the agent's streamed output into
@@ -37,12 +38,9 @@ struct AgentLaunchOptions {
 
 /// The raw JSON stream each runner saves to <workDir>/last-run.jsonl.
 enum AgentTranscript {
+    /// Owner-only (0600) from creation.
     static func open(_ url: URL, append: Bool) -> FileHandle? {
-        let fm = FileManager.default
-        if !append || !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
-        if append { _ = try? handle.seekToEnd() }
-        return handle
+        try? OwnerOnly.openForWriting(url, truncate: !append)
     }
 }
 
@@ -123,20 +121,16 @@ final class CodexRunner: AgentRunner {
     /// Run without the user's ~/.codex/config.toml (their default model may not be available to
     /// ChatGPT sign-ins, and their MCP servers/hooks would slow things down). Auth is unaffected.
     /// Sandbox: a permission profile that extends Codex's built-in read-only one and also makes
-    /// Likely's search history unreadable (same paths as AgentSandbox.historyRules). Equivalent to
-    /// `sandbox_mode="read-only"` otherwise; the two can't be combined. Verified with
-    /// `codex sandbox` (codex-cli 0.153): reads under the denied paths fail with EPERM.
-    private static let baseArguments: [String] = {
-        let denied = AgentSandbox.historyDeniedPaths
-        let entries = (denied.folders + denied.files).map { "\(tomlString($0)) = \"none\"" }.joined(separator: ", ")
-        return ["--json", "--skip-git-repo-check", "--ignore-user-config",
-                "-c", "default_permissions=\"likely\"",
-                "-c", "permissions.likely.extends=\":read-only\"",
-                "-c", "permissions.likely.filesystem={ \(entries) }"]
-    }()
-
-    private static func tomlString(_ s: String) -> String {
-        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    /// Likely's data unreadable, except the run's work folder (same paths as
+    /// AgentSandbox.protectionRules). Equivalent to `sandbox_mode="read-only"` otherwise; the two
+    /// can't be combined. Verified with `codex sandbox` (codex-cli 0.153): reads under the denied
+    /// paths fail with EPERM, the more specific "read" entry for the work folder wins.
+    /// The screenshot is attached with `-i`, which Codex itself reads (outside the sandbox).
+    private static func baseArguments(workDir: URL) -> [String] {
+        ["--json", "--skip-git-repo-check", "--ignore-user-config",
+         "-c", "default_permissions=\"likely\"",
+         "-c", "permissions.likely.extends=\":read-only\"",
+         "-c", "permissions.likely.filesystem=" + AgentSandbox.codexFilesystem(readable: [workDir.path])]
     }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
@@ -148,17 +142,17 @@ final class CodexRunner: AgentRunner {
         let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var arguments = ["exec"] + Self.baseArguments + ["-m", model, prompt]
+        var arguments = ["exec"] + Self.baseArguments(workDir: workDir) + ["-m", model, prompt]
         if let image { arguments += ["-i", image.path] }   // after the prompt: -i takes several values
         launch(arguments)
     }
 
     @discardableResult
     func send(_ text: String) -> Bool {
-        guard let threadID, executable != nil else { return false }
+        guard let threadID, executable != nil, let workDir else { return false }
         // No mid-turn input: stop the current turn (the conversation so far is kept) and resume.
         stopProcess()
-        launch(["exec", "resume"] + Self.baseArguments + ["-m", model, threadID, text])
+        launch(["exec", "resume"] + Self.baseArguments(workDir: workDir) + ["-m", model, threadID, text])
         return true
     }
 

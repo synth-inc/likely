@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 
 /// One search Likely ran for a picker: where, what the user typed, what the agent suggested, and what
 /// the user picked in the end. Kept locally (history.jsonl, one per line) so any past search can be
@@ -96,9 +97,16 @@ public struct SearchHistoryEntry: Codable, Identifiable, Hashable {
     }
 }
 
-/// Reads and writes history.jsonl. Lines that don't decode are skipped on load but left in place on
-/// rewrites, until they age out past the cap. A file that exists but can't be read (permissions,
-/// invalid UTF-8, I/O error) makes every call throw rather than start over with an empty file.
+/// Reads and writes history.jsonl. Every line is encrypted on its own (`DataCipher.sealLine`: AES-GCM
+/// with the data key from the Keychain), so the file is still JSON Lines in shape: "\n"-separated,
+/// one entry per line, appended and capped as before. Per line rather than per file because a line
+/// that can't be opened (damaged, or sealed by another build's key) is then skipped on its own and
+/// kept in place, exactly like a line that doesn't decode was before, and the rest still reads.
+///
+/// Lines that don't decode are skipped on load but left in place on rewrites, until they age out past
+/// the cap. A file that exists but can't be read (permissions, invalid UTF-8, I/O error) makes every
+/// call throw rather than start over with an empty file, and so does a missing key when writing:
+/// nothing is ever written in plaintext.
 public enum SearchHistoryFile {
     public static let defaultLimit = 500
 
@@ -117,20 +125,62 @@ public enum SearchHistoryFile {
         defaultDirectory.deletingLastPathComponent().appendingPathComponent("history.jsonl")
     }
 
+    /// What a read found: the entries this build can open, and how many lines it couldn't.
+    public struct Contents {
+        public var entries: [SearchHistoryEntry]
+        /// Encrypted lines that couldn't be opened (another build's key, no key, damaged).
+        public var unreadable: Int
+        /// Why the first of them couldn't be opened.
+        public var problem: DataCipher.CipherError?
+    }
+
     /// Moves `legacy` to `url` if there's nothing at `url` yet, with the new permissions.
     public static func migrate(from legacy: URL, to url: URL) throws {
         let fm = FileManager.default
         guard fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: url.path) else { return }
-        try prepareDirectory(for: url)
+        try OwnerOnly.createDirectory(url.deletingLastPathComponent())
         try fm.moveItem(at: legacy, to: url)
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    /// Entries oldest first (file order). No file means no entries; an unreadable file throws.
-    public static func load(_ url: URL) throws -> [SearchHistoryEntry] {
-        try rawLines(url).compactMap(decode)
+    /// Encrypts every plaintext line (history written before encryption), keeping the order and the
+    /// lines already encrypted as they are. Lines are sealed as they are, even ones that don't decode,
+    /// so nothing readable is left. Returns how many lines were encrypted; throws without writing if
+    /// the file can't be read or there's no key.
+    @discardableResult
+    public static func encryptPlaintext(_ url: URL, cipher: DataCipher) throws -> Int {
+        let all = try rawLines(url)
+        guard all.contains(where: { !DataCipher.isSealedLine($0) }) else { return 0 }
+        var count = 0
+        let sealed = try all.map { line -> String in
+            if DataCipher.isSealedLine(line) { return line }
+            count += 1
+            return try cipher.sealLine(line)
+        }
+        try write(sealed, to: url)
+        return count
     }
 
+    /// Entries oldest first (file order). No file means no entries; an unreadable file throws.
+    public static func load(_ url: URL, cipher: DataCipher) throws -> [SearchHistoryEntry] {
+        try read(url, cipher: cipher).entries
+    }
+
+    public static func read(_ url: URL, cipher: DataCipher) throws -> Contents {
+        var contents = Contents(entries: [], unreadable: 0, problem: nil)
+        for line in try rawLines(url) {
+            switch open(line, cipher: cipher) {
+            case .success(let entry?): contents.entries.append(entry)
+            case .success(nil): break
+            case .failure(let error):
+                contents.unreadable += 1
+                if contents.problem == nil { contents.problem = error }
+            }
+        }
+        return contents
+    }
+
+    /// Plaintext JSON Lines (history from before encryption, and tests).
     public static func parse(_ text: String) -> [SearchHistoryEntry] {
         lines(text).compactMap(decode)
     }
@@ -142,23 +192,25 @@ public enum SearchHistoryFile {
     }
 
     /// Adds an entry, then drops the oldest lines beyond `limit`. Throws without writing if the
-    /// existing file can't be read.
-    public static func append(_ e: SearchHistoryEntry, to url: URL, limit: Int = defaultLimit) throws {
+    /// existing file can't be read or the entry can't be encrypted.
+    public static func append(_ e: SearchHistoryEntry, to url: URL, cipher: DataCipher, limit: Int = defaultLimit) throws {
         var all = try rawLines(url)
-        all.append(encodeLine(e))
+        all.append(try cipher.sealLine(encodeLine(e)))
         if all.count > limit { all.removeFirst(all.count - limit) }
         try write(all, to: url)
     }
 
-    /// Rewrites the entry with `id`, if there is one. Returns the updated entry, or nil if no line has that id.
+    /// Rewrites the entry with `id`, if there is one. Returns the updated entry, or nil if no line this
+    /// build can read has that id. Lines it can't read are kept as they are.
     @discardableResult
-    public static func update(id: String, in url: URL, _ change: (inout SearchHistoryEntry) -> Void) throws -> SearchHistoryEntry? {
+    public static func update(id: String, in url: URL, cipher: DataCipher,
+                              _ change: (inout SearchHistoryEntry) -> Void) throws -> SearchHistoryEntry? {
         var updated: SearchHistoryEntry?
         let all = try rawLines(url).map { line -> String in
-            guard var e = decode(line), e.id == id else { return line }
+            guard updated == nil, case .success(var e?) = open(line, cipher: cipher), e.id == id else { return line }
             change(&e)
             updated = e
-            return encodeLine(e)
+            return try cipher.sealLine(encodeLine(e))
         }
         if updated != nil { try write(all, to: url) }
         return updated
@@ -166,6 +218,19 @@ public enum SearchHistoryFile {
 
     public static func clear(_ url: URL) throws {
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+    }
+
+    /// One line: `.success(entry)`, `.success(nil)` for a (plaintext or decrypted) line that doesn't
+    /// decode, `.failure` for an encrypted line that can't be opened.
+    private static func open(_ line: String, cipher: DataCipher) -> Result<SearchHistoryEntry?, DataCipher.CipherError> {
+        guard DataCipher.isSealedLine(line) else { return .success(decode(line)) }
+        do {
+            return .success(decode(try cipher.openLine(line)))
+        } catch let error as DataCipher.CipherError {
+            return .failure(error)
+        } catch {
+            return .failure(.damaged)
+        }
     }
 
     private static func decode(_ line: String) -> SearchHistoryEntry? {
@@ -182,16 +247,8 @@ public enum SearchHistoryFile {
         return lines(try String(contentsOf: url, encoding: .utf8))
     }
 
-    private static func prepareDirectory(for url: URL) throws {
-        let dir = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-    }
-
-    /// Atomic, owner-only (0600) file in an owner-only (0700) folder.
+    /// Atomic, owner-only (0600 from creation) file in an owner-only (0700) folder.
     private static func write(_ lines: [String], to url: URL) throws {
-        try prepareDirectory(for: url)
-        try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: [.atomic])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try OwnerOnly.write(Data((lines.joined(separator: "\n") + "\n").utf8), to: url)
     }
 }
