@@ -52,7 +52,7 @@ final class SearchHistoryStore: ObservableObject {
             do {
                 try SearchHistoryFile.migrate(from: SearchHistoryFile.legacyURL, to: plaintext)
             } catch {
-                Log.write("history", "couldn't move history.jsonl into History/: \(error)")
+                Log.write("history", "couldn't move history.jsonl into History/: \(error: error)")
             }
             // Plaintext history (older versions, or a build without encryption): moved into the
             // encrypted file, once. Without encryption, nothing changes (history.enc.jsonl included).
@@ -61,7 +61,7 @@ final class SearchHistoryStore: ObservableObject {
                 let count = try SearchHistoryFile.convertPlaintext(from: plaintext, to: SearchHistoryFile.encryptedURL, cipher: cipher)
                 if count > 0 { Log.write("history", "encrypted \(count) saved search(es)") }
             } catch {
-                Log.write("history", "couldn't encrypt saved searches, left as they are: \(error)")
+                Log.write("history", "couldn't encrypt saved searches, left as they are: \(error: error)")
             }
         }
     }
@@ -123,14 +123,14 @@ final class SearchHistoryStore: ObservableObject {
         queue.async { [url, cipher] in
             do {
                 try SearchHistoryFile.append(entry, to: url, cipher: cipher)
-                Log.write("history", "saved search (\(entry.suggested.count) suggested, \(entry.picked.isEmpty ? "no pick" : "picked"))")
+                Log.write("history", "saved search (\(entry.suggested.count) suggested, \(public: entry.picked.isEmpty ? "no pick" : "picked"))")
                 DispatchQueue.main.async {
                     let defaults = UserDefaults.standard
                     if defaults.object(forKey: Self.firstRecordedKey) == nil { defaults.set(Date().timeIntervalSince1970, forKey: Self.firstRecordedKey) }
                     if self.visibleCount > 0 { self.reload() }
                 }
             } catch {
-                Log.write("history", "couldn't save search, history left as is: \(error)")
+                Log.write("history", "couldn't save search, history left as is: \(error: error)")
                 let message = (error as? DataCipher.CipherError).map { "Couldn't save the last search: \($0)." }
                     ?? "Couldn't save the last search: \(error.localizedDescription)"
                 DispatchQueue.main.async { self.lastError = message }

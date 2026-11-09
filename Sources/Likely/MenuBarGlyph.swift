@@ -64,7 +64,7 @@ enum MenuBarGlyph {
         let ids: [String?] = [nil] + available.map(\.id)
         let index = ids.firstIndex(of: debugSelection) ?? 0
         debugSelection = ids[(index + step + ids.count) % ids.count]
-        Log.write("app", "menu bar glyph: \(debugSelection ?? "default")")
+        Log.write("app", "menu bar glyph: \(public: debugSelection ?? "default")")
     }
 
     static func baseImage(id: String? = debugSelection) -> NSImage? {

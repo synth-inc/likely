@@ -64,10 +64,10 @@ enum EvalCapture {
         let destination = picked.isEmpty ? EvalStorage.draftsURL : EvalStorage.casesURL
         do {
             try EvalCaseFile.append(draft, to: destination)
-            Log.write("evals", picked.isEmpty ? "pick unknown: \(id) saved to drafts (needs expected)" : "test \(id) saved (\(picked.count) picked)")
+            Log.write("evals", picked.isEmpty ? "pick unknown: \(sensitive: id) saved to drafts (needs expected)" : "test \(sensitive: id) saved (\(picked.count) picked)")
             DispatchQueue.main.async { EvalCaseStore.shared.reload() }
         } catch {
-            Log.write("evals", "couldn't save captured test: \(error)")
+            Log.write("evals", "couldn't save captured test: \(error: error)")
             if let screenshotPath { try? FileManager.default.removeItem(atPath: screenshotPath) }
         }
     }

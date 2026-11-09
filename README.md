@@ -81,7 +81,9 @@ Eval mode, Settings → Evals and "Save as test" exist only in dev builds (`./bu
 Your own cases live in `~/Library/Application Support/Likely/evals/cases.jsonl` ("Save as test" in the bar above a
 picker, Settings → History → Make Eval, Settings → Evals, or automatic saving of picks). See [docs/EVALS.md](docs/EVALS.md).
 
-Logs: `~/Library/Logs/Likely/likely.log` (menu → Verbose AX Logging logs every AX event).
+Logs: `~/Library/Logs/Likely/likely.log`. Release builds leave out queries, window titles, paths and agent text
+unless Settings → General → "Log details for troubleshooting" is on (24 hours at most; it also logs every AX
+event). Dev builds always log details. See docs/PRIVACY.md.
 
 ## Your data
 

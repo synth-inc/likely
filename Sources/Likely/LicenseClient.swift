@@ -92,7 +92,7 @@ actor LicenseClient {
     private static func stripePage(_ string: String, host: String) throws -> URL {
         guard let url = URL(string: string), url.scheme?.lowercased() == "https", url.host?.lowercased() == host,
               url.user == nil, url.password == nil, url.port == nil || url.port == 443 else {
-            Log.write("license", "refused session URL host=\(URL(string: string)?.host ?? "?")")
+            Log.write("license", "refused session URL host=\(public: URL(string: string)?.host)")
             throw ClientError.badResponse
         }
         return url
@@ -148,7 +148,7 @@ actor LicenseClient {
             return try await Self.perform(Self.request(method, path, query: query, body: body, token: first))
         } catch ClientError.server(let status, _) where status == 401 {
             // Expired (30-day TTL) or revoked: log in again with the same installId and retry once.
-            Log.write("license", "\(path) got 401, logging in again")
+            Log.write("license", "\(public: path) got 401, logging in again")
             token = nil
             Keychain.delete(account: Self.keychainAccount)
             let fresh = try await login()
@@ -181,20 +181,20 @@ actor LicenseClient {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            Log.write("license", "\(request.url?.path ?? "?") failed: \(error.localizedDescription)")
+            Log.write("license", "\(public: request.url?.path) failed: \(error: error)")
             throw ClientError.offline(error.localizedDescription)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let message = (try? JSONDecoder().decode(ServerError.self, from: data))?.message
-            Log.write("license", "\(request.httpMethod ?? "") \(request.url?.path ?? "?") -> \(status) \(message ?? "")")
+            Log.write("license", "\(public: request.httpMethod) \(public: request.url?.path) -> \(status) \(sensitive: message)")
             if status == 404 { throw ClientError.unavailable }
             throw ClientError.server(status: status, message: message)
         }
         do {
             return try JSONDecoder().decode(Response.self, from: data)
         } catch {
-            Log.write("license", "\(request.url?.path ?? "?") undecodable: \(error)")
+            Log.write("license", "\(public: request.url?.path) undecodable: \(error: error)")
             throw ClientError.badResponse
         }
     }

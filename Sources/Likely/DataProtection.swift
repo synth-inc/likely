@@ -14,7 +14,7 @@ enum DataProtection {
     /// Decided once per launch, from this build's entitlements and a read-only keychain probe.
     static let encryption: EncryptionAvailability = {
         let state = EncryptionAvailability.current()
-        Log.write("privacy", state.summary)
+        Log.write("privacy", "\(public: state.summary)")
         return state
     }()
 
@@ -32,12 +32,12 @@ enum DataProtection {
         for folder in LikelyDataPaths.all() {
             do {
                 let outcome = try SpotlightExclusion.exclude(folder)
-                if outcome != .alreadyExcluded { Log.write("privacy", "Spotlight exclusion for \(folder.path): \(outcome)") }
+                if outcome != .alreadyExcluded { Log.write("privacy", "Spotlight exclusion for \(path: folder): \(outcome)") }
             } catch {
-                Log.write("privacy", "couldn't keep \(folder.path) out of Spotlight: \(error)")
+                Log.write("privacy", "couldn't keep \(path: folder) out of Spotlight: \(error: error)")
             }
             let changed = OwnerOnly.repair(folder)
-            if changed > 0 { Log.write("privacy", "made \(changed) item(s) in \(folder.path) owner-only") }
+            if changed > 0 { Log.write("privacy", "made \(changed) item(s) in \(path: folder) owner-only") }
         }
         #if !LIKELY_DEV
         // Release builds keep debug screenshots in memory only.
@@ -54,7 +54,7 @@ enum DataProtection {
                 let count = try EvalScreenshots.encryptExisting(cipher: cipher)
                 if count > 0 { Log.write("privacy", "encrypted \(count) saved test screenshot(s)") }
             } catch {
-                Log.write("privacy", "couldn't encrypt saved test screenshots (left as they are): \(error)")
+                Log.write("privacy", "couldn't encrypt saved test screenshots (left as they are): \(error: error)")
             }
         }
     }

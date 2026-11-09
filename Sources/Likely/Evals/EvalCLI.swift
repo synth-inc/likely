@@ -70,7 +70,7 @@ enum EvalCLI {
             exit(0)
         }
         Log.echoToStderr = options.verbose
-        Log.write("eval", "eval mode: \(arguments.dropFirst().joined(separator: " "))")
+        Log.write("eval", "eval mode: \(sensitive: arguments.dropFirst().joined(separator: " "))")
 
         let suite: Suite
         do { suite = try Suite.load(options.suite) } catch { fail("\(error)") }
@@ -505,7 +505,7 @@ final class EvalCaseRun {
             if file.isTemporary { temporaryScreenshot = file.url }
             return file.url
         } catch {
-            Log.write("eval", "\(evalCase.id): can't read the screenshot \(path): \(error)")
+            Log.write("eval", "\(sensitive: evalCase.id): can't read the screenshot \(path: path): \(error: error)")
             return nil
         }
     }()
@@ -588,7 +588,7 @@ final class EvalCaseRun {
         let prompt = firstPrompt()
         try? OwnerOnly.write(prompt, to: workDir.appendingPathComponent("prompt.txt"))
         if wantsIsolation, !agent.canIsolate {
-            Log.write("eval", "\(evalCase.id): Codex runs under its own sandbox, so this case is not isolated (prompt only)")
+            Log.write("eval", "\(sensitive: evalCase.id): Codex runs under its own sandbox, so this case is not isolated (prompt only)")
         }
         let runner = AgentModels.makeRunner(for: agent.kind.id)
         runner.launchOptions = launchOptions

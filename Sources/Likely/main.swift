@@ -6,6 +6,10 @@ import AppKit
 if EvalCLI.isRequested(CommandLine.arguments) { EvalCLI.main(CommandLine.arguments) }
 #endif
 
+// "Log details for troubleshooting" lasts one session at most: off at quit, and here in case the last
+// session didn't quit cleanly. Before anything logs or opens a transcript.
+Log.details.turnOff()
+
 // Owner-only permissions, Spotlight exclusion, release builds' debug screenshots: before the
 // coordinator (created with the delegate) touches the folders. Then encrypt older plaintext data.
 DataProtection.prepareAtLaunch()

@@ -63,7 +63,7 @@ final class OpenCodeRunner: AgentRunner {
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = workDir.appendingPathComponent(AgentTranscript.fileName)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         var arguments = ["run", "--format", "json", "-m", model]
@@ -148,7 +148,8 @@ final class OpenCodeRunner: AgentRunner {
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Log.write("opencode-stderr", text.trimmingCharacters(in: .whitespacesAndNewlines))
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            Log.write("opencode-stderr", "\(trimmed.count) chars: \(sensitive: trimmed)")
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -173,9 +174,9 @@ final class OpenCodeRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("opencode", "started \(arguments.contains("-s") ? "resume" : "run") model=\(model) pid=\(process.processIdentifier)")
+            Log.write("opencode", "started \(public: arguments.contains("-s") ? "resume" : "run") model=\(public: model) pid=\(process.processIdentifier)")
         } catch {
-            Log.write("opencode", "failed to launch \(executable): \(error)")
+            Log.write("opencode", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch opencode", costUSD: nil))
         }
     }
@@ -211,7 +212,7 @@ final class OpenCodeRunner: AgentRunner {
             isBusy = false
             let error = event["error"] as? [String: Any] ?? [:]
             let message = ((error["data"] as? [String: Any])?["message"] as? String) ?? error["name"] as? String ?? "opencode failed"
-            Log.write("opencode", "error: \(message.prefix(300))")
+            Log.write("opencode", "error: \(sensitive: message.prefix(300))")
             onTurnFinished?(AgentOutcome(success: false, summary: message, costUSD: nil))
         default:
             break

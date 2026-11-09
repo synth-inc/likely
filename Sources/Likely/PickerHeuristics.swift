@@ -3,11 +3,11 @@ import Foundation
 
 /// Decides whether an AX window/sheet is an open-file picker (NSOpenPanel or a lookalike).
 enum PickerHeuristics {
-    struct Verdict: CustomStringConvertible {
+    struct Verdict {
         let isPicker: Bool
-        let reason: String
+        let reason: LogMessage
         var buttonTitle: String?
-        var description: String { "\(isPicker ? "PICKER" : "no"): \(reason)" }
+        var logLine: LogMessage { "\(public: isPicker ? "PICKER" : "no"): \(reason)" }
     }
 
     /// Guesses at a private attribute exposing the AppKit class name (Accessibility Inspector shows
@@ -24,17 +24,17 @@ enum PickerHeuristics {
     static func evaluate(_ window: AXUIElement) -> Verdict {
         let role = AX.string(window, kAXRoleAttribute)
         guard role == kAXWindowRole || role == kAXSheetRole else {
-            return Verdict(isPicker: false, reason: "role \(role ?? "nil")")
+            return Verdict(isPicker: false, reason: "role \(public: role ?? "nil")")
         }
 
         // NSOpenPanel windows carry a stable AXIdentifier: "open-panel" on the app's own window,
         // "OpenPanel" on the system dialog that sandboxed apps get from the panel service.
         if let identifier = AX.string(window, kAXIdentifierAttribute) {
             if openPanelIdentifiers.contains(identifier) {
-                return Verdict(isPicker: true, reason: "identifier=\(identifier)", buttonTitle: defaultButtonTitle(window))
+                return Verdict(isPicker: true, reason: "identifier=\(public: identifier)", buttonTitle: defaultButtonTitle(window))
             }
             if identifier.localizedCaseInsensitiveContains("savepanel") || identifier == "save-panel" {
-                return Verdict(isPicker: false, reason: "identifier=\(identifier)")
+                return Verdict(isPicker: false, reason: "identifier=\(public: identifier)")
             }
         }
 
@@ -69,12 +69,21 @@ enum PickerHeuristics {
             ?? buttons.first(where: openButtonTitles.contains)
         let cancel = hasCancel || buttons.contains("cancel")
         let browser = !roles.isDisjoint(with: browserRoles)
-        let summary = "default=\(defaultTitle ?? "nil") cancel=\(cancel) browser=\(browser) buttons=\(buttons.sorted()) nodes=\(visited)"
+        let buttonList = LogMessage.joined(buttons.sorted().map(buttonForLog))
+        let summary: LogMessage = "default=\(buttonForLog(defaultTitle)) cancel=\(cancel) browser=\(browser) buttons=[\(buttonList)] nodes=\(visited)"
 
         if openTitle != nil && cancel && browser {
             return Verdict(isPicker: true, reason: summary, buttonTitle: openTitle)
         }
         return Verdict(isPicker: false, reason: summary)
+    }
+
+    /// Button titles Likely looks for are logged as they are; others (any window's buttons, some of
+    /// which name a document or a person) only with details on.
+    private static func buttonForLog(_ title: String?) -> LogMessage {
+        guard let title else { return "nil" }
+        let known = openButtonTitles.contains(title.lowercased()) || ["cancel", "save"].contains(title.lowercased())
+        return known ? "\(public: title)" : "\(sensitive: title)"
     }
 
     static func defaultButtonTitle(_ window: AXUIElement) -> String? {
@@ -84,10 +93,10 @@ enum PickerHeuristics {
     /// One-time dump of everything we can see on a detected picker, to learn what's reliable.
     static func logDiagnostics(_ window: AXUIElement) {
         let names = AX.attributeNames(window)
-        Log.write("picker-diag", "attributes: \(names.joined(separator: ", "))")
+        Log.write("picker-diag", "attributes: \(public: names.joined(separator: ", "))")
         for attribute in classNameAttributes {
             let value = AX.value(window, attribute).map { "\($0)" } ?? "nil"
-            Log.write("picker-diag", "probe \(attribute) = \(value)")
+            Log.write("picker-diag", "probe \(public: attribute) = \(sensitive: value)")
         }
     }
 }

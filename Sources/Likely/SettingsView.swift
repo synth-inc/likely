@@ -1,4 +1,5 @@
 import AppKit
+import LikelyStorage
 import LikelyTools
 import OnboardingKit
 import SwiftUI
@@ -8,7 +9,7 @@ struct SettingsActions {
     /// Onboarding, opened on the license page.
     var showLicense: () -> Void
     var showDebugView: () -> Void
-    var verboseChanged: (Bool) -> Void
+    var logDetailsChanged: (Bool) -> Void
 }
 
 /// The selected Settings tab, so the menu bar can open Settings on a given tab.
@@ -85,7 +86,8 @@ private struct DebugSettings: View {
 private struct GeneralSettings: View {
     let actions: SettingsActions
     @AppStorage("openToLikely") private var openToLikely = true
-    @AppStorage("verbose") private var verbose = false
+    /// LogDetailsSwitch's expiry (seconds since 1970), 0 when off.
+    @AppStorage(LogDetailsSwitch.defaultsKey) private var logDetailsUntil: Double = 0
     @AppStorage("showRecentFiles") private var showRecentFiles = true
     @AppStorage("recentFileCount") private var recentFileCount = 3
     /// Settings.sendScreenshot (migrated from "autoSuggest" at launch).
@@ -93,6 +95,18 @@ private struct GeneralSettings: View {
     private var screenshotsAllowed: Bool { CGPreflightScreenCaptureAccess() }
     @State private var folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
     @State private var pinned = SidebarFavorites.contains(LikelyFolder.url)
+
+    private var logDetailsCaption: String {
+        let until = Date(timeIntervalSince1970: logDetailsUntil)
+        var text: String
+        if until > Date() {
+            text = "On until \(until.formatted(date: .abbreviated, time: .shortened)): the log includes what you type, window titles, file names and paths, and your agent's output, plus every accessibility event. It turns off by itself after 24 hours or when you quit Likely. What's already in the log stays until you clear it."
+        } else {
+            text = "Off: the log keeps events, timings and counts, but not what you type, window titles, file names or your agent's output. Turn on to send the log with a bug report; it turns off by itself after 24 hours or when you quit Likely."
+        }
+        if Log.details.alwaysOn { text += " This dev build always logs details." }
+        return text
+    }
 
     private func refreshFolder() {
         folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
@@ -158,11 +172,14 @@ private struct GeneralSettings: View {
             }
             if Updater.isEnabled { UpdatesSection() }
             Section("Troubleshooting") {
-                Toggle("Log every accessibility event (verbose)", isOn: $verbose)
-                    .onChange(of: verbose) { _, value in actions.verboseChanged(value) }
+                Toggle("Log details for troubleshooting", isOn: Binding(
+                    get: { logDetailsUntil > Date().timeIntervalSince1970 },
+                    set: { actions.logDetailsChanged($0) }))
+                Text(logDetailsCaption).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Open Debug View") { actions.showDebugView() }
                     Button("Open Log") { NSWorkspace.shared.open(Log.fileURL) }
+                    Button("Clear Log") { Log.clear() }
                     Spacer()
                     Button("Run Onboarding Again") { actions.showOnboarding() }
                 }

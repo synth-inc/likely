@@ -14,10 +14,10 @@ searching to its model provider; that's how the search works.
 | Eval runs (results, reports, transcripts) | `…/Likely/evals/runs/` (dev builds only) | Owner-only, agents can't read them (a running case reads only its own folder) |
 | Your extra agent tools | `…/Likely/tools.json` | Plaintext (see below), owner-only, agents can't read it |
 | The screenshot sent with a search | `…/Likely/run/context-<id>.png` | Owner-only; only on disk while the agent works on a turn (see below) |
-| Agent transcripts of the current search | `…/Likely/run/last-run.jsonl` | Owner-only, agents can't read it |
+| Agent transcript of the last search | `…/Likely/run/last-run.jsonl`, only while "Log details for troubleshooting" is on (dev builds: always) | Owner-only, agents can't read it; deleted when details turn off and at launch |
 | Copies Likely made in the Likely folder (bookkeeping) | `…/Likely/likely-manifest.json` | Owner-only |
 | Debug view screenshots | In memory only. Dev builds also write `…/Likely/debug/<id>.png` | Owner-only (dev builds) |
-| Log | `~/Library/Logs/Likely/likely.log` | Owner-only, agents can't read it |
+| Log (events, timings, counts; no queries, titles, paths or agent text unless you turn details on, see below) | `~/Library/Logs/Likely/likely.log` | Owner-only, agents can't read it |
 | Settings, tool approvals | `~/Library/Preferences/inc.synth.likely.plist` | Agents can't write them |
 | Encryption key | Data-protection keychain, access group `<team id>.inc.synth.likely`, "Likely data key" (`inc.synth.likely.data-key`) | Only Likely can read it; this device only, never synced |
 
@@ -85,6 +85,56 @@ Spotlight still skips folders whose name ends in `.noindex`, so on launch Likely
 `<name>.noindex` and leaves a link with the old name; every path above keeps working. (The marker file is
 written as well, for macOS versions that honor it.)
 
+## The log
+
+`~/Library/Logs/Likely/likely.log` (Settings → General → Troubleshooting → Open Log) is for finding out why
+a picker wasn't detected or a search went wrong. By default it records:
+
+- events and states: a picker opened or closed and in which app, how it was detected, the agent
+  starting, finishing or failing, a copy made or skipped and why, license and update checks;
+- timings and counts: how long recent files took, how many files were found or picked, how long what you
+  typed was, the cost of a search;
+- non-identifying metadata: app names, agent and model names, accessibility roles and identifiers, window
+  sizes and positions, process IDs, error domains and codes.
+
+It doesn't record what you typed, window titles (email subjects, document names), file paths and names,
+what the agent wrote (its STATUS and FILE lines, answers, error output), or the prompt. Where one of those
+belongs in a line, the log has a short code instead, plus the extension for a file:
+
+```
+[picker] OPENED in Safari via ax:AXWindowCreated frame=440,210 800x500 title=<#9c41d2>
+[feedback] request: 18 chars <#3f0a7e>
+[likely] added <#b81c55 .pdf>
+[likely] skip <#20e9af .env> (hidden file or folder)
+[picker] picked 1 (confirmed with Return): [<#b81c55 .pdf>]
+[agent] Done – found 3 files cost=$0.0123
+```
+
+The same value gets the same code within one run of Likely, so lines about the same file can be followed.
+The codes are keyed with a random value that changes at every launch and is never written down, so they
+can't be checked against guesses.
+
+Release builds write nothing to the macOS unified log: any process running as you can read that with
+`log show`, outside the protection of `~/Library/Logs/Likely`. (Dev builds copy each line there with the
+message marked private.)
+
+**Log details for troubleshooting** (Settings → General → Troubleshooting) writes those values as they are,
+logs every accessibility event and window, and keeps the agent's transcript of the last search
+(`…/Likely/run/last-run.jsonl`). Turn it on to reproduce a problem and send the log with a bug report. It
+turns itself off after 24 hours or when you quit Likely, whichever comes first. Lines written while it was
+on stay in the log until you clear it (Clear Log, next to Open Log). Dev builds (`./build.sh`) always log
+details.
+
+**Upgrading.** Versions before this one wrote what you typed, window titles and file paths into the log.
+The first launch of this version (release builds) deletes that log, and any rotated `likely.log.*` copies,
+once, and notes it in the new log.
+
+For developers: a log line is a `LogMessage`, so a string can only go into it marked `sensitive:` (private),
+`path:` (private, keeps the extension), `error:` (domain and code; the description is private) or
+`public:` (safe metadata). Unmarked interpolations compile only for numbers, booleans and `LogSafe` types.
+`LogPrivacySourceTests` keeps every `public:` value and `LogSafe` type to a reviewed list, so a new one
+fails `swift test` until someone checks it (see `Sources/LikelyStorage/LogPrivacy.swift`).
+
 ### Why tools.json and cases.jsonl stay plaintext
 
 You edit both, often with your own coding agent ("add an rclip tool to Likely", "fix this test case").
@@ -96,6 +146,7 @@ changed outside Likely's Settings does nothing until you approve it there.
 
 - **Search history:** Settings → History → Clear History…, or delete the `History` folder.
 - **Tests:** Settings → Evals, or delete `…/Likely/evals`.
+- **Log:** Settings → General → Clear Log, or delete `~/Library/Logs/Likely`.
 - **Everything:** quit Likely, then delete `~/Library/Application Support/Likely`,
   `~/Library/Application Support/Likely.noindex`, `~/Library/Logs/Likely`, `~/Library/Logs/Likely.noindex`
   and `~/Library/Preferences/inc.synth.likely.plist`. Without the data, the key left in the keychain
