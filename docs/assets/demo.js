@@ -193,7 +193,8 @@
       '<div class="ld-shots">' + (ref ? 'Screenshots <span>0 of 10</span>' : 'Files <span>0 of 10</span>') + '</div>' +
       [0, 1, 2, 3, 4].map(function (i) { return '<div class="ld-thumb" style="left:' + (64.8 + i * 123.6) + 'px"></div>'; }).join('') +
       '</div>';
-    s.appendChild(app);
+    // Only the reference comparison draws the browser behind; the demo shows just the desktop.
+    if (ref) s.appendChild(app);
 
     // The Open dialog
     var sheet = el('div', 'ld-sheet');
