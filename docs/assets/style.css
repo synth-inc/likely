@@ -194,6 +194,8 @@ h1 em { font-style: normal; color: var(--text-2); }
   font-size: 14px; color: var(--text);
 }
 .legal { max-width: 720px; padding-top: 24px; }
+.hero h1 { font-size: clamp(30px, 5.2vw, 50px); }
+.hero h1 .hero-l1 { white-space: nowrap; }
 .legal h1 { font-size: clamp(32px, 5vw, 44px); margin-bottom: 10px; }
 .legal .meta { color: var(--text-2); font-size: 14px; margin-bottom: 8px; }
 .placeholder { background: rgba(255, 159, 10, 0.18); padding: 1px 6px; border-radius: 5px; color: var(--text); font-size: inherit; }
