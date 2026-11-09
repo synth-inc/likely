@@ -8,6 +8,9 @@
  *
  * TO CHANGE THE SEARCHES OR TIMING: edit SEARCHES (what's typed, the status lines, the files found)
  * and TIMING (seconds). Everything else follows from them.
+ *
+ * THE CAMERA (Screen Studio-style zoom): `cam` events in script() say where to look and how close
+ * (CAMERA below); the Player eases between them and never shows past the wide view.
  */
 (function () {
   'use strict';
@@ -27,7 +30,33 @@
     move: 0.50,           // pointer travel time
     clickGap: 0.30,       // between clicks
     betweenSearches: 0.55,// dialog closed, before the next one opens
-    loopRest: 0.6         // extra pause before the loop starts again
+    loopRest: 0.6,        // extra pause before the loop starts again
+    // Camera. Each `cam` event eases from wherever the camera is to its new target over camMove
+    // seconds (camWide when going back out to the wide view). Longer = lazier, shorter = snappier.
+    camMove: 0.7,
+    camWide: 0.9,
+    camIntro: 1.2,        // the slow drift in toward the recent files at the start
+    camIntroAt: 0.75,     // ...starting this long after the first dialog opens
+    camBarLead: 0.15,     // later searches: after the dialog opens, wait this long, then zoom to the bar
+    clickRing: 0.5        // the ring that pulses at the pointer on each click
+  };
+
+  // ---- Camera -----------------------------------------------------------------------------------
+  // Zoom levels: 1 = the wide view (CROP below); 1.5 = things look 1.5x bigger. Where each shot
+  // looks is FOCUS (scene points). To change a shot, edit its zoom here; to change when it
+  // happens, move its cam(...) call in script().
+  var CAMERA = {
+    recent: 1.15,     // first dialog: the recent files
+    bar: 1.7,         // typing in Likely's search bar
+    list: 1.5,        // the agent working: status files and results popping into the list
+    follow: 1.4,      // selecting files and clicking Open: the camera trails the pointer
+    ql: 1.6,          // Quick Look of the meme
+    followLag: 0.42,  // follow: seconds of pointer history the camera averages (more = lazier)
+    followMargin: 70, // follow: keep the pointer at least this many points inside the frame
+    // Small boxes (phones): zooms above 1 get stronger, so text stays readable.
+    // zoom' = 1 + (zoom - 1) * smallBoost when the box is narrower than smallWidth px.
+    smallWidth: 560,
+    smallBoost: 1.5
   };
 
   // ---- The searches -----------------------------------------------------------------------------
@@ -77,6 +106,19 @@
   var ROW_H = 24.2, ROWS_TOP = 172 + 52 + 30.8;        // first file row, in desktop points
   var OPEN_BTN = { x: 222.4 + 705.2 + 47, y: 172 + 411.2 + 17 };
   var REST = { x: 840, y: 520 };                       // where the pointer idles
+  // What each camera shot looks at. If the zoomed frame is smaller than the rect it keeps the
+  // rect's top-left corner in view (where the text starts) and crops the right/bottom.
+  var SHEET = { x: 222.4, y: 172, w: 808.4, h: 454.4 };
+  var HUD = { x: 418.4, y: 115.2, w: 612, h: 48 };
+  var FOCUS = {
+    wide: CROP,
+    // The bar's mark + field and the top of the list just below it.
+    bar: { x: HUD.x - 12, y: HUD.y - 4, w: 470, h: 56 },
+    // The file list (header + rows), with the bar above it so its status line is in view too.
+    list: { x: SHEET.x + 196 - 6, y: HUD.y - 4, w: 580, h: ROWS_TOP + 7.5 * ROW_H - HUD.y + 4 },
+    ql: { x: 540, y: 200, w: 450, h: 328 },          // the Quick Look panel, and the selected row's pointer
+    open: { x: OPEN_BTN.x - 150, y: OPEN_BTN.y - 90, w: 200, h: 120 }
+  };
 
   // ---- Icons ------------------------------------------------------------------------------------
   var GLYPH = '<svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">' +
@@ -247,11 +289,13 @@
       '<div class="ld-ql-img" style="background-image:' + dataURI(MEME).replace(/"/g, '&quot;') + '"></div>';
     s.appendChild(ql);
 
+    var ring = el('div', 'ld-click');
+    s.appendChild(ring);
     var cur = el('div', 'ld-cursor', CURSOR);
     s.appendChild(cur);
 
     return {
-      root: s, sheet: sheet, rows: rows, open: sheet.querySelector('.ld-open'), hud: hud, ql: ql, cursor: cur,
+      root: s, sheet: sheet, rows: rows, open: sheet.querySelector('.ld-open'), hud: hud, ql: ql, cursor: cur, ring: ring,
       mark: hud.querySelector('.ld-mark'), field: hud.querySelector('.ld-field'),
       ph: hud.querySelector('.ld-ph'), typed: hud.querySelector('.ld-typed'),
       status: hud.querySelector('.ld-status'), send: hud.querySelector('.ld-send')
@@ -268,8 +312,10 @@
     var cursor = { x: REST.x, y: REST.y };
     function add(e) { e.t = t; ev.push(e); return e; }
     function wait(d) { t += d; }
-    function moveTo(x, y, d) { add({ type: 'move', fx: cursor.x, fy: cursor.y, x: x, y: y, d: d }); cursor = { x: x, y: y }; wait(d); }
+    // Camera: focus is a FOCUS key or 'follow' (trail the pointer); d = seconds to get there.
+    function cam(focus, zoom, d) { add({ type: 'cam', focus: focus, zoom: zoom || 1, d: d || TIMING.camMove }); }
     function click() { add({ type: 'down' }); wait(0.09); add({ type: 'up' }); }
+    function moveTo(x, y, d) { add({ type: 'move', fx: cursor.x, fy: cursor.y, x: x, y: y, d: d }); cursor = { x: x, y: y }; wait(d); }
     function type(text, from) {
       add({ type: 'focus', on: true });
       add({ type: 'dim', on: false });   // typing a new query replaces the greyed one
@@ -282,17 +328,18 @@
       }
     }
     function rowY(i) { return ROWS_TOP + i * ROW_H + ROW_H / 2; }
-    function open(hold) {
+    function open(hold, camAt, camFn) {
       add({ type: 'sheet', on: true });
       add({ type: 'rows', files: RECENT, pop: false });
       add({ type: 'sel', ids: [RECENT[0].n] });
       add({ type: 'status', s: '' });
       add({ type: 'dim', on: false });
       add({ type: 'text', s: '' });
-      wait(hold);
+      wait(camAt); camFn(); wait(hold - camAt);
     }
     function submit(s, files) {
       wait(TIMING.beforeReturn);
+      cam('list', CAMERA.list);                     // watch the agent work in the list
       add({ type: 'dim', on: true });              // the query stays in the field, greyed out, while the agent works
       add({ type: 'focus', on: false });           // ...and hands the keyboard back to the picker
       add({ type: 'working', on: true });
@@ -321,6 +368,7 @@
       wait(TIMING.afterFound);
     }
     function pickAndOpen(files) {
+      cam('follow', CAMERA.follow);
       moveTo(560, rowY(0), TIMING.move); click(); add({ type: 'sel', ids: [files[0].n] });
       if (files.length > 1) {
         wait(TIMING.clickGap);
@@ -332,25 +380,31 @@
       moveTo(OPEN_BTN.x, OPEN_BTN.y, TIMING.move * 1.1); click();
       add({ type: 'press', on: true }); wait(0.12); add({ type: 'press', on: false });
       add({ type: 'sheet', on: false }); add({ type: 'focus', on: false }); add({ type: 'ql', on: false });
+      cam('wide', 1, TIMING.camWide);              // the dialog closes: ease back out
       wait(TIMING.sheetOut);
       moveTo(REST.x, REST.y, 0.6);
     }
 
     // 1. The dialog opens on the Likely folder: recent files, newest screenshot first.
+    cam('wide', 1);
     add({ type: 'cap', i: 0 });
-    open(TIMING.recentHold);
+    open(TIMING.recentHold, TIMING.camIntroAt, function () { cam('list', CAMERA.recent, TIMING.camIntro); });
     SEARCHES.forEach(function (s, n) {
-      if (n > 0) { wait(TIMING.betweenSearches); open(TIMING.focusDelay); }
+      if (n > 0) { wait(TIMING.betweenSearches); open(TIMING.focusDelay, TIMING.camBarLead, function () { cam('bar', CAMERA.bar); }); }
+      else cam('bar', CAMERA.bar);
       add({ type: 'cap', i: s.cap });
       type(s.query);
       submit(s);
       found(s.found);
       if (s.quickLook) {
+        cam('follow', CAMERA.follow);
         moveTo(560, rowY(0), TIMING.move); click(); add({ type: 'sel', ids: [s.found[0].n] });
-        wait(0.25); add({ type: 'ql', on: true }); wait(1.7); add({ type: 'ql', on: false }); wait(0.3);
+        wait(0.25); add({ type: 'ql', on: true }); cam('ql', CAMERA.ql);
+        wait(1.7); add({ type: 'ql', on: false }); wait(0.3);
       }
       if (s.refine) {
         wait(0.5);
+        cam('bar', CAMERA.bar);
         type(s.refine.query);
         submit({ status: s.refine.status }, s.found);
         add({ type: 'rows', files: s.refine.keep, pop: false });
@@ -381,12 +435,74 @@
       { t: -9, type: 'move', fx: 2000, fy: 2000, x: 2000, y: 2000, d: 1 }] };
   }
 
+  // ---- Camera at time t -------------------------------------------------------------------------
+  // A camera is { x, y, z }: the scene point at the middle of the box and the zoom (1 = wide).
+  // It's a pure function of time (no per-frame state), so seek() lands on the same frame as play.
+  // view = { w, h, boost }: the scene points the box shows at zoom 1 (CROP, or less of it when the
+  // box isn't 16:10) and the small-box zoom boost.
+
+  // Ease for camera moves: a critically damped spring from rest, scaled to land exactly at 1.
+  var CAM_K = 5.5, CAM_N = 1 - (1 + CAM_K) * Math.exp(-CAM_K);
+  function camEase(x) { x = clamp(x); return (1 - (1 + CAM_K * x) * Math.exp(-CAM_K * x)) / CAM_N; }
+
+  function cursorAt(tl, t) {
+    var mv = tl.moves || (tl.moves = tl.events.filter(function (e) { return e.type === 'move'; }));
+    var c = { x: REST.x, y: REST.y };
+    for (var i = 0; i < mv.length && mv[i].t <= t; i++) {
+      var e = mv[i], p = easeInOut((t - e.t) / e.d);
+      c = { x: e.fx + (e.x - e.fx) * p, y: e.fy + (e.y - e.fy) * p };
+    }
+    return c;
+  }
+
+  // Where a cam event wants the camera at time t (it can move: 'follow' trails the pointer).
+  function camTarget(tl, e, t, view) {
+    var z = e.zoom > 1 ? 1 + (e.zoom - 1) * view.boost : 1;
+    var vw = view.w / z, vh = view.h / z;
+    if (e.focus === 'follow') {
+      // Average the pointer over the last followLag seconds: the camera trails it smoothly.
+      var sx = 0, sy = 0, N = 7;
+      for (var j = 0; j < N; j++) { var c = cursorAt(tl, t - CAMERA.followLag * j / (N - 1)); sx += c.x; sy += c.y; }
+      var cx = sx / N, cy = sy / N, now = cursorAt(tl, t);
+      // ...but never let the pointer itself leave the frame.
+      var mx = Math.min(CAMERA.followMargin, vw / 4), my = Math.min(CAMERA.followMargin, vh / 4);
+      cx = Math.min(Math.max(cx, now.x - vw / 2 + mx), now.x + vw / 2 - mx);
+      cy = Math.min(Math.max(cy, now.y - vh / 2 + my), now.y + vh / 2 - my);
+      return { x: cx, y: cy, z: z };
+    }
+    var r = FOCUS[e.focus] || CROP;
+    // Center on the rect; if it doesn't fit, keep its top-left (where the reading starts) in view.
+    return {
+      x: vw >= r.w ? r.x + r.w / 2 : r.x + vw / 2,
+      y: vh >= r.h ? r.y + r.h / 2 : r.y + vh / 2,
+      z: z
+    };
+  }
+  function camMix(a, b, p) {
+    return { x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p, z: a.z * Math.pow(b.z / a.z, p) };  // zoom: geometric
+  }
+  function camAt(tl, t, view) {
+    var cams = tl.cams || (tl.cams = tl.events.filter(function (e) { return e.type === 'cam'; }));
+    var key = view.w + ',' + view.h + ',' + view.boost;
+    // from[i]: where the camera was when cams[i] started (memoized; depends only on the timeline and the view).
+    if (!tl.camFrom || tl.camFrom.key !== key) tl.camFrom = { key: key, v: [] };
+    var from = tl.camFrom.v;
+    var wide = { x: CROP.x + CROP.w / 2, y: CROP.y + CROP.h / 2, z: 1 };
+    var i = -1;
+    while (i + 1 < cams.length && cams[i + 1].t <= t) i++;
+    if (i < 0) return wide;
+    for (var j = from.length; j <= i; j++) {
+      from[j] = j === 0 ? wide : camMix(from[j - 1], camTarget(tl, cams[j - 1], cams[j].t, view), camEase((cams[j].t - cams[j - 1].t) / cams[j - 1].d));
+    }
+    return camMix(from[i], camTarget(tl, cams[i], t, view), camEase((t - cams[i].t) / cams[i].d));
+  }
+
   // ---- State at time t --------------------------------------------------------------------------
-  function stateAt(tl, t) {
+  function stateAt(tl, t, view) {
     var st = {
       sheet: { on: false, t: -9 }, rows: {}, order: [], sel: [], text: '', lastType: -9, focus: false,
       status: '', tone: '', working: false, dim: false, cap: 0, ql: { on: false, t: -9 }, press: false,
-      cur: { x: REST.x, y: REST.y }, down: false
+      cur: { x: REST.x, y: REST.y }, down: false, click: null
     };
     var rows = st.rows, gen = 0;
     for (var i = 0; i < tl.events.length; i++) {
@@ -413,7 +529,7 @@
         case 'cap': st.cap = e.i; break;
         case 'ql': if (st.ql.on !== e.on) st.ql = { on: e.on, t: e.t }; break;
         case 'press': st.press = e.on; break;
-        case 'down': st.down = true; break;
+        case 'down': st.down = true; st.click = { t: e.t, x: st.cur.x, y: st.cur.y }; break;
         case 'up': st.down = false; break;
         case 'move':
           var p = easeInOut((t - e.t) / e.d);
@@ -421,6 +537,7 @@
           break;
       }
     }
+    st.cam = view ? camAt(tl, t, view) : null;
     return st;
   }
 
@@ -435,11 +552,29 @@
     host.appendChild(viewport);
     var crop = opts.crop || CROP;
     var rowEls = {}, last = {}, t0 = null, t = 0, playing = false, raf = 0, started = false;
+    // The camera only runs on the real demo (not the reference comparison, nor a custom crop).
+    var camOn = !ref && !opts.crop;
+    var shown = null, box = { w: 0, h: 0, k: 1 }, view = { w: crop.w, h: crop.h, boost: 1 };
 
     function fit() {
       var w = host.clientWidth, h = host.clientHeight; if (!w || !h) return;
-      var k = Math.max(w / crop.w, h / crop.h);
-      sc.root.style.transform = 'translate(' + (-crop.x * k + (w - crop.w * k) / 2) + 'px,' + (-crop.y * k + (h - crop.h * k) / 2) + 'px) scale(' + k + ')';
+      var k = Math.max(w / crop.w, h / crop.h);   // cover the box with the crop
+      box = { w: w, h: h, k: k };
+      view = { w: w / k, h: h / k, boost: w < CAMERA.smallWidth ? CAMERA.smallBoost : 1 };
+      if (shown != null) render(shown); else applyCamera(null);
+    }
+
+    // Fit transform x camera: scale by k*z around the camera point, clamped to the wide view
+    // (CROP) so nothing past it is ever shown. Transform only: no layout.
+    function applyCamera(c) {
+      if (!box.w) return;
+      var z = c ? Math.max(1, c.z) : 1, K = box.k * z;
+      var vw = box.w / K, vh = box.h / K;
+      var cx = c ? c.x : crop.x + crop.w / 2, cy = c ? c.y : crop.y + crop.h / 2;
+      cx = Math.min(Math.max(cx, crop.x + vw / 2), crop.x + crop.w - vw / 2);
+      cy = Math.min(Math.max(cy, crop.y + vh / 2), crop.y + crop.h - vh / 2);
+      var tf = 'translate(' + (box.w / 2 - cx * K).toFixed(2) + 'px,' + (box.h / 2 - cy * K).toFixed(2) + 'px) scale(' + K.toFixed(5) + ')';
+      if (last.cam !== tf) { last.cam = tf; sc.root.style.transform = tf; }
     }
     fit();
     if (window.ResizeObserver) new ResizeObserver(fit).observe(host); else window.addEventListener('resize', fit);
@@ -479,7 +614,9 @@
     function fitKind(k) { var out = k; while (textWidth(out) > kindMax && out.length > 4) out = out.slice(0, -2) + '…'; if (out !== k) out = out.replace(/\s*…$/, '…'); return out; }
 
     function render(now) {
-      var st = stateAt(tl, now);
+      shown = now;
+      var st = stateAt(tl, now, camOn ? view : null);
+      applyCamera(st.cam);
 
       // Dialog
       var sp = st.sheet.on ? spring((now - st.sheet.t) / 0.55) : 1 - easeOut((now - st.sheet.t) / TIMING.sheetOut);
@@ -548,6 +685,13 @@
       set(sc.open, 'filter', st.press ? 'brightness(0.85)' : 'none', 'press');
       set(sc.cursor, 'transform', 'translate(' + (st.cur.x - 1.5).toFixed(2) + 'px,' + (st.cur.y - 1.2).toFixed(2) + 'px) scale(' + (st.down ? 0.92 : 1) + ')', 'cur');
 
+      // Click highlight: a ring pulses out from the pointer's tip.
+      var cp = camOn && st.click ? (now - st.click.t) / TIMING.clickRing : 1;
+      if (cp < 1) {
+        set(sc.ring, 'transform', 'translate(' + st.click.x.toFixed(2) + 'px,' + st.click.y.toFixed(2) + 'px) scale(' + (0.3 + 0.9 * easeOut(cp)).toFixed(4) + ')', 'rt');
+        set(sc.ring, 'opacity', (0.9 * (1 - easeInOut(cp))).toFixed(3), 'ro');
+      } else set(sc.ring, 'opacity', '0', 'ro');
+
       // Captions
       if (opts.captions && last.cap !== st.cap) {
         last.cap = st.cap;
@@ -572,6 +716,8 @@
       play: function () { if (playing) return; if (!started) { started = true; t = 0; } playing = true; t0 = null; raf = requestAnimationFrame(frame); },
       pause: function () { playing = false; cancelAnimationFrame(raf); },
       seek: function (s) { started = true; t = typeof s === 'string' ? tl.marks[s] : s; t0 = null; render(t); return t; },
+      // camera(false): hold the wide view (reduced motion). camera(true) turns it back on.
+      camera: function (on) { on = !!on && !ref && !opts.crop; if (on === camOn) return; camOn = on; if (shown != null) render(shown); },
       get time() { return t; }
     };
     // Before it first plays (e.g. still below the fold), show the picker open with recent files.
@@ -579,7 +725,7 @@
     return api;
   }
 
-  window.LikelyDemo = { Player: Player, SEARCHES: SEARCHES, TIMING: TIMING, script: script };
+  window.LikelyDemo = { Player: Player, SEARCHES: SEARCHES, TIMING: TIMING, CAMERA: CAMERA, script: script };
 
   // ---- Mount on the landing page ----------------------------------------------------------------
   var host = document.querySelector('[data-likely-demo]');
@@ -590,7 +736,8 @@
   var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)');
   var visible = false;
   function update() {
-    if (reduce && reduce.matches) { player.pause(); player.seek(STILL_AT); return; }
+    if (reduce && reduce.matches) { player.pause(); player.camera(false); player.seek(STILL_AT); return; }
+    player.camera(true);
     if (visible && !document.hidden) player.play(); else player.pause();
   }
   if ('IntersectionObserver' in window) {
