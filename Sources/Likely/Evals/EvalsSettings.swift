@@ -407,7 +407,8 @@ struct EvalCaseEditor: View {
         c.id = typedID.isEmpty ? EvalCase.slug(queryList.first ?? "", fallback: "case") : typedID
         c.query = queryList
         let context = EvalCase.Context(app: app.isEmpty ? nil : app, windowTitle: windowTitle.isEmpty ? nil : windowTitle,
-                                       screenshot: screenshot.isEmpty ? nil : screenshot, button: c.context?.button)
+                                       screenshot: screenshot.isEmpty ? nil : screenshot, button: c.context?.button,
+                                       userName: c.context?.userName)
         c.context = context.isEmpty ? nil : context
         c.expect = Expectation.make(kind: paths.isEmpty ? .none : kind, paths: kind == .folder ? Array(paths.prefix(1)) : paths)
         c.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }

@@ -29,15 +29,20 @@ public struct EvalCase: Codable, Identifiable, Hashable {
         public var screenshot: String?
         /// The picker's confirm button ("Open", "Upload", …), if known.
         public var button: String?
+        /// The user's name, sent as `{{userName}}`. Unset: personal cases send no name; fixture cases
+        /// (`source: "fixture"`) use the synthetic persona, "Jordan Rivera".
+        public var userName: String?
 
-        public init(app: String? = nil, windowTitle: String? = nil, screenshot: String? = nil, button: String? = nil) {
+        public init(app: String? = nil, windowTitle: String? = nil, screenshot: String? = nil, button: String? = nil,
+                    userName: String? = nil) {
             self.app = app
             self.windowTitle = windowTitle
             self.screenshot = screenshot
             self.button = button
+            self.userName = userName
         }
 
-        public var isEmpty: Bool { app == nil && windowTitle == nil && screenshot == nil && button == nil }
+        public var isEmpty: Bool { app == nil && windowTitle == nil && screenshot == nil && button == nil && userName == nil }
     }
 
     public init(id: String, query: [String], context: Context? = nil, expect: Expectation, tags: [String] = [],
