@@ -21,7 +21,7 @@
     typeMin: 0.030,       // per-character typing delay range
     typeMax: 0.085,
     beforeReturn: 0.30,   // pause between the last character and Return
-    statusStep: 0.75,     // each status line shows this long
+    statusStep: 1.0,      // each status file shows this long
     popGap: 0.30,         // between files popping into the folder
     afterFound: 0.45,     // results settle before the pointer moves
     move: 0.50,           // pointer travel time
@@ -33,6 +33,8 @@
   // ---- The searches -----------------------------------------------------------------------------
   // f(): name, date modified, size, kind, icon. Names are made up.
   function f(n, d, s, k, ic) { return { n: n, d: d, s: s, k: k, ic: ic }; }
+  // Like the app: while the agent works, its latest status is an empty " …status…" file at the top of the folder.
+  function statusFile(line) { return f('…' + line.replace(/…$/, '') + '…', 'Now', 'Zero bytes', 'Document', 'txt'); }
 
   var RECENT = [
     f('Screenshot 2026-11-09 at 9.38.12 AM.png', 'Today at 9:38 AM', '1.2 MB', 'PNG image', 'shot'),
@@ -300,15 +302,24 @@
       add({ type: 'working', on: true });
       add({ type: 'rows', files: files || [], pop: false });
       add({ type: 'sel', ids: [] });
-      s.status.forEach(function (line) { add({ type: 'status', s: line, tone: 'progress' }); wait(TIMING.statusStep); });
+      add({ type: 'status', s: '' });
+      s.status.forEach(function (line) {
+        lastStatus = statusFile(line);
+        add({ type: 'rows', files: [lastStatus].concat(files || []), pop: true });
+        wait(TIMING.statusStep);
+      });
     }
+    var lastStatus = null;
     function found(list, keepRows) {
       var shown = keepRows ? keepRows.slice() : [];
       list.forEach(function (file, i) {
         shown = shown.concat([file]);
-        add({ type: 'rows', files: shown.slice(), pop: true });
+        add({ type: 'rows', files: (lastStatus ? [lastStatus] : []).concat(shown), pop: true });
         if (i < list.length - 1) wait(TIMING.popGap);
       });
+      wait(0.35);
+      add({ type: 'rows', files: shown.slice(), pop: false });   // the status file goes away when the search ends
+      lastStatus = null;
       add({ type: 'working', on: false });
       add({ type: 'status', s: list.length + ' found · <u>Not these</u>', tone: 'found' });
       wait(TIMING.afterFound);
@@ -347,6 +358,7 @@
         type(s.refine.query);
         submit({ status: s.refine.status }, s.found);
         add({ type: 'rows', files: s.refine.keep, pop: false });
+        lastStatus = null;
         add({ type: 'working', on: false });
         add({ type: 'status', s: s.refine.keep.length + ' found · <u>Not these</u>', tone: 'found' });
         wait(TIMING.afterFound + 0.3);
