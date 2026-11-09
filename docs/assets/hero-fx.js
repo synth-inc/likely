@@ -1,17 +1,6 @@
 /* Hero effects: question marks burst out of the cursor while it moves over the hero.
    Off for touch and for people who prefer reduced motion. */
 (function () {
-  // "already": wrap each letter so it can breathe on its own offset rhythm (see .title-accent in style.css).
-  var accent = document.querySelector('.hero .title-accent');
-  var editing = /[?&](edit|preview-edits)(&|=|$)/.test(location.search);
-  if (accent && !editing && !accent.querySelector('.tl')) {
-    var word = accent.textContent;
-    accent.setAttribute('aria-label', word);
-    accent.innerHTML = word.split('').map(function (c, i) {
-      var dur = (5 + (i % 3) * 0.9) / 2, delay = -i * 0.75 / 2;
-      return '<span class="tl" aria-hidden="true" style="animation-duration:' + dur + 's;animation-delay:' + delay + 's">' + c + '</span>';
-    }).join('');
-  }
   var hero = document.querySelector('.hero');
   if (!hero || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   if (getComputedStyle(hero).position === 'static') hero.style.position = 'relative';
