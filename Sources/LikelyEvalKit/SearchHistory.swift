@@ -97,16 +97,22 @@ public struct SearchHistoryEntry: Codable, Identifiable, Hashable {
     }
 }
 
-/// Reads and writes history.jsonl. Every line is encrypted on its own (`DataCipher.sealLine`: AES-GCM
-/// with the data key from the Keychain), so the file is still JSON Lines in shape: "\n"-separated,
-/// one entry per line, appended and capped as before. Per line rather than per file because a line
-/// that can't be opened (damaged, or sealed by another build's key) is then skipped on its own and
-/// kept in place, exactly like a line that doesn't decode was before, and the rest still reads.
+/// Reads and writes the history file: JSON Lines, "\n"-separated, one entry per line, appended and
+/// capped. Builds that can encrypt (EncryptionAvailability) keep it in `encryptedURL`
+/// (history.enc.jsonl), every line sealed on its own (`DataCipher.sealLine`: AES-GCM with the data
+/// key from the Keychain); builds that can't keep it in `plaintextURL` (history.jsonl). Separate
+/// files, so a build never mixes the two or touches the other kind's file: a build without encryption
+/// leaves history.enc.jsonl as it is, and a build with encryption moves history.jsonl into it once
+/// (`convertPlaintext`).
 ///
-/// Lines that don't decode are skipped on load but left in place on rewrites, until they age out past
-/// the cap. A file that exists but can't be read (permissions, invalid UTF-8, I/O error) makes every
-/// call throw rather than start over with an empty file, and so does a missing key when writing:
-/// nothing is ever written in plaintext.
+/// Per line rather than per file because a line that can't be opened (damaged, or sealed with
+/// another key) is then skipped on its own and kept in place, exactly like a line that doesn't
+/// decode, and the rest still reads. Such lines are kept on rewrites until they age out past the cap.
+/// A file that exists but can't be read (permissions, invalid UTF-8, I/O error) makes every call
+/// throw rather than start over with an empty file, and so does a missing key when writing to the
+/// encrypted file: nothing meant to be encrypted is ever written in plaintext.
+///
+/// `cipher` nil means plaintext (a build without encryption).
 public enum SearchHistoryFile {
     public static let defaultLimit = 500
 
@@ -117,8 +123,17 @@ public enum SearchHistoryFile {
             .appendingPathComponent("Library/Application Support/Likely/History", isDirectory: true)
     }
 
-    /// ~/Library/Application Support/Likely/History/history.jsonl.
-    public static var defaultURL: URL { defaultDirectory.appendingPathComponent("history.jsonl") }
+    /// History/history.jsonl: plaintext history (builds without encryption, and older versions).
+    public static var plaintextURL: URL { defaultDirectory.appendingPathComponent(plaintextName) }
+    /// History/history.enc.jsonl: encrypted history.
+    public static var encryptedURL: URL { defaultDirectory.appendingPathComponent(encryptedName) }
+    public static let plaintextName = "history.jsonl"
+    public static let encryptedName = "history.enc.jsonl"
+
+    /// The file a build uses: encrypted with a cipher, plaintext without.
+    public static func url(encrypted: Bool, in directory: URL = defaultDirectory) -> URL {
+        directory.appendingPathComponent(encrypted ? encryptedName : plaintextName)
+    }
 
     /// Where pre-release builds kept it (next to the evals folder); moved by `migrate`.
     public static var legacyURL: URL {
@@ -128,7 +143,7 @@ public enum SearchHistoryFile {
     /// What a read found: the entries this build can open, and how many lines it couldn't.
     public struct Contents {
         public var entries: [SearchHistoryEntry]
-        /// Encrypted lines that couldn't be opened (another build's key, no key, damaged).
+        /// Encrypted lines that couldn't be opened (another key, no key, encryption off, damaged).
         public var unreadable: Int
         /// Why the first of them couldn't be opened.
         public var problem: DataCipher.CipherError?
@@ -143,30 +158,45 @@ public enum SearchHistoryFile {
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    /// Encrypts every plaintext line (history written before encryption), keeping the order and the
-    /// lines already encrypted as they are. Lines are sealed as they are, even ones that don't decode,
-    /// so nothing readable is left. Returns how many lines were encrypted; throws without writing if
-    /// the file can't be read or there's no key.
+    /// Moves plaintext history (`plain`: a build without encryption's, or an older version's) into
+    /// the encrypted file `encrypted`, after what's already there, keeping the order. Lines are sealed
+    /// as they are, even ones that don't decode, so nothing readable is left; an entry already in
+    /// `encrypted` (an earlier conversion that stopped half way) isn't added twice. Encrypted lines in
+    /// `plain` (sealed by an earlier test build of Likely) aren't Likely's to convert: they stay in
+    /// `plain`, untouched. The encrypted file is written first, then `plain` is rewritten without the
+    /// converted lines (or removed when nothing is left), so a failure at any point loses nothing.
+    /// Returns how many lines were converted; throws without writing if a file can't be read or
+    /// there's no key.
     @discardableResult
-    public static func encryptPlaintext(_ url: URL, cipher: DataCipher) throws -> Int {
-        let all = try rawLines(url)
-        guard all.contains(where: { !DataCipher.isSealedLine($0) }) else { return 0 }
-        var count = 0
-        let sealed = try all.map { line -> String in
-            if DataCipher.isSealedLine(line) { return line }
-            count += 1
-            return try cipher.sealLine(line)
+    public static func convertPlaintext(from plain: URL, to encrypted: URL, cipher: DataCipher) throws -> Int {
+        let source = try rawLines(plain)
+        let toConvert = source.filter { !DataCipher.isSealedLine($0) }
+        guard !toConvert.isEmpty else { return 0 }
+        let kept = source.filter(DataCipher.isSealedLine)
+        var existing = try rawLines(encrypted)
+        let present = Set(existing.compactMap { line -> String? in
+            guard case .success(let e?) = open(line, cipher: cipher) else { return nil }
+            return e.id
+        })
+        for line in toConvert {
+            if let e = decode(line), present.contains(e.id) { continue }
+            existing.append(try cipher.sealLine(line))
         }
-        try write(sealed, to: url)
-        return count
+        try write(existing, to: encrypted)
+        if kept.isEmpty {
+            try FileManager.default.removeItem(at: plain)
+        } else {
+            try write(kept, to: plain)
+        }
+        return toConvert.count
     }
 
     /// Entries oldest first (file order). No file means no entries; an unreadable file throws.
-    public static func load(_ url: URL, cipher: DataCipher) throws -> [SearchHistoryEntry] {
+    public static func load(_ url: URL, cipher: DataCipher?) throws -> [SearchHistoryEntry] {
         try read(url, cipher: cipher).entries
     }
 
-    public static func read(_ url: URL, cipher: DataCipher) throws -> Contents {
+    public static func read(_ url: URL, cipher: DataCipher?) throws -> Contents {
         var contents = Contents(entries: [], unreadable: 0, problem: nil)
         for line in try rawLines(url) {
             switch open(line, cipher: cipher) {
@@ -180,7 +210,7 @@ public enum SearchHistoryFile {
         return contents
     }
 
-    /// Plaintext JSON Lines (history from before encryption, and tests).
+    /// Plaintext JSON Lines.
     public static func parse(_ text: String) -> [SearchHistoryEntry] {
         lines(text).compactMap(decode)
     }
@@ -193,9 +223,9 @@ public enum SearchHistoryFile {
 
     /// Adds an entry, then drops the oldest lines beyond `limit`. Throws without writing if the
     /// existing file can't be read or the entry can't be encrypted.
-    public static func append(_ e: SearchHistoryEntry, to url: URL, cipher: DataCipher, limit: Int = defaultLimit) throws {
+    public static func append(_ e: SearchHistoryEntry, to url: URL, cipher: DataCipher?, limit: Int = defaultLimit) throws {
         var all = try rawLines(url)
-        all.append(try cipher.sealLine(encodeLine(e)))
+        all.append(try seal(encodeLine(e), cipher: cipher))
         if all.count > limit { all.removeFirst(all.count - limit) }
         try write(all, to: url)
     }
@@ -203,14 +233,14 @@ public enum SearchHistoryFile {
     /// Rewrites the entry with `id`, if there is one. Returns the updated entry, or nil if no line this
     /// build can read has that id. Lines it can't read are kept as they are.
     @discardableResult
-    public static func update(id: String, in url: URL, cipher: DataCipher,
+    public static func update(id: String, in url: URL, cipher: DataCipher?,
                               _ change: (inout SearchHistoryEntry) -> Void) throws -> SearchHistoryEntry? {
         var updated: SearchHistoryEntry?
         let all = try rawLines(url).map { line -> String in
             guard updated == nil, case .success(var e?) = open(line, cipher: cipher), e.id == id else { return line }
             change(&e)
             updated = e
-            return try cipher.sealLine(encodeLine(e))
+            return try seal(encodeLine(e), cipher: cipher)
         }
         if updated != nil { try write(all, to: url) }
         return updated
@@ -220,10 +250,16 @@ public enum SearchHistoryFile {
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
     }
 
+    private static func seal(_ line: String, cipher: DataCipher?) throws -> String {
+        guard let cipher else { return line }
+        return try cipher.sealLine(line)
+    }
+
     /// One line: `.success(entry)`, `.success(nil)` for a (plaintext or decrypted) line that doesn't
     /// decode, `.failure` for an encrypted line that can't be opened.
-    private static func open(_ line: String, cipher: DataCipher) -> Result<SearchHistoryEntry?, DataCipher.CipherError> {
+    private static func open(_ line: String, cipher: DataCipher?) -> Result<SearchHistoryEntry?, DataCipher.CipherError> {
         guard DataCipher.isSealedLine(line) else { return .success(decode(line)) }
+        guard let cipher else { return .failure(.encryptionOff) }
         do {
             return .success(decode(try cipher.openLine(line)))
         } catch let error as DataCipher.CipherError {

@@ -1,4 +1,5 @@
 import CryptoKit
+import LocalAuthentication
 import Foundation
 import XCTest
 @testable import LikelyStorage
@@ -232,5 +233,70 @@ final class SpotlightExclusionTests: TempDirTestCase {
         let other = dir.appendingPathComponent("Other")
         try FileManager.default.createSymbolicLink(atPath: other.path, withDestinationPath: "/tmp")
         guard case .skipped = try SpotlightExclusion.exclude(other) else { return XCTFail() }
+    }
+}
+
+/// Whether a build encrypts, decided from entitlements and an injected probe: no keychain is touched.
+final class EncryptionAvailabilityTests: XCTestCase {
+    private func neverProbed(_ group: String) -> Result<Void, KeychainKeyStore.KeychainError> {
+        XCTFail("probed \(group) without an access group entitlement")
+        return .success(())
+    }
+
+    func testNoProvisioningProfileMeansOffWithoutProbing() {
+        XCTAssertEqual(EncryptionAvailability.evaluate(SigningEntitlements(), probe: neverProbed), .off(.noProvisioningProfile))
+        // Signed with a team but without keychain-access-groups (no profile): still off.
+        let teamOnly = SigningEntitlements(applicationIdentifier: "ABCDE12345.inc.synth.likely", teamIdentifier: "ABCDE12345")
+        XCTAssertEqual(EncryptionAvailability.evaluate(teamOnly, probe: neverProbed), .off(.noProvisioningProfile))
+        // Only the profile's wildcard: no concrete group to use.
+        let wildcard = SigningEntitlements(teamIdentifier: "ABCDE12345", keychainAccessGroups: ["ABCDE12345.*"])
+        XCTAssertEqual(EncryptionAvailability.evaluate(wildcard, probe: neverProbed), .off(.noProvisioningProfile))
+    }
+
+    func testOnWithTheTeamsLikelyGroupFromTheEntitlements() {
+        var probed: [String] = []
+        let e = SigningEntitlements(applicationIdentifier: "ABCDE12345.inc.synth.likely", teamIdentifier: "ABCDE12345",
+                                    keychainAccessGroups: ["ABCDE12345.other", "ABCDE12345.inc.synth.likely"])
+        let state = EncryptionAvailability.evaluate(e) { probed.append($0); return .success(()) }
+        XCTAssertEqual(state, .on(accessGroup: "ABCDE12345.inc.synth.likely"))
+        XCTAssertEqual(probed, ["ABCDE12345.inc.synth.likely"])
+        XCTAssertTrue(state.isOn)
+        XCTAssertEqual(state.summary, "Encryption: on")
+    }
+
+    /// A third-party build with its own team and bundle id uses its own group: nothing is hard-coded.
+    func testAnotherTeamsGroup() {
+        let e = SigningEntitlements(applicationIdentifier: "ZZZZZ99999.com.example.likely", keychainAccessGroups: ["ZZZZZ99999.com.example.likely"])
+        XCTAssertEqual(e.team, "ZZZZZ99999")
+        XCTAssertEqual(EncryptionAvailability.evaluate(e) { _ in .success(()) }, .on(accessGroup: "ZZZZZ99999.com.example.likely"))
+    }
+
+    func testProbeFailureMeansOff() {
+        let e = SigningEntitlements(teamIdentifier: "ABCDE12345", keychainAccessGroups: ["ABCDE12345.inc.synth.likely"])
+        let state = EncryptionAvailability.evaluate(e) { _ in .failure(KeychainKeyStore.KeychainError(status: errSecMissingEntitlement)) }
+        guard case .off(.keychainUnavailable(let why)) = state else { return XCTFail("\(state)") }
+        XCTAssertTrue(why.contains("-34018"), why)
+        XCTAssertFalse(state.isOn)
+        XCTAssertNil(state.accessGroup)
+    }
+
+    func testOffSummaryNamesTheProfile() {
+        XCTAssertEqual(EncryptionAvailability.off(.noProvisioningProfile).summary,
+                       "Encryption: off in this build (no provisioning profile)")
+    }
+
+    /// The queries KeychainKeyStore sends (built, never run): data-protection keychain, the access
+    /// group, this device only, not synced, no UI.
+    func testKeychainQueriesUseTheDataProtectionKeychainWithoutUI() throws {
+        let store = KeychainKeyStore(accessGroup: "ABCDE12345.inc.synth.likely")
+        for query in [store.loadQuery, store.addQuery(Data(count: 32))] {
+            XCTAssertEqual(query[kSecUseDataProtectionKeychain as String] as? Bool, true)
+            XCTAssertEqual(query[kSecAttrAccessGroup as String] as? String, "ABCDE12345.inc.synth.likely")
+            XCTAssertEqual(query[kSecAttrSynchronizable as String] as? Bool, false)
+            let context = try XCTUnwrap(query[kSecUseAuthenticationContext as String] as? LAContext)
+            XCTAssertTrue(context.interactionNotAllowed)
+        }
+        XCTAssertEqual(store.addQuery(Data(count: 32))[kSecAttrAccessible as String] as? String,
+                       kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
     }
 }

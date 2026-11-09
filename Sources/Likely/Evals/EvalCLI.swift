@@ -494,8 +494,8 @@ final class EvalCaseRun {
     private var timeoutWork: DispatchWorkItem?
 
     private var evalCase: EvalCase { item.evalCase }
-    /// The case's screenshot as a file the agent can read. Saved test screenshots are encrypted
-    /// (evals/screenshots/*.png.enc, see EvalScreenshots): those are decrypted into a temporary 0600
+    /// The case's screenshot as a file the agent can read. Saved test screenshots are encrypted in
+    /// builds with encryption (evals/screenshots/*.png.enc, see EvalScreenshots): those are decrypted into a temporary 0600
     /// file in this case's own folder (the one folder of Likely's its sandbox may read), deleted when
     /// the case ends. Plain PNGs (the repo's fixtures) are used as they are.
     private lazy var screenshot: URL? = {

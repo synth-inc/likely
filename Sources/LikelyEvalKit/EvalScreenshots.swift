@@ -1,10 +1,12 @@
 import Foundation
 import LikelyStorage
 
-/// Screenshots saved with personal test cases (evals/screenshots): encrypted on disk as
-/// `<case id>.png.enc` (DataCipher, the data key in the Keychain). They're only ever decrypted in
-/// memory (the case editor's preview), or into a temporary 0600 file in an eval run's own case folder
-/// for the agent to read, deleted when the case ends.
+/// Screenshots saved with personal test cases (evals/screenshots). In builds that can encrypt
+/// (EncryptionAvailability) they're encrypted on disk as `<case id>.png.enc` (DataCipher, the data key
+/// in the Keychain), and only ever decrypted in memory (the case editor's preview), or into a
+/// temporary 0600 file in an eval run's own case folder for the agent to read, deleted when the case
+/// ends. Builds without encryption (`cipher` nil) save plain, owner-only `<case id>.png` files, and
+/// can't open `.png.enc` files (another build's), which are left as they are.
 ///
 /// Screenshots outside that folder (the repo's fixtures, a path the user typed) are plain PNGs and
 /// are read as they are.
@@ -13,10 +15,17 @@ public enum EvalScreenshots {
 
     public static func isEncrypted(_ path: String) -> Bool { path.hasSuffix(".png.enc") }
 
-    /// Encrypts `png` to `<folder>/<id>.png.enc` (replacing any file there). Returns its path.
+    /// Encrypts `png` to `<folder>/<id>.png.enc`, or without a cipher writes `<folder>/<id>.png`
+    /// (replacing any file there). Returns its path.
     public static func save(_ png: Data, id: String, in folder: URL = EvalStorage.screenshotsURL,
-                            cipher: DataCipher) throws -> String {
-        let url = folder.appendingPathComponent("\(EvalCase.slug(id, fallback: "case")).png.enc")
+                            cipher: DataCipher?) throws -> String {
+        let name = EvalCase.slug(id, fallback: "case")
+        guard let cipher else {
+            let url = folder.appendingPathComponent("\(name).png")
+            try OwnerOnly.write(png, to: url)
+            return url.path
+        }
+        let url = folder.appendingPathComponent("\(name).png.enc")
         try OwnerOnly.write(try cipher.sealFile(png), to: url)
         return url.path
     }
@@ -24,12 +33,15 @@ public enum EvalScreenshots {
     /// The PNG bytes behind a case's `screenshot` path: decrypted if it's `.png.enc`; a plain file
     /// otherwise; and for a `.png` reference whose file was encrypted by `encryptExisting`, the
     /// `.png.enc` next to it.
-    public static func load(_ path: String, cipher: DataCipher) throws -> Data {
+    /// Without a cipher, an encrypted file throws `CipherError.encryptionOff`.
+    public static func load(_ path: String, cipher: DataCipher?) throws -> Data {
         let fm = FileManager.default
-        if isEncrypted(path) { return try cipher.openFile(try Data(contentsOf: URL(fileURLWithPath: path))) }
-        if !fm.fileExists(atPath: path), fm.fileExists(atPath: path + ".enc") {
-            return try cipher.openFile(try Data(contentsOf: URL(fileURLWithPath: path + ".enc")))
+        func open(_ encrypted: String) throws -> Data {
+            guard let cipher else { throw DataCipher.CipherError.encryptionOff }
+            return try cipher.openFile(try Data(contentsOf: URL(fileURLWithPath: encrypted)))
         }
+        if isEncrypted(path) { return try open(path) }
+        if !fm.fileExists(atPath: path), fm.fileExists(atPath: path + ".enc") { return try open(path + ".enc") }
         return try Data(contentsOf: URL(fileURLWithPath: path))
     }
 
@@ -41,7 +53,7 @@ public enum EvalScreenshots {
     /// A readable PNG for an agent, in `workDir` (an eval case's own folder, which its sandbox may read):
     /// the plain file itself, or a temporary 0600 decrypted copy the caller deletes afterwards
     /// (`isTemporary`).
-    public static func materialize(_ path: String, in workDir: URL, cipher: DataCipher) throws -> (url: URL, isTemporary: Bool) {
+    public static func materialize(_ path: String, in workDir: URL, cipher: DataCipher?) throws -> (url: URL, isTemporary: Bool) {
         guard needsDecrypting(path) else { return (URL(fileURLWithPath: path), false) }
         let url = workDir.appendingPathComponent("screenshot-\(UUID().uuidString.prefix(8)).png")
         try OwnerOnly.write(try load(path, cipher: cipher), to: url)

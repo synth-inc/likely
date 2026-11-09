@@ -6,20 +6,25 @@ import LikelyStorage
 /// - owner-only permissions on everything under ~/Library/Application Support/Likely and
 ///   ~/Library/Logs/Likely (set at creation by OwnerOnly; `prepareAtLaunch` fixes older files);
 /// - the agents' sandboxes can't read either folder (AgentSandbox.protectionRules, CodexRunner);
-/// - search history and saved test screenshots are encrypted with a key in the Keychain (`cipher`);
+/// - in builds with a provisioning profile, search history and saved test screenshots are encrypted
+///   with a key in the data-protection keychain (`cipher`, see EncryptionAvailability); other builds
+///   keep them in plaintext (docs/BUILDING.md);
 /// - both folders are kept out of Spotlight (SpotlightExclusion).
 enum DataProtection {
-    /// The data key: one per kind of build, because the Keychain ties an item to the code signature
-    /// that made it (Apple Development for dev builds, Developer ID for releases).
-    static let keyAccount: String = {
-        #if LIKELY_DEV
-        return "dev"
-        #else
-        return "release"
-        #endif
+    /// Decided once per launch, from this build's entitlements and a read-only keychain probe.
+    static let encryption: EncryptionAvailability = {
+        let state = EncryptionAvailability.current()
+        Log.write("privacy", state.summary)
+        return state
     }()
 
-    static let cipher = DataCipher(store: KeychainKeyStore(account: keyAccount))
+    /// The data key's cipher, or nil when this build has no encryption (data is kept in plaintext).
+    /// One key for every build of the same team: the access group, not the code signature, decides
+    /// who can read it, so dev and release builds signed by that team share it.
+    static let cipher: DataCipher? = encryption.accessGroup.map { DataCipher(store: KeychainKeyStore(accessGroup: $0)) }
+
+    /// docs/BUILDING.md: how to build with encryption on.
+    static let buildingGuideURL = URL(string: "https://github.com/synth-inc/likely/blob/main/docs/BUILDING.md")!
 
     /// Runs before anything else touches the folders (main.swift): quick, synchronous. Encrypting what
     /// older versions left in plaintext happens in the background (`migrateInBackground`).
@@ -44,6 +49,7 @@ enum DataProtection {
         DispatchQueue.global(qos: .utility).async {
             // Search history: SearchHistoryStore moves and encrypts it on its own queue.
             _ = SearchHistoryStore.shared
+            guard let cipher else { return }
             do {
                 let count = try EvalScreenshots.encryptExisting(cipher: cipher)
                 if count > 0 { Log.write("privacy", "encrypted \(count) saved test screenshot(s)") }
