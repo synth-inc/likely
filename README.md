@@ -30,6 +30,9 @@ open build/Likely.app
 The setup window walks through Accessibility, Screen Recording, creating `~/Likely` (drag it into
 the Finder sidebar), and finding the `claude` CLI.
 
+Encryption of your search history is off in builds without a provisioning profile. To turn it on
+with your own Apple team, and for all build options, see [docs/BUILDING.md](docs/BUILDING.md).
+
 For debugging, run the bare binary from a terminal (`.build/release/Likely`): it inherits the
 terminal's Accessibility / Screen Recording grants and logs to stderr.
 
@@ -41,6 +44,7 @@ EdDSA key kept in the release machine's login Keychain (account `likely`).
 
 ```sh
 scripts/bump-version.sh patch && git commit -am "Bump version"
+# LIKELY_PROFILE must point at the Developer ID provisioning profile (docs/BUILDING.md)
 scripts/release.sh --dry-run   # build, Developer ID sign, Likely.dmg, notarize, appcast → build/release
 scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Likely.dmg, write the appcast
 ```
@@ -82,8 +86,9 @@ Logs: `~/Library/Logs/Likely/likely.log` (menu → Verbose AX Logging logs every
 ## Your data
 
 Everything Likely keeps stays on this Mac, owner-only, unreadable to the search agents and out of Spotlight;
-search history and saved test screenshots are encrypted. What's stored, where, and how to delete it:
-[docs/PRIVACY.md](docs/PRIVACY.md).
+in official releases, search history and saved test screenshots are also encrypted (builds from source
+need a provisioning profile for that: [docs/BUILDING.md](docs/BUILDING.md)). What's stored, where, and
+how to delete it: [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## License
 

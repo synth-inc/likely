@@ -31,8 +31,8 @@ enum EvalCapture {
         let stamp = Self.stamp()
         let id = EvalCaseFile.uniqueID(EvalCase.slug(queries.first ?? app, fallback: "captured") + "-" + stamp, existing: existing + cases)
 
-        // The live screenshot is deleted when the picker closes: keep an encrypted copy with the case
-        // (evals/screenshots/<id>.png.enc).
+        // The live screenshot is deleted when the picker closes: keep a copy with the case
+        // (evals/screenshots/<id>.png.enc, or <id>.png in builds without encryption).
         let screenshotPath = screenshot.flatMap { EvalCaseStore.keepScreenshot(png: $0, id: id) }
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path

@@ -15,6 +15,10 @@
 # Needs:
 #   - "Developer ID Application: Synthetic Exploration, Inc (TYC9PKBMB6)" in the login Keychain
 #     (override with SIGN_ID).
+#   - LIKELY_PROFILE: the "Likely Developer ID" provisioning profile (Developer ID, App ID
+#     TYC9PKBMB6.inc.synth.likely, made with that certificate). It's embedded in the app and gives it
+#     the keychain access group that turns encryption on (docs/BUILDING.md). Checked before building:
+#     App ID = bundle id, same team as SIGN_ID, macOS, not expired (warns within 60 days).
 #   - Notarization credentials, same as the other Synth apps' build_and_notarize.sh:
 #     NOTARY_KEY_PATH / NOTARY_KEY_ID / NOTARY_ISSUER_ID (App Store Connect API key), or
 #     NOTARY_PROFILE=<notarytool keychain profile>.
@@ -77,6 +81,15 @@ PUBLIC_KEY=$("$SPARKLE_BIN/generate_keys" --account "$SPARKLE_ACCOUNT" -p)
 [ "$PUBLIC_KEY" = "$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" Info.plist)" ] ||
     { echo "SUPublicEDKey in Info.plist doesn't match the Keychain key '$SPARKLE_ACCOUNT'"; exit 1; }
 security find-identity -v -p codesigning | grep -qF "$SIGN_ID" || { echo "Signing identity not found: $SIGN_ID"; exit 1; }
+[ -n "${LIKELY_PROFILE:-}" ] || { echo "LIKELY_PROFILE isn't set: the Developer ID provisioning profile (see docs/BUILDING.md)"; exit 1; }
+[ -f "$LIKELY_PROFILE" ] || { echo "LIKELY_PROFILE: no such file: $LIKELY_PROFILE"; exit 1; }
+BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Info.plist)
+# Fails early on a profile that doesn't fit; build.sh runs the same check again when signing.
+PREFLIGHT_ENTITLEMENTS=$(mktemp)
+python3 -I scripts/provisioning.py --profile "$LIKELY_PROFILE" --bundle-id "$BUNDLE_ID" --template Likely.entitlements \
+    --out "$PREFLIGHT_ENTITLEMENTS" --identity "$SIGN_ID" --developer-id >/dev/null
+TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print :com.apple.developer.team-identifier" "$PREFLIGHT_ENTITLEMENTS")
+rm -f "$PREFLIGHT_ENTITLEMENTS"
 
 if [ "$SKIP_NOTARIZE" = false ]; then
     if [ -n "${NOTARY_PROFILE:-}" ]; then
@@ -112,13 +125,14 @@ fi
 echo "==> Building and signing with $SIGN_ID"
 rm -rf "$OUT"
 mkdir -p "$OUT"
-BUILD_DIR="$OUT" CODESIGN_IDENTITY="$SIGN_ID" LIKELY_DISTRIBUTION=1 ./build.sh
+BUILD_DIR="$OUT" LIKELY_SIGN_ID="$SIGN_ID" LIKELY_PROFILE="$LIKELY_PROFILE" LIKELY_BUNDLE_ID="$BUNDLE_ID" \
+    LIKELY_TEAM_ID="$TEAM_ID" LIKELY_DISTRIBUTION=1 ./build.sh
 codesign --verify --deep --strict --verbose=2 "$APP"
+scripts/check-signature.sh "$APP" "$TEAM_ID" "$BUNDLE_ID" "$LIKELY_PROFILE"
 # build.sh only compiles dev features (LIKELY_DEV) when LIKELY_DISTRIBUTION isn't set; make sure.
 if grep -q "devLicenseOverride" "$APP/Contents/MacOS/$APP_NAME" || [ -d "$APP/Contents/Resources/MenuBarGlyphs" ]; then
     echo "The release build contains dev-only features"; exit 1
 fi
-codesign -d --entitlements - --xml "$APP" >/dev/null
 
 # ---------------------------------------------------------------- DMG
 echo "==> Creating $DMG"

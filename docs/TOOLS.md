@@ -138,6 +138,10 @@ So with tools on, a tool that needs to write (a cache, an index) or, under Codex
 at run time, whichever agent runs it. Do that work in the tool's setup, outside Likely. (`rclip -n` was
 checked to work this way under Claude Code, Gemini CLI and OpenCode.)
 
+Evals (`--eval`, dev builds) run your personal cases with your tools, as the app does, and the public
+fixture suite without them unless you pass `--with-tools`; each run records which tools it used. See
+[EVALS.md](EVALS.md#your-tools).
+
 ## Worked example: image search with rclip
 
 Settings → Tools (also menu bar → Improve Results…) always lists **Photo search (rclip)**. Without rclip

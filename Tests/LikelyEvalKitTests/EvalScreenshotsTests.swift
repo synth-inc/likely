@@ -28,6 +28,27 @@ final class EvalScreenshotsTests: XCTestCase {
         XCTAssertThrowsError(try EvalScreenshots.load(path, cipher: DataCipher(store: InMemoryKeyStore(key: Data(repeating: 3, count: 32)))))
     }
 
+    func testWithoutEncryptionScreenshotsArePlainOwnerOnlyFiles() throws {
+        let path = try EvalScreenshots.save(png, id: "my-case", in: shots, cipher: nil)
+        XCTAssertTrue(path.hasSuffix("/my-case.png"))
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), png)
+        XCTAssertEqual(OwnerOnly.mode(path), 0o600)
+        XCTAssertEqual(try EvalScreenshots.load(path, cipher: nil), png)
+        let file = try EvalScreenshots.materialize(path, in: dir, cipher: nil)
+        XCTAssertFalse(file.isTemporary)
+    }
+
+    /// A build without encryption can't open another build's encrypted screenshot, and leaves it be.
+    func testWithoutEncryptionEncryptedScreenshotsAreReportedAndKept() throws {
+        let path = try EvalScreenshots.save(png, id: "c", in: shots, cipher: cipher)
+        let before = try Data(contentsOf: URL(fileURLWithPath: path))
+        XCTAssertThrowsError(try EvalScreenshots.load(path, cipher: nil)) {
+            XCTAssertEqual($0 as? DataCipher.CipherError, .encryptionOff)
+        }
+        XCTAssertThrowsError(try EvalScreenshots.materialize(path, in: dir, cipher: nil))
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), before)
+    }
+
     func testPlainScreenshotsAreUsedAsTheyAre() throws {
         let plain = dir.appendingPathComponent("fixture.png")
         try png.write(to: plain)

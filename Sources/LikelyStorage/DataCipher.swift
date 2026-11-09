@@ -26,9 +26,10 @@ public final class InMemoryKeyStore: DataKeyStore {
 }
 
 /// AES-256-GCM encryption of Likely's private data (search history lines, saved test screenshots)
-/// with one random key kept in the Keychain (see KeychainKeyStore).
+/// with one random key kept in the data-protection keychain (see KeychainKeyStore). Only builds with
+/// a provisioning profile have one (EncryptionAvailability); the others keep that data in plaintext.
 ///
-/// - A line (history.jsonl): `lk1:<key id>:<base64 of nonce + ciphertext + tag>`. One sealed box per
+/// - A line (history.enc.jsonl): `lk1:<key id>:<base64 of nonce + ciphertext + tag>`. One sealed box per
 ///   line, so a damaged line, or one sealed by another build's key, is skipped on its own and the
 ///   rest of the file still reads.
 /// - A file (`.png.enc`): "LKE1", the 4-byte key id, then nonce + ciphertext + tag.
@@ -50,12 +51,16 @@ public final class DataCipher {
         case otherKey
         /// Not something this format can open (damaged, truncated, or tampered with).
         case damaged
+        /// Encrypted, and this build has no encryption (no provisioning profile, see
+        /// EncryptionAvailability): another build of Likely encrypted it.
+        case encryptionOff
 
         public var description: String {
             switch self {
             case .keyUnavailable(let why): return "the encryption key isn't available to this build (\(why))"
             case .otherKey: return "it was encrypted by another build of Likely, or with a key no longer in the Keychain"
             case .damaged: return "it's damaged"
+            case .encryptionOff: return "it was encrypted by another build of Likely, and this build has no encryption"
             }
         }
     }

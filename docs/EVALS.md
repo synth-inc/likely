@@ -38,6 +38,7 @@ $APP --eval fixtures --dry-run                   # print the prompts; run nothin
 | `--prompt-file <file>` | Settings | try a different prompt template |
 | `--out <dir>` | see below | results folder |
 | `--no-isolate` | | don't sandbox cases that set `searchFolders` |
+| `--with-tools` | | give fixture cases your tools too (see Your tools) |
 | `--verbose` | | also print Likely's log lines |
 
 From the app: **Settings → Evals → Run Suite…** runs the same command as a subprocess and shows its
@@ -45,12 +46,13 @@ progress; **Open Last Report** opens the newest report.
 
 Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-<model>/`:
 
-- `results.json`: every case's suggestions, score, timings, cost, tool calls (schema: `EvalRun` in
-  `Sources/LikelyEvalKit/EvalResults.swift`).
+- `results.json`: every case's suggestions, score, timings, cost, tool calls, and the run's tools (schema:
+  `EvalRun` in `Sources/LikelyEvalKit/EvalResults.swift`).
 - `report.html`: self-contained report: summary tiles, per-tag table, per-case details, and a comparison
   with the previous run of the same suite, including which cases started or stopped passing. It prefers a
   previous run with the same agent, model, k, tags and `--case` filter; if there's none, it compares with
-  the newest run of the suite and says which settings differ.
+  the newest run of the suite and says which settings differ. When your tools differ from that run's,
+  it says so too ("tools changed: +rclip"), without passing over the run: see Your tools.
 - `cases/<n>-<id>/prompt.txt` and `cases/<n>-<id>/transcript.jsonl`: the exact first message and the
   agent's raw stream (every turn, relaunches included). `<n>` is the case's position in the suite, so
   cases that share an id keep separate folders.
@@ -89,6 +91,7 @@ One JSON object per line. Blank lines and lines starting with `#` or `//` are ig
 | `context.screenshot` | optional | path to a screenshot of that window. With one, the case runs like automatic mode (screenshot + "the user already added: …"); without, input-first (typed description only) |
 | `context.button` | optional | the picker's confirm button ("Open", "Upload", …) |
 | `context.userName` | optional | the name sent as `{{userName}}` ("The user is …"). Unset: none for personal cases (evals never send your real name), "Jordan Rivera" for `source: "fixture"` cases |
+| `context.useTools` | optional | `true`/`false`: whether the agent gets your tools (tools.json) for this case. Unset: personal cases do, fixture cases don't (see Your tools) |
 | `expect` | required | one of the three forms below; `{}` means "not filled in yet" (skipped) |
 | `tags` | optional | free-form; filter with `--tags`, broken down in the report |
 | `source` | optional | `manual`, `captured`, `history` or `fixture` |
@@ -125,6 +128,30 @@ The summary averages over cases with expectations.
 The scoring code lives in `Sources/LikelyEvalKit` (no app dependencies) and is unit-tested:
 `swift test`.
 
+## Your tools
+
+Tools you add in Settings → Tools (tools.json, see [TOOLS.md](TOOLS.md)) change what the agent can do,
+so evals handle them explicitly:
+
+- **Personal cases** (your cases.jsonl, any file you pass, and cases whose `source` isn't `fixture`) run
+  with your enabled, approved tools, exactly as the app does: their prompt section, their command
+  allowlist entries and the sandbox profile that comes with them. Add a tool and run the evals again,
+  and the comparison measures the tool.
+- **Fixture cases** (`source: "fixture"`, or anything in `evals/fixtures/cases.jsonl`) ignore your tools
+  by default, so public-suite results stay comparable across machines: no tools section in the prompt,
+  no allowlist entries, and the default (non-tools) sandbox profile. `--with-tools` gives them your tools
+  for one run; `"context": {"useTools": true}` does it for one case.
+- A case's `context.useTools` wins either way (`false` keeps a personal case on the built-in commands only).
+- The tools are read once, when the run starts, so every case of a run sees the same set.
+
+Every run records the tools the agent got in `results.json` (`tools`: each tool's id with a hash of its
+commands and instructions, plus a hash of the set; empty when no case used them) and each case's
+`usedTools`. The report and the printed summary show them ("Tools: rclip (1a2b3c4d)"), and the
+comparison with the previous run flags a different set: `+id` added, `-id` removed, `~id` edited
+(commands or instructions). A tool change doesn't count as different settings when picking the previous
+run, since comparing against the run before the tool is the point. Runs from before tools were recorded
+show no tools line and no tool comparison.
+
 ## Writing your own cases
 
 Your cases live in `~/Library/Application Support/Likely/evals/cases.jsonl`. Ways to add one:
@@ -150,9 +177,10 @@ model is weak.
 
 With **Settings → Evals → "Automatically save picks as tests"** turned on (off by default in every build),
 each confirmed pick becomes a case in `cases.jsonl` right away, with no approval step: what you typed,
-the app, the window title, the screenshot (if one was taken, saved encrypted as `…/evals/screenshots/<id>.png.enc`;
-the case editor decrypts it in memory for its preview, and an eval run decrypts it into a temporary 0600
-file in the case's own folder for the agent, deleted when the case ends), and the
+the app, the window title, the screenshot (if one was taken, saved as `…/evals/screenshots/<id>.png.enc`
+in builds with encryption, see [BUILDING.md](BUILDING.md), or as a 0600 `<id>.png` without; the case
+editor decrypts it in memory for its preview, and an eval run decrypts it into a temporary 0600 file in
+the case's own folder for the agent, deleted when the case ends), and the
 file(s) you picked. Captured cases have `"source": "captured"` and the tag `captured`, so they're easy to
 filter, edit or delete in Settings → Evals. Nothing is recorded for cancelled pickers, or when you neither
 typed anything nor had a screenshot. If the pick can't be read, it stays out of your tests: it's logged
@@ -181,7 +209,8 @@ How the pick is read (Accessibility; `PickTracker` in `Sources/Likely/Evals/Eval
 ## Search history
 
 With **Settings → History → "Save search history"** on (the default; independent of automatic saving),
-every picker Likely searched for is kept in `~/Library/Application Support/Likely/History/history.jsonl`,
+every picker Likely searched for is kept in `~/Library/Application Support/Likely/History/history.enc.jsonl`
+(`history.jsonl` in builds without encryption),
 newest 500 only: the time, the app, the window title and confirm button, what you typed (in order), the
 originals the agent suggested (not the `~/Likely` copies), and what you picked, when the picker was
 confirmed and the pick could be read (same `PickTracker` as Capture). Pickers where nothing ran (nothing
@@ -194,10 +223,11 @@ typed in input-first mode, or no license), and a picker still open when Likely q
   `~/Library/Application Support/Likely` and `~/Library/Logs/Likely` except the run's work folder, and Codex
   gets a permission profile that extends its built-in read-only one with the same paths set to `"none"`
   (`AgentSandbox.codexFilesystem`). See [PRIVACY.md](PRIVACY.md).
-- Each line is encrypted (AES-GCM, with a key in the Keychain): `lk1:<key id>:<base64>`. History saved
-  by an older version is encrypted in place on first launch. A build that can't read the key (a dev build
-  reading a release build's history, or the other way round) says "History can't be read by this build"
-  and leaves those lines alone.
+- In builds with encryption (official releases; see [BUILDING.md](BUILDING.md)) each line is encrypted
+  (AES-GCM, with a key in the data-protection keychain): `lk1:<key id>:<base64>`. Plaintext history (an
+  older version's, or a build without encryption's) is moved into the encrypted file on launch. A build
+  without encryption leaves the encrypted file alone and says "History is encrypted by another build of
+  Likely"; lines sealed with a key this build can't read are reported and left alone too.
 - The first time a search is recorded, Settings → History shows a short line about it (until you click
   OK), and the next picker's bar shows the same line once: "Likely keeps a private history of your
   searches on this Mac so you can turn them into tests. Turn it off in Settings → History."
@@ -257,7 +287,8 @@ isolated*; Run Suite shows a note when you pick Codex for the public fixtures.
 
 ## Code map
 
-- `Sources/LikelyEvalKit/`: case format, path rules, scoring, results, reports (tested in `Tests/LikelyEvalKitTests`).
+- `Sources/LikelyEvalKit/`: case format, path rules, scoring, results, reports, which cases get your tools
+  (`EvalToolPolicy`, `EvalToolSet` in EvalTools.swift) (tested in `Tests/LikelyEvalKitTests`).
 - `Sources/Likely/Evals/EvalCLI.swift`: `--eval` mode (suites, runner loop, dry-run sink, isolation).
 - `Sources/Likely/Evals/EvalCapture.swift`: cases from real use (`EvalCapture`, `PickTracker`).
 - `Sources/LikelyEvalKit/SearchHistory.swift`, `Sources/Likely/Evals/SearchHistorySettings.swift`: search

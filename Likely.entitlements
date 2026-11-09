@@ -2,9 +2,27 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Hardened-runtime exceptions for Developer ID builds (scripts/release.sh): none needed today.
-         No App Sandbox: Likely reads other apps' accessibility trees, captures windows and launches
-         agent CLIs. Accessibility and Screen Recording are TCC grants and need no entitlement. Likely
-         sends no Apple Events, so there's no automation entitlement (and agents are denied them). -->
+    <!-- A template: codesign doesn't expand variables. scripts/provisioning.py fills in the team
+         and bundle id from the provisioning profile (LIKELY_PROFILE) at sign time and checks every
+         value against the profile's own Entitlements; build.sh signs with the result
+         (build/…/Likely.entitlements.generated). Builds without a profile are signed without
+         entitlements. See docs/BUILDING.md.
+
+         keychain-access-groups needs the profile (its allowed groups are "<team id>.*"): it gives the
+         app the data-protection keychain group that holds the data key (KeychainKeyStore,
+         EncryptionAvailability). Without it, encryption is off.
+
+         Hardened-runtime exceptions: none needed. No App Sandbox: Likely reads other apps'
+         accessibility trees, captures windows and launches agent CLIs. Accessibility and Screen
+         Recording are TCC grants and need no entitlement. Likely sends no Apple Events, so there's no
+         automation entitlement (and agents are denied them). -->
+    <key>com.apple.application-identifier</key>
+    <string>$(TeamID).$(BundleID)</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>$(TeamID)</string>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(TeamID).inc.synth.likely</string>
+    </array>
 </dict>
 </plist>

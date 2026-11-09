@@ -109,8 +109,8 @@ final class EvalCaseStore: ObservableObject {
         if !used { try? FileManager.default.removeItem(atPath: standardized) }
     }
 
-    /// Keeps a screenshot with the cases, encrypted (evals/screenshots/<id>.png.enc). A path already
-    /// in that folder is kept as it is.
+    /// Keeps a screenshot with the cases: evals/screenshots/<id>.png.enc, or <id>.png in builds
+    /// without encryption. A path already in that folder is kept as it is.
     static func keepScreenshot(path: String, id: String) -> String? {
         if URL(fileURLWithPath: path).standardizedFileURL.path.hasPrefix(EvalStorage.screenshotsURL.standardizedFileURL.path + "/") {
             return path
@@ -362,7 +362,7 @@ struct EvalCaseEditor: View {
                                 Text(previewProblem).font(.caption).foregroundStyle(.secondary)
                             }
                             HStack {
-                                Text(screenshot.isEmpty ? "From this run (saved encrypted with the test)" : EvalPath.display(screenshot))
+                                Text(screenshot.isEmpty ? (DataProtection.cipher == nil ? "From this run (saved with the test)" : "From this run (saved encrypted with the test)") : EvalPath.display(screenshot))
                                     .font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
                                 Button("Remove") { screenshot = ""; pendingPNG = nil; preview = nil; previewProblem = nil }
                             }
@@ -457,7 +457,7 @@ struct EvalCaseEditor: View {
         c.query = queryList
         let context = EvalCase.Context(app: app.isEmpty ? nil : app, windowTitle: windowTitle.isEmpty ? nil : windowTitle,
                                        screenshot: screenshot.isEmpty ? nil : screenshot, button: c.context?.button,
-                                       userName: c.context?.userName)
+                                       userName: c.context?.userName, useTools: c.context?.useTools)
         c.context = context.isEmpty ? nil : context
         c.expect = Expectation.make(kind: paths.isEmpty ? .none : kind, paths: kind == .folder ? Array(paths.prefix(1)) : paths)
         c.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }

@@ -3,11 +3,13 @@ import LikelyEvalKit
 import LikelyStorage
 import SwiftUI
 
-/// Every search Likely ran (History/history.jsonl next to the evals folder, last 500), so any of them
-/// can be made into an eval case later. On this Mac only; never sent anywhere, and the agents' sandboxes
-/// can't read it (AgentSandbox.protectionRules, CodexRunner). Each line is encrypted with the data key
-/// in the Keychain (SearchHistoryFile, DataProtection.cipher). "Save search history" in Settings → History,
-/// on by default, independent of "Automatically save picks as tests".
+/// Every search Likely ran (in History/ next to the evals folder, last 500), so any of them can be made
+/// into an eval case later. On this Mac only; never sent anywhere, and the agents' sandboxes can't read
+/// it (AgentSandbox.protectionRules, CodexRunner). Builds with encryption keep it in history.enc.jsonl,
+/// each line encrypted with the data key in the Keychain (SearchHistoryFile, DataProtection.cipher), and
+/// move plaintext history into it at launch; builds without keep it in history.jsonl and leave
+/// history.enc.jsonl alone. "Save search history" in Settings → History, on by default, independent of
+/// "Automatically save picks as tests".
 ///
 /// All file access goes through one serial background queue, so recording a search never blocks the
 /// main thread when a picker closes and writes can't interleave. The list is only read and decoded
@@ -27,13 +29,15 @@ final class SearchHistoryStore: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
     }
 
-    let url = SearchHistoryFile.defaultURL
     private let cipher = DataProtection.cipher
+    /// history.enc.jsonl with encryption, history.jsonl without.
+    let url = SearchHistoryFile.url(encrypted: DataProtection.cipher != nil)
     static let unreadableMessage = "History can't be read by this build"
+    static let encryptedElsewhereMessage = "History is encrypted by another build of Likely"
     private let queue = DispatchQueue(label: "inc.synth.likely.history", qos: .utility)
     /// Newest first. Only kept current while the History tab is visible.
     @Published private(set) var entries: [SearchHistoryEntry] = []
-    /// Whether history.jsonl exists, even if none of its lines decode (Clear and Show File use this).
+    /// Whether the history file exists, even if none of its lines decode (Clear and Show File use this).
     @Published private(set) var fileExists = false
     @Published var lastError: String?
     /// Saved searches this build can't open (encrypted by another build of Likely, or its key is
@@ -43,15 +47,18 @@ final class SearchHistoryStore: ObservableObject {
     private var visibleCount = 0
 
     private init() {
-        queue.async { [url, cipher] in
+        queue.async { [cipher] in
+            let plaintext = SearchHistoryFile.plaintextURL
             do {
-                try SearchHistoryFile.migrate(from: SearchHistoryFile.legacyURL, to: url)
+                try SearchHistoryFile.migrate(from: SearchHistoryFile.legacyURL, to: plaintext)
             } catch {
                 Log.write("history", "couldn't move history.jsonl into History/: \(error)")
             }
-            // History saved before encryption: encrypted in place, once (only plaintext lines change).
+            // Plaintext history (older versions, or a build without encryption): moved into the
+            // encrypted file, once. Without encryption, nothing changes (history.enc.jsonl included).
+            guard let cipher else { return }
             do {
-                let count = try SearchHistoryFile.encryptPlaintext(url, cipher: cipher)
+                let count = try SearchHistoryFile.convertPlaintext(from: plaintext, to: SearchHistoryFile.encryptedURL, cipher: cipher)
                 if count > 0 { Log.write("history", "encrypted \(count) saved search(es)") }
             } catch {
                 Log.write("history", "couldn't encrypt saved searches, left as they are: \(error)")
@@ -73,16 +80,18 @@ final class SearchHistoryStore: ObservableObject {
 
     /// Reads the file in the background and publishes it, if the tab is still visible.
     func reload() {
-        queue.async { [url] in
+        queue.async { [url, cipher] in
             let exists = FileManager.default.fileExists(atPath: url.path)
-            let result = Result { try SearchHistoryFile.read(url, cipher: self.cipher) }
+            let result = Result { try SearchHistoryFile.read(url, cipher: cipher) }
+            // Without encryption, history.enc.jsonl is another build's: left alone, but mentioned.
+            let encryptedElsewhere = cipher == nil && FileManager.default.fileExists(atPath: SearchHistoryFile.encryptedURL.path)
             DispatchQueue.main.async {
                 guard self.visibleCount > 0 else { return }
                 self.fileExists = exists
                 switch result {
                 case .success(let contents):
                     self.entries = contents.entries.reversed()
-                    self.unreadableNote = Self.note(for: contents)
+                    self.unreadableNote = Self.note(for: contents, encryptedElsewhere: encryptedElsewhere)
                     if self.lastError?.hasPrefix("Couldn't read") == true { self.lastError = nil }
                 case .failure(let error):
                     self.entries = []
@@ -93,7 +102,10 @@ final class SearchHistoryStore: ObservableObject {
         }
     }
 
-    static func note(for contents: SearchHistoryFile.Contents) -> String? {
+    static func note(for contents: SearchHistoryFile.Contents, encryptedElsewhere: Bool = false) -> String? {
+        if encryptedElsewhere {
+            return encryptedElsewhereMessage + ". It's kept as it is; that build can still read it. This build saves its own history unencrypted."
+        }
         guard contents.unreadable > 0 else { return nil }
         let why = contents.problem.map { " (\($0))" } ?? ""
         if contents.entries.isEmpty {
@@ -195,6 +207,7 @@ struct HistorySettings: View {
                 Text("Keeps your last \(SearchHistoryFile.defaultLimit) searches (what you typed, the app, what Likely suggested and what you picked) on this Mac only, so you can turn any of them into a test. Nothing is uploaded.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            EncryptionStatusView()
             if enabled && firstRecorded != 0 && !noticeDismissed {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "info.circle").foregroundStyle(.secondary)
@@ -427,5 +440,28 @@ struct MakeEvalSheet: View {
     private func isFolder(_ path: String) -> Bool {
         var isDir: ObjCBool = false
         return FileManager.default.fileExists(atPath: (path as NSString).expandingTildeInPath, isDirectory: &isDir) && isDir.boolValue
+    }
+}
+
+/// Whether this build encrypts history and saved test screenshots (DataProtection.encryption), with
+/// how to turn it on when it's off.
+struct EncryptionStatusView: View {
+    private let state = DataProtection.encryption
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: state.isOn ? "lock.fill" : "lock.open").foregroundStyle(.secondary)
+            switch state {
+            case .on:
+                Text("Encryption: on").font(.caption).foregroundStyle(.secondary)
+            case .off:
+                Text(state.summary + ".").font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("How to turn it on", destination: DataProtection.buildingGuideURL).font(.caption)
+            }
+        }
+        .help(state.isOn
+              ? "Search history and saved test screenshots are encrypted with a key in your Keychain."
+              : "Search history and saved test screenshots are kept unencrypted, readable only by your user account, and hidden from Likely's agents and Spotlight.")
     }
 }
