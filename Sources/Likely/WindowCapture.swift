@@ -5,8 +5,9 @@ import UniformTypeIdentifiers
 /// Screenshots the window the user was looking at when the picker opened, leaving the picker out.
 ///
 /// Once a picker is showing it's baked into the app's window pixels (Chrome draws the sheet into its
-/// own window), so the primary source is a snapshot taken on the click or ⌘-shortcut that opened it.
-/// A live capture is the fallback.
+/// own window), so the primary source is a snapshot taken on the click or ⌘-shortcut that opened it,
+/// kept in memory. A live capture is the fallback. Either is only written to disk (`save`) when the
+/// user submits a search.
 enum WindowCapture {
     struct Result {
         let url: URL
@@ -20,6 +21,13 @@ enum WindowCapture {
         let title: String?
         let image: CGImage
         let date: Date
+    }
+
+    /// A screenshot in memory, not yet written.
+    struct Image {
+        let image: CGImage
+        let windowTitle: String?
+        let mode: String
     }
 
     enum CaptureError: Error { case noWindow, noDisplay, writeFailed }
@@ -41,14 +49,18 @@ enum WindowCapture {
         return Snapshot(pid: pid, windowID: info.id, title: window.title, image: image, date: Date())
     }
 
-    static func save(_ snapshot: Snapshot, to url: URL) throws -> Result {
-        try write(snapshot.image, to: url)
+    static func image(from snapshot: Snapshot) -> Image {
         let age = String(format: "%.1fs", Date().timeIntervalSince(snapshot.date))
-        return Result(url: url, windowTitle: snapshot.title, mode: "pre-picker snapshot of window #\(snapshot.windowID), \(age) old")
+        return Image(image: snapshot.image, windowTitle: snapshot.title, mode: "pre-picker snapshot of window #\(snapshot.windowID), \(age) old")
+    }
+
+    static func save(_ image: Image, to url: URL) throws -> Result {
+        try write(image.image, to: url)
+        return Result(url: url, windowTitle: image.windowTitle, mode: image.mode)
     }
 
     /// Fallback when there's no fresh snapshot. The picker may show up in the image.
-    static func captureNow(pid: pid_t, pickerFrame: CGRect?, to url: URL) async throws -> Result {
+    static func captureNow(pid: pid_t, pickerFrame: CGRect?) async throws -> Image {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
 
         if let info = frontWindow(pid: pid, excluding: pickerFrame),
@@ -59,8 +71,7 @@ enum WindowCapture {
             let config = configuration(for: window.frame)
             config.sourceRect = window.frame.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-            try write(image, to: url)
-            return Result(url: url, windowTitle: window.title, mode: "live capture of window #\(info.id)")
+            return Image(image: image, windowTitle: window.title, mode: "live capture of window #\(info.id)")
         }
 
         // No separate underlying window (e.g. a standalone Open panel): capture the display minus the picker.
@@ -74,8 +85,7 @@ enum WindowCapture {
         }
         let filter = SCContentFilter(display: display, excludingWindows: excluded)
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration(for: display.frame))
-        try write(image, to: url)
-        return Result(url: url, windowTitle: nil, mode: "live capture of display minus \(excluded.count) picker windows")
+        return Image(image: image, windowTitle: nil, mode: "live capture of display minus \(excluded.count) picker windows")
     }
 
     /// Retina resolution, capped so the image stays a reasonable size for Claude to read.
@@ -98,7 +108,8 @@ enum WindowCapture {
 }
 
 /// Keeps an in-memory snapshot of the front window, refreshed on every click and ⌘-shortcut,
-/// i.e. the gestures that open pickers. Nothing is written to disk unless a picker opens.
+/// i.e. the gestures that open pickers. Nothing is written to disk unless the user searches from the
+/// picker that click opened. Off when "Send a screenshot with searches" is.
 final class PrePickerSnapshotter {
     private(set) var latest: WindowCapture.Snapshot?
     var isSuspended: () -> Bool = { false }
@@ -124,6 +135,9 @@ final class PrePickerSnapshotter {
         guard let latest, latest.pid == pid, Date().timeIntervalSince(latest.date) < maxAge else { return nil }
         return latest
     }
+
+    /// Forgets the snapshot (a picker closed, or screenshots were turned off).
+    func discard() { latest = nil }
 
     /// Like `snapshot(for:)`, but first lets a capture that's still running (from the opening click) finish.
     func awaitSnapshot(for pid: pid_t) async -> WindowCapture.Snapshot? {

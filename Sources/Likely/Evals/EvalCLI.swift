@@ -512,7 +512,7 @@ final class EvalCaseRun {
         }
         lastPrompt = prompt
         let typed = evalCase.query.first.map { $0.isEmpty ? [] : [$0] } ?? []
-        return PromptBuilder.withTyped(prompt, typed: typed, autoMode: screenshot != nil)
+        return PromptBuilder.withTyped(prompt, typed: typed)
     }
 
     /// Search folders are process-wide (read synchronously while building the prompt and launching);

@@ -19,10 +19,15 @@ let package = Package(
         // Eval case format, scoring and reports (Foundation only, unit-tested). See docs/EVALS.md.
         .target(name: "LikelyEvalKit", path: "Sources/LikelyEvalKit"),
         .testTarget(name: "LikelyEvalKitTests", dependencies: ["LikelyEvalKit"], path: "Tests/LikelyEvalKitTests"),
+        // Foundation-only rules for picking recent files (batches, files apps write in the background),
+        // split out so they can be unit tested.
+        .target(name: "RecentFilesCore", path: "Sources/RecentFilesCore"),
         .executableTarget(
             name: "Likely",
-            dependencies: ["OnboardingKit", "LikelyEvalKit", .product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["OnboardingKit", "LikelyEvalKit", "RecentFilesCore",
+                           .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Likely",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
+        .testTarget(name: "RecentFilesCoreTests", dependencies: ["RecentFilesCore"], path: "Tests/RecentFilesCoreTests"),
     ]
 )
