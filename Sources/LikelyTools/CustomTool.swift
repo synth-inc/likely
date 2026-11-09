@@ -11,15 +11,56 @@ public struct CustomTool: Codable, Identifiable, Equatable, Hashable {
     public var instructions: String
     /// For people and coding agents: how to install or maintain the tool. Not sent to the search agent.
     public var setup: String?
+    /// Private data areas the tool reads (`PrivateDataArea` ids such as "photos"), which agents are
+    /// otherwise kept out of. Part of what the user approves (ToolApproval); the tool isn't used until
+    /// each area is turned on in Settings → Permissions.
+    public var needs: [String]
 
-    public init(id: String, name: String, enabled: Bool = true, commands: [String], instructions: String, setup: String? = nil) {
+    public init(id: String, name: String, enabled: Bool = true, commands: [String], instructions: String, setup: String? = nil,
+                needs: [String] = []) {
         self.id = id
         self.name = name
         self.enabled = enabled
         self.commands = commands
         self.instructions = instructions
         self.setup = setup
+        self.needs = needs
     }
+
+    private enum CodingKeys: String, CodingKey { case id, name, enabled, commands, instructions, setup, needs }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        commands = try c.decodeIfPresent([String].self, forKey: .commands) ?? []
+        instructions = try c.decodeIfPresent(String.self, forKey: .instructions) ?? ""
+        setup = try c.decodeIfPresent(String.self, forKey: .setup)
+        needs = try c.decodeIfPresent([String].self, forKey: .needs) ?? []
+    }
+
+    /// `needs` is left out when empty, so tools.json stays as it was for tools without any.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(commands, forKey: .commands)
+        try c.encode(instructions, forKey: .instructions)
+        try c.encodeIfPresent(setup, forKey: .setup)
+        if !needs.isEmpty { try c.encode(needs, forKey: .needs) }
+    }
+
+    /// The areas in `needs`, without unknown ids or duplicates, in declaration order.
+    public var neededAreas: [PrivateDataArea] {
+        var areas: [PrivateDataArea] = []
+        for need in needs { if let area = PrivateDataArea(id: need), !areas.contains(area) { areas.append(area) } }
+        return areas
+    }
+
+    /// `needs` normalized (area ids, sorted): what approval covers.
+    public var normalizedNeeds: [String] { neededAreas.map(\.rawValue).sorted() }
 
     /// Validation problems; a tool with any is never given to the agent.
     public var problems: [String] { ToolValidator.problems(for: self) }
@@ -126,9 +167,22 @@ public struct ToolsFile: Equatable {
             }
             usedIDs.insert(id)
 
+            var needs: [String] = []
+            switch dict["needs"] {
+            case let list as [Any]:
+                needs = list.compactMap { $0 as? String }
+                if needs.count != list.count { file.issues.append("\(name): non-text entries in \"needs\" ignored") }
+            case let single as String:
+                needs = [single]
+            case nil:
+                break
+            default:
+                file.issues.append("\(name): \"needs\" should be a list of strings")
+            }
+
             let setup = (dict["setup"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             file.tools.append(CustomTool(id: id, name: name, enabled: enabled, commands: commands,
-                                         instructions: dict["instructions"] as? String ?? "", setup: setup))
+                                         instructions: dict["instructions"] as? String ?? "", setup: setup, needs: needs))
         }
         return file
     }

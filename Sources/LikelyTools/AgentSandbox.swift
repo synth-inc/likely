@@ -79,16 +79,29 @@ public enum AgentSandbox {
     /// Likely's folders and every agent's session transcripts (`AgentSessions`, Codex's own included:
     /// Codex reads its sessions itself, outside the sandbox) are "none" and the run's work folder is
     /// "read" (the more specific path wins; verified with `codex sandbox`, codex-cli 0.153).
+    /// Private data areas the user hasn't opened (`blockedAreas`, see PrivateDataArea) are "none" too.
     /// Codex's read-only profile allows no writes at all, so renaming a folder above Likely's data
     /// (`dataAncestorPaths`) is already impossible there.
     public static func codexFilesystem(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
-                                       readable: [String], denied extra: [String] = []) -> String {
-        var denied: [String] = []
-        for path in dataDeniedPaths(home: home) + AgentSessions.deniedPaths(home: home, except: nil) + extra
-        where !denied.contains(path) { denied.append(path) }
-        let entries = denied.map { "\(tomlString($0)) = \"none\"" }
-            + readable.map { "\(tomlString(realPath($0))) = \"read\"" }
-        return "{ " + entries.joined(separator: ", ") + " }"
+                                       readable: [String],
+                                       blockedAreas: [PrivateDataArea] = PrivateDataAccess.blocked(),
+                                       photoLibraries: [String] = [],
+                                       denied extra: [String] = []) -> String {
+        var entries: [(path: String, access: String)] = []
+        func add(_ path: String, _ access: String) {
+            // A path appears once (a TOML table can't repeat a key); a deny never loses to a read.
+            if let i = entries.firstIndex(where: { $0.path == path }) {
+                if access == "none" { entries[i].access = "none" }
+            } else {
+                entries.append((path, access))
+            }
+        }
+        for path in dataDeniedPaths(home: home) + AgentSessions.deniedPaths(home: home, except: nil) + extra { add(path, "none") }
+        for entry in PrivateDataAccess.codexEntries(blocked: blockedAreas, home: home, photoLibraries: photoLibraries) {
+            add(entry.path, entry.access)
+        }
+        for path in readable { add(realPath(path), "read") }
+        return "{ " + entries.map { "\(tomlString($0.path)) = \"\($0.access)\"" }.joined(separator: ", ") + " }"
     }
 
     static func tomlString(_ s: String) -> String {
@@ -151,13 +164,25 @@ public enum AgentSandbox {
     /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
     /// `extraRules` (evals only, see EvalIsolation) come after the profile, so they win over it.
     /// Every profile ends with `protectionRules`, so no agent can read Likely's data (other than
-    /// `readable`, the run's work folder) or change Likely's data or settings.
+    /// `readable`, the run's work folder) or change Likely's data or settings, and none can read the
+    /// private data areas the user hasn't opened (`blockedAreas`, see PrivateDataArea).
     /// `agent`: whose session transcripts stay readable (the agent's own; see AgentSessions).
     public static func wrap(executable: String, arguments: [String], profile: String, extraRules: String = "",
-                            readable: [String] = [], agent: AgentSessions? = nil) -> (URL, [String]) {
+                            readable: [String] = [], blockedAreas: [PrivateDataArea] = PrivateDataAccess.blocked(),
+                            agent: AgentSessions? = nil) -> (URL, [String]) {
         (URL(fileURLWithPath: "/usr/bin/sandbox-exec"),
-         ["-p", profile + (extraRules.isEmpty ? "" : "\n" + extraRules) + "\n" + protectionRules(readable: readable, agent: agent),
+         ["-p", compose(profile: profile, extraRules: extraRules, readable: readable, blockedAreas: blockedAreas, agent: agent),
           executable] + arguments)
+    }
+
+    /// The full profile `wrap` passes to sandbox-exec.
+    public static func compose(profile: String, extraRules: String = "", readable: [String] = [],
+                               blockedAreas: [PrivateDataArea], agent: AgentSessions? = nil,
+                               home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
+        let privateData = PrivateDataAccess.sandboxRules(blocked: blockedAreas, home: home)
+        return profile + (extraRules.isEmpty ? "" : "\n" + extraRules)
+            + (privateData.isEmpty ? "" : "\n" + privateData)
+            + "\n" + protectionRules(home: home, readable: readable, agent: agent)
     }
 
     // MARK: Likely's own files

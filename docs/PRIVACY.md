@@ -133,6 +133,13 @@ written as well, for macOS versions that honor it.) Nothing is written to the lo
 done, and if an earlier version did split a folder (both names real folders), the old one's contents are
 merged into the `.noindex` one and it's replaced by the link.
 
+**Other apps' private data.** The agents are also kept out of macOS's protected stores (Photos libraries,
+Mail, Messages, Contacts & Calendars, Notes, Safari, other apps' containers) unless you turn one on in
+Settings → Permissions → Private data, or allow it for a tool that needs it. Stores only Full Disk Access
+opens (call history, the TCC database, Biome, iPhone backups, cookies, the data-protection keychain, …)
+are always denied, even with every area on. See [TOOLS.md](TOOLS.md#private-data-needs), which also lists
+what's left for Codex.
+
 ## The log
 
 `~/Library/Logs/Likely/likely.log` (Settings → General → Troubleshooting → Open Log) is for finding out why

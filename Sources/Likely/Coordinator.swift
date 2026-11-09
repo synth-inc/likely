@@ -788,6 +788,7 @@ enum PromptTemplate {
     More Spotlight: by source site `mdfind 'kMDItemWhereFroms == "*example.com*"'`, by type `mdfind -onlyin ~ 'kMDItemContentTypeTree == "public.image" && kMDItemFSContentChangeDate >= $time.today(-7)'`.
     Where to look: {{searchFolders}}. Folders the user added are good bets. Elsewhere in ~ is fine too.
     Hidden or app-specific folders only if the obvious places come up empty. Ignore {{likelyFolder}} itself. Never modify anything.
+    Don't search inside app data stores (Photos, Mail, Messages, ~/Library) unless the user asks for that kind of item.
     """
 
     static func render(_ template: String, values: [String: String]) -> String {
