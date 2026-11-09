@@ -601,4 +601,28 @@
   document.addEventListener('visibilitychange', update);
   if (reduce && reduce.addEventListener) reduce.addEventListener('change', update);
   update();
+
+  // ---- ?edit: a background picker for the demo (editing aid only; never shown to visitors) -------
+  if (/[?&]edit(&|=|$)/.test(location.search)) {
+    var WALLS = [["Midnight aurora (current)", "radial-gradient(60% 55% at 12% 18%, rgba(56,125,245,.55), transparent 70%), radial-gradient(55% 60% at 88% 78%, rgba(124,82,230,.5), transparent 72%), radial-gradient(45% 40% at 70% 15%, rgba(40,170,200,.3), transparent 70%), radial-gradient(50% 45% at 25% 90%, rgba(220,90,150,.22), transparent 70%), linear-gradient(160deg,#101A3A,#141233 55%,#0C0F24)"], ["Deep blue", "radial-gradient(70% 60% at 30% 20%, #2B5BD6, transparent 70%), radial-gradient(60% 60% at 80% 90%, #1B2F7A, transparent 70%), #0A1230"], ["Sunset dunes", "radial-gradient(80% 60% at 20% 100%, #E9734A, transparent 70%), radial-gradient(70% 60% at 85% 85%, #B8467A, transparent 70%), linear-gradient(180deg,#2A1B4A,#5A2E62 55%,#C2566A)"], ["Teal lagoon", "radial-gradient(60% 60% at 15% 25%, #1FB5A8, transparent 70%), radial-gradient(60% 60% at 85% 75%, #146C94, transparent 70%), linear-gradient(160deg,#08262E,#0B3A44)"], ["Graphite", "radial-gradient(70% 70% at 30% 20%, #3A3D45, transparent 70%), linear-gradient(160deg,#1C1D21,#121316)"], ["Warm sand (light)", "radial-gradient(70% 60% at 20% 20%, #F6E3C6, transparent 70%), radial-gradient(60% 60% at 85% 85%, #E7B98C, transparent 70%), #EED6B6"], ["Lavender haze", "radial-gradient(60% 60% at 20% 20%, #9B8CF2, transparent 70%), radial-gradient(60% 60% at 80% 80%, #F2A2C8, transparent 70%), linear-gradient(160deg,#3B2F6E,#6A4A9C)"], ["Forest", "radial-gradient(70% 60% at 25% 25%, #2F7A4F, transparent 70%), radial-gradient(60% 60% at 85% 85%, #144C3A, transparent 70%), #0B1F18"], ["Brand blue", "radial-gradient(70% 70% at 50% 0%, #5C96FA, transparent 70%), linear-gradient(180deg,#387DF5,#1D4FB8)"], ["Peach glow", "radial-gradient(60% 60% at 15% 85%, #FFB38A, transparent 70%), radial-gradient(60% 60% at 85% 15%, #FF7E8A, transparent 70%), linear-gradient(160deg,#4A1F3A,#8A3550)"], ["Ocean wave", "conic-gradient(from 210deg at 70% 60%, #0F3D8A, #2A7BD6, #4FC3E8, #2A7BD6, #0F3D8A)"], ["Plain near-black", "#141519"]];
+    var wall = host.querySelector('.ld-wall');
+    var KEY = 'likely-demo-wall';
+    var i = 0;
+    try { i = Math.min(WALLS.length - 1, Math.max(0, +localStorage.getItem(KEY) || 0)); } catch (e) {}
+    var bar = document.createElement('div');
+    bar.className = 'ld-wallpicker';
+    bar.innerHTML = '<button type="button" data-d="-1" aria-label="Previous background">‹</button><span></span><button type="button" data-d="1" aria-label="Next background">›</button>';
+    var label = bar.querySelector('span');
+    function apply() {
+      wall.style.background = WALLS[i][1];
+      label.textContent = 'Background ' + (i + 1) + ' of ' + WALLS.length + ': ' + WALLS[i][0];
+      try { localStorage.setItem(KEY, String(i)); } catch (e) {}
+    }
+    bar.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      i = (i + (+b.dataset.d) + WALLS.length) % WALLS.length; apply();
+    });
+    host.parentNode.insertBefore(bar, host.nextSibling);
+    apply();
+  }
 })();

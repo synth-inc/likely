@@ -165,3 +165,9 @@
 .demo-cap.on { opacity: 1; transform: none; }
 .copy-editing .demo-caps { height: auto; }
 .copy-editing .demo-cap { position: static; opacity: 1; transform: none; margin: 4px 0; }
+
+/* ?edit only: background picker under the demo */
+.ld-wallpicker { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px auto 0; font: 500 13px -apple-system, sans-serif; color: rgba(235,240,255,.75); }
+.ld-wallpicker button { width: 30px; height: 30px; border-radius: 8px; border: 0; background: rgba(224,229,255,.12); color: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
+.ld-wallpicker button:hover { background: #387DF5; }
+.ld-wallpicker span { min-width: 260px; text-align: center; }
