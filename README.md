@@ -50,9 +50,6 @@ scripts/release.sh --dry-run   # build, Developer ID sign, Likely.dmg, notarize,
 scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Likely.dmg, and commit + push docs/appcast.xml
 ```
 
-Likely 0.1.0 still checks the old feed on onit-server. Until those installs have updated, run the release with
-`LEGACY_FEED_DIR=<onit-server checkout>` so the appcast is written there too, then deploy onit-server.
-
 ## How it works
 
 - **Detection** (`AXWatcher`, `PickerHeuristics`): AX observers on every app. NSOpenPanel windows have

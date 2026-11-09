@@ -29,10 +29,6 @@
 #   - The update feed is docs/appcast.xml in this repo, served by GitHub Pages at $FEED_URL
 #     (https://synth-inc.github.io/likely/appcast.xml). The script commits it to main and pushes;
 #     Sparkle clients see the release once Pages has redeployed (about a minute).
-#   - Bridge for 0.1.0 installs: Likely 0.1.0 checks the old feed on onit-server
-#     (onit-server-v2-...herokuapp.com/likely/appcast.xml). Set LEGACY_FEED_DIR to an onit-server checkout
-#     (use a worktree, e.g. ~/Apps/onit-server-likely) to also write the appcast there, then deploy it.
-#     Keep doing this until 0.1.0 installs have updated; the first release with the new feed URL moves them over.
 set -euo pipefail
 
 # Releases are the paid edition, built without dev-only switches, whatever the calling shell has set.
@@ -54,8 +50,6 @@ OUT="$ROOT/build/release"
 APP="$OUT/$APP_NAME.app"
 DMG="$OUT/$APP_NAME.dmg"
 APPCAST_SRC="$ROOT/docs/appcast.xml"
-LEGACY_FEED_DIR="${LEGACY_FEED_DIR:-}"
-LEGACY_APPCAST_REL="public/likely/appcast.xml"
 FEED_URL=$(/usr/libexec/PlistBuddy -c "Print :SUFeedURL" Info.plist)
 
 DRY_RUN=false
@@ -121,11 +115,6 @@ if [ "$DRY_RUN" = false ]; then
     git fetch -q --tags origin
     git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "Tag $TAG already exists; run scripts/bump-version.sh patch"; exit 1; }
     gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1 && { echo "Release $TAG already exists"; exit 1; }
-    if [ -n "$LEGACY_FEED_DIR" ]; then
-        [ -d "$LEGACY_FEED_DIR/public" ] || { echo "LEGACY_FEED_DIR has no public/ folder: $LEGACY_FEED_DIR"; exit 1; }
-    else
-        echo "Note: LEGACY_FEED_DIR isn't set, so 0.1.0 installs (old onit-server feed) won't see this release."
-    fi
     if [ -f "$APPCAST_SRC" ] && grep -q "<sparkle:version>$BUILD</sparkle:version>" "$APPCAST_SRC"; then
         echo "Build $BUILD is already in the appcast; run scripts/bump-version.sh"; exit 1
     fi
@@ -217,12 +206,6 @@ git add docs/appcast.xml
 git commit -q -m "Likely $VERSION appcast"
 if ! git push -q origin HEAD:main; then
     echo "Couldn't push the appcast to main. Push this commit (or open a PR) yourself: $(git rev-parse --short HEAD)"
-fi
-if [ -n "$LEGACY_FEED_DIR" ]; then
-    echo "==> Bridge: updating $LEGACY_FEED_DIR/$LEGACY_APPCAST_REL for 0.1.0 installs"
-    mkdir -p "$(dirname "$LEGACY_FEED_DIR/$LEGACY_APPCAST_REL")"
-    cp "$APPCAST_OUT" "$LEGACY_FEED_DIR/$LEGACY_APPCAST_REL"
-    echo "  In $LEGACY_FEED_DIR: git add $LEGACY_APPCAST_REL && git commit -m \"Likely $VERSION appcast\" && git push   # then deploy"
 fi
 echo
 echo "Released $TAG: https://github.com/$GH_REPO/releases/tag/$TAG"
