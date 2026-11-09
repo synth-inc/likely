@@ -194,7 +194,7 @@ h1 em { font-style: normal; color: var(--text-2); }
 .legal { max-width: 720px; padding-top: 24px; }
 .legal h1 { font-size: clamp(32px, 5vw, 44px); margin-bottom: 10px; }
 .legal .meta { color: var(--text-2); font-size: 14px; margin-bottom: 8px; }
-.legal .placeholder { background: rgba(255, 159, 10, 0.18); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+.placeholder { background: rgba(255, 159, 10, 0.18); padding: 1px 6px; border-radius: 5px; color: var(--text); font-size: inherit; }
 .legal .lede { font-size: 17px; color: var(--text-2); margin: 20px 0 8px; line-height: 1.55; }
 .legal h2 { text-align: left; font-size: 21px; margin: 44px 0 12px; scroll-margin-top: 20px; }
 .legal h3 { margin: 22px 0 6px; }

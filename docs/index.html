@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Likely: the file you were about to look for</title>
-  <meta name="description" content="Likely is a Mac menu bar app. Open a file picker and your newest files are already in the Likely folder, pinned to the sidebar. Type what you need and your coding agent finds the rest.">
+  <meta name="description" content="Likely is a Mac menu bar app. Every file picker opens with the files you just added. For anything else, describe it, and Likely finds it.">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#16171A" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F5F5F5" media="(prefers-color-scheme: light)">
@@ -53,7 +53,7 @@
       <img class="hero-logo" src="assets/logo-512.png" width="88" height="88" alt="">
       <p class="badge"><span class="badge-dot" aria-hidden="true"></span><span data-copy-id="hero.badge">Open source, for macOS</span></p>
       <h1 data-copy-id="hero.title">Why doesn’t macOS <i class="title-accent">already</i> do this?</h1>
-      <p class="subtitle" data-copy-id="hero.subtitle">Anytime you open a file picker, <b>Likely</b> puts your newest files in a pinned folder. Type what you need, and it finds the rest.</p>
+      <p class="subtitle" data-copy-id="hero.subtitle">Every file picker opens with the files you just added. For anything else, describe it, and <b>Likely</b> finds it.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg">
           <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -103,10 +103,10 @@
     <section id="how" class="wrap section" aria-labelledby="how-h">
       <h2 id="how-h" data-copy-id="how.headline">Anytime you open a file picker...</h2>
       <ul class="panel bullets">
-        <li data-copy-id="how.b1">Open any file picker: Mail, Chrome, Pages, anything.</li>
-        <li data-copy-id="how.b2">Your most recently added files are already at the top of the Likely folder, pinned in the sidebar.</li>
-        <li data-copy-id="how.b3">Need something else? Type it in the search bar above the picker. Your coding agent searches your Mac and copies the matches into the folder.</li>
-        <li data-copy-id="how.b4">Keep asking, in plain English, until you find it.</li>
+        <li data-copy-id="how.b1">Your newest files are already there, in a Likely folder pinned to the sidebar. Most of the time, that’s the one.</li>
+        <li data-copy-id="how.b2">Looking for something else? Type it in plain English: “my 2025 W-2”, “the logo with the transparent background”.</li>
+        <li data-copy-id="how.b3">Your coding agent searches your Mac and puts the best matches in the Likely folder.</li>
+        <li data-copy-id="how.b4">Not it? Say so, and it keeps looking.</li>
       </ul>
       <div class="agents">
         <span class="agents-label" data-copy-id="how.agents.label">Runs on the agent you already have:</span>
@@ -119,29 +119,44 @@
     </section>
 
 
-    <!-- 5. MAKE LIKELY SMARTER (tools + evals; details in docs/TOOLS.md) -->
+    <!-- 5. PRIVATE BY DEFAULT (short; details in "What leaves your Mac" below and privacy.html) -->
+    <section id="private" class="wrap section" aria-labelledby="private-h">
+      <h2 id="private-h" data-copy-id="private.title">Private by default</h2>
+      <ul class="panel bullets">
+        <li data-copy-id="private.b1">Your files never leave your Mac. Likely copies them locally.</li>
+        <li data-copy-id="private.b2">Searches go to the AI you choose, under your own account. Likely doesn’t run an AI.</li>
+        <li data-copy-id="private.b3">No analytics, no tracking.</li>
+        <!-- ACCURACY: "stay out of Photos, Mail and Messages unless you allow it" ships with PR #11
+             (private-data-access), which isn't merged yet. On main, agents are read-only but not kept
+             out of those stores. Merge #11 before publishing this line, or cut the second half. -->
+        <li data-copy-id="private.b4">Agents can search and read, never change anything, and stay out of Photos, Mail and Messages unless you allow it.</li>
+      </ul>
+      <p class="section-more" data-copy-id="private.more"><a href="#leaves">See exactly what leaves your Mac →</a></p>
+    </section>
+
+    <!-- 6. MAKE LIKELY SMARTER (tools + evals; details in docs/TOOLS.md) -->
     <section id="smarter" class="wrap section" aria-labelledby="smarter-h">
       <h2 id="smarter-h" data-copy-id="smarter.title">Make Likely smarter</h2>
-      <p class="section-sub" data-copy-id="smarter.subtitle">Teach your agent a new trick in three steps.</p>
+      <p class="section-sub" data-copy-id="smarter.subtitle">Teach your agent a new trick in three steps. Say, finding photos by what’s in them.</p>
       <ol class="steps">
         <li class="panel step">
           <h3 data-copy-id="smarter.s1.title">Add a tool</h3>
-          <p data-copy-id="smarter.s1.body">Copy the setup prompt from Settings → Tools and paste it into your coding agent. Say what you want, like “index my photos so ‘my headshot’ works.” It installs the tool and adds it to Likely.</p>
+          <p data-copy-id="smarter.s1.body">Copy the setup prompt from Settings → Tools and paste it into your coding agent with what you want: “index my photos so ‘my headshot’ works.” It installs a photo search tool (rclip) and adds it to Likely.</p>
         </li>
         <li class="panel step">
           <h3 data-copy-id="smarter.s2.title">Tell the agent when to use it</h3>
-          <p data-copy-id="smarter.s2.body">Each tool comes with a few lines of instructions: when to reach for it and what to run. Likely adds them to every search.</p>
+          <p data-copy-id="smarter.s2.body">Each tool comes with a few lines of instructions, like “when the user wants a photo of something, run rclip.” Likely adds them to every search.</p>
         </li>
         <li class="panel step">
           <h3 data-copy-id="smarter.s3.title">Test it with evals</h3>
-          <p data-copy-id="smarter.s3.body">Turn real searches into test cases and run them on your own files, so you can see whether the tool actually finds the right file. Evals are in builds from source.</p>
+          <p data-copy-id="smarter.s3.body">Turn real searches like “my headshot” into test cases and run them on your own files, to see whether the tool finds the right photo. Evals are in builds from source.</p>
         </li>
       </ol>
       <p class="section-more" data-copy-id="smarter.more">How tools work: <a href="https://github.com/synth-inc/likely/blob/main/docs/TOOLS.md">docs/TOOLS.md</a> on GitHub.</p>
     </section>
 
-    <!-- 6. WHAT LEAVES YOUR MAC (plain-language version of the table in privacy.html) -->
-    <section id="privacy" class="wrap section" aria-labelledby="leaves-h">
+    <!-- 7. WHAT LEAVES YOUR MAC (plain-language version of the table in privacy.html) -->
+    <section id="leaves" class="wrap section" aria-labelledby="leaves-h">
       <h2 id="leaves-h" data-copy-id="leaves.title">What leaves your Mac</h2>
       <div class="panel leaves">
         <table class="data-table">
@@ -169,12 +184,12 @@
             </tr>
             <tr>
               <th scope="row" data-copy-id="leaves.server.to">Likely’s license server</th>
-              <td data-copy-id="leaves.server.what">A random install ID, plus your email and license status if you buy</td>
+              <td data-copy-id="leaves.server.what">A random install ID, and whether your license is active</td>
               <td data-copy-id="leaves.server.when">When you activate and when Likely checks your license</td>
             </tr>
             <tr>
               <th scope="row" data-copy-id="leaves.stripe.to">Stripe</th>
-              <td data-copy-id="leaves.stripe.what">Your payment details. Your card number never reaches us.</td>
+              <td data-copy-id="leaves.stripe.what">Your email and payment details. Your card number never reaches us.</td>
               <td data-copy-id="leaves.stripe.when">When you buy or manage a subscription</td>
             </tr>
             <tr>
@@ -194,13 +209,15 @@
       <p class="leaves-more" data-copy-id="leaves.more">No analytics, no telemetry, no crash reports. The details are in our <a href="privacy.html">privacy policy</a>.</p>
     </section>
 
-    <!-- 7. PRICING -->
+    <!-- 8. PRICING -->
     <section id="pricing" class="wrap section" aria-labelledby="price-h">
       <h2 id="price-h" data-copy-id="pricing.title">We couldn’t pick a business model…</h2>
       <div class="plans">
         <article class="panel plan plan-featured">
           <p class="vote" data-copy-id="pricing.sub.vote">Recurring</p>
-          <p class="price"><span data-copy-id="pricing.sub.price">$3</span><small data-copy-id="pricing.sub.unit">/month</small></p>
+          <!-- PRICING: the subscription period isn't decided. Replace the placeholder below in ?edit mode
+           (and check License.swift's "/ month" and the checkout plan match). -->
+          <p class="price"><span data-copy-id="pricing.sub.price">$3</span><small data-copy-id="pricing.sub.unit">/<span class="placeholder">[month or year?]</span></small></p>
           <p class="plan-body" data-copy-id="pricing.sub.body">A subscription gives us an excuse to keep working on this silly little app.</p>
           <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg"><span data-copy-id="pricing.sub.cta">Download</span></a>
         </article>
@@ -219,13 +236,13 @@
       </div>
     </section>
 
-    <!-- 8. FAQ -->
+    <!-- 9. FAQ -->
     <section id="faq" class="wrap section" aria-labelledby="faq-h">
       <h2 id="faq-h" data-copy-id="faq.title">Q&amp;A</h2>
       <div class="panel faq">
         <details>
           <summary><span data-copy-id="faq.how.q">How does it work?</span></summary>
-          <p data-copy-id="faq.how.a">When a file picker opens, Likely copies your most recently added files into the Likely folder and points the picker there. Nothing is sent anywhere. When you type in the search bar above the picker, Likely hands your request to your coding agent, along with the app and window title and, if you turn screenshots on, what you were just looking at. The agent searches with Spotlight and read-only tools, and Likely copies the best matches into the folder. The folder is cleared shortly after you’re done.</p>
+          <p data-copy-id="faq.how.a">When a file picker opens, Likely puts your most recently added files in the Likely folder. Your coding agent runs only when you type a request in the bar above the picker and submit it. It can only search and read, and Likely copies the matches into the folder. Whether the picker jumps straight to the Likely folder is a setting. The copies are cleared shortly after you’re done.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.need.q">What do I need?</span></summary>
@@ -237,7 +254,13 @@
         </details>
         <details>
           <summary><span data-copy-id="faq.screenshots.q">Are screenshots required? Where do they go?</span></summary>
-          <p data-copy-id="faq.screenshots.a">No. They need the optional Screen Recording permission, and you can switch them off in Settings. When on, a screenshot of the window behind the picker goes with your search, only to the agent you chose, and never just because a picker opened.</p>
+          <!-- DEFAULT: "Send a screenshot with searches" is on by default once Screen Recording is granted
+             (SettingsView.swift, sendScreenshot = true). If the default changes to off, update this answer. -->
+          <p data-copy-id="faq.screenshots.a">No. A screenshot of the window behind the picker is sent only when you search, and only to the agent you chose. You can turn them off in Settings, and they’re never sent if you don’t grant Screen Recording.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.send.q">Does Likely send my files anywhere?</span></summary>
+          <p data-copy-id="faq.send.a">No. If your agent opens a file to check it, its contents go to your AI provider as part of that search, the same as if you’d asked it in Terminal.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.folder.q">What’s in the Likely folder?</span></summary>
@@ -249,7 +272,11 @@
         </details>
         <details>
           <summary><span data-copy-id="faq.accessibility.q">Why does it want Accessibility permission?</span></summary>
-          <p data-copy-id="faq.accessibility.a">That’s how it notices a file picker opening, pins the Likely folder, and presents the search bar above the file picker. Screen Recording is only needed if you turn on screenshots.</p>
+          <p data-copy-id="faq.accessibility.a">That’s how it notices a file picker opening, shows the search bar above it, and jumps the picker to the Likely folder in its sidebar. Screen Recording is optional and only needed for screenshots with searches.</p>
+        </details>
+        <details>
+          <summary><span data-copy-id="faq.better.q">Can I make it better at finding my stuff?</span></summary>
+          <p data-copy-id="faq.better.a">Yes. Add tools: any command-line program your agent should use, like rclip for finding photos by what’s in them. Then test the result on your own files with evals. See <a href="https://github.com/synth-inc/likely/blob/main/docs/TOOLS.md">docs/TOOLS.md</a> and <a href="https://github.com/synth-inc/likely/blob/main/docs/EVALS.md">docs/EVALS.md</a>.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.switch.q">What if I switch Macs?</span></summary>

@@ -67,7 +67,8 @@
     <p data-copy-id="privacy.collect.p1">We (Synth) receive only what we need to sell and license the app:</p>
     <ul>
       <li data-copy-id="privacy.collect.li1"><b>App and install ID.</b> When Likely activates and when it checks your license, it sends our server the app’s identifier (“likely”) and a random ID created when you install it. The ID isn’t derived from your hardware, name or files.</li>
-      <li data-copy-id="privacy.collect.li2"><b>Account email and license status.</b> If you buy a license, our server keeps your account email address and whether your license is active, which plan it is, and when a subscription renews or ends.</li>
+      <li data-copy-id="privacy.collect.li2"><b>Purchase and license records.</b> There’s no sign-up or sign-in: Likely activates with the random install ID. If you buy a license, our server links the purchase to that install ID and keeps the plan, whether the license is active, when a subscription renews or ends, and Stripe’s reference numbers for the purchase (customer, checkout, payment and subscription IDs). Our server doesn’t store your email address.</li>
+      <li data-copy-id="privacy.collect.li2b"><b>Your email, through Stripe.</b> The email address you enter at checkout goes to Stripe, which keeps it with your purchase and sends your receipts. Because the purchase is in our Stripe account, we can see that email and your purchase history there, for example to answer a support or refund request.</li>
       <li data-copy-id="privacy.collect.li3"><b>Network information.</b> Like any web server, ours (and GitHub, which hosts downloads and this site) sees your IP address when the app or your browser connects.</li>
     </ul>
     <p data-copy-id="privacy.collect.p2">We don’t collect:</p>
@@ -109,12 +110,12 @@
           </tr>
           <tr>
             <th scope="row" data-copy-id="privacy.table.server.to">Likely’s license server (run by us on Heroku)</th>
-            <td data-copy-id="privacy.table.server.what">App ID and random install ID; account email and license status</td>
+            <td data-copy-id="privacy.table.server.what">App ID and random install ID; your plan and license status, and Stripe’s IDs for your purchase</td>
             <td data-copy-id="privacy.table.server.when">At activation, at license checks (at launch and about every 12 hours), and when you buy</td>
           </tr>
           <tr>
             <th scope="row" data-copy-id="privacy.table.stripe.to">Stripe</th>
-            <td data-copy-id="privacy.table.stripe.what">What you enter at checkout or in Stripe’s billing portal, such as email and card details</td>
+            <td data-copy-id="privacy.table.stripe.what">What you enter at checkout or in Stripe’s billing portal: your email and payment details</td>
             <td data-copy-id="privacy.table.stripe.when">When you buy or manage a subscription</td>
           </tr>
           <tr>
@@ -133,7 +134,7 @@
     <p data-copy-id="privacy.ai.p3">You control what goes to the provider: screenshots and your name each have a switch in Settings, the agent only searches when you type, and you choose which tools to add.</p>
 
     <h2 id="payment" data-copy-id="privacy.payment.title">5. Payment</h2>
-    <p data-copy-id="privacy.payment.p1">Purchases go through Stripe Checkout, and subscriptions are managed in Stripe’s billing portal. Stripe processes your payment under its own <a href="https://stripe.com/privacy">privacy policy</a>. Your card details go to Stripe and never reach us. We receive the result of the purchase so we can turn on your license.</p>
+    <p data-copy-id="privacy.payment.p1">Purchases go through Stripe Checkout, and subscriptions are managed in Stripe’s billing portal. Stripe processes your payment under its own <a href="https://stripe.com/privacy">privacy policy</a>. Your card details go to Stripe and never reach us. Stripe tells our server when a purchase, renewal, cancellation or refund happens, so we can turn your license on or off. We can see your email and purchase history in our Stripe account.</p>
 
     <h2 id="updates" data-copy-id="privacy.updates.title">6. Updates</h2>
     <p data-copy-id="privacy.updates.p1">Paid builds of Likely check for updates with Sparkle. The update feed is on our server and the download comes from GitHub releases, so both see your IP address and app version. Sparkle’s optional system-profile reporting is off, so no information about your Mac is sent with the check. You can turn off automatic checks in Settings. Builds you make yourself from source don’t check for updates.</p>
@@ -144,15 +145,15 @@
       <li data-copy-id="privacy.local.li1"><code>~/Likely</code> (or the folder you chose): copies of suggested files. Copies are cloned locally and cleared shortly after the picker closes; your originals are never changed.</li>
       <li data-copy-id="privacy.local.li2"><code>~/Library/Application Support/Likely</code>: search history (<code>History</code>), your tools (<code>tools.json</code>), eval cases and results (<code>evals</code>), and temporary screenshots (<code>run</code>, removed when the picker closes).</li>
       <li data-copy-id="privacy.local.li3"><code>~/Library/Logs/Likely</code>: Likely’s log, which may mention past searches.</li>
-      <li data-copy-id="privacy.local.li4">Likely’s preferences (<code>inc.synth.likely</code>), which hold your settings, the install ID and your cached license status, and a Keychain item (<code>inc.synth.likely.server</code>) with a sign-in token for the license server.</li>
+      <li data-copy-id="privacy.local.li4">Likely’s preferences (<code>inc.synth.likely</code>), which hold your settings, the install ID and your cached license status, and a Keychain item (<code>inc.synth.likely.server</code>) holding an access token for the license server.</li>
     </ul>
     <p data-copy-id="privacy.local.p2">To delete search history, use Settings → History. To delete everything, quit Likely and delete the folders above, then run <code>defaults delete inc.synth.likely</code> in Terminal and remove the Keychain item in Keychain Access. Your AI provider’s CLI may keep its own session logs; see its documentation.</p>
 
     <h2 id="retention" data-copy-id="privacy.retention.title">8. Retention</h2>
-    <p data-copy-id="privacy.retention.p1">We keep account and license records (install ID, account email, license status) for as long as your license is active, and after that only as long as we need to for legal, tax and accounting purposes, or to resolve disputes. Stripe keeps payment records under its own policy. Server logs that include IP addresses are kept only as long as our hosting providers retain them.</p>
+    <p data-copy-id="privacy.retention.p1">We keep account and license records (install ID, plan, license status and Stripe’s purchase IDs) for as long as your license is active, and after that only as long as we need to for legal, tax and accounting purposes, or to resolve disputes. Stripe keeps payment records under its own policy. Server logs that include IP addresses are kept only as long as our hosting providers retain them.</p>
 
     <h2 id="rights" data-copy-id="privacy.rights.title">9. Your rights</h2>
-    <p data-copy-id="privacy.rights.p1">Depending on where you live, you may have the right to access, correct, delete or export the personal information we hold about you, or to object to how we use it. To make a request, including asking us to delete your account and license records, email <a href="mailto:contact@cloudless.so">contact@cloudless.so</a> from the address you bought with, or include your install ID (in Likely’s preferences). We’ll answer within the time the law requires. You can also complain to your local data protection authority.</p>
+    <p data-copy-id="privacy.rights.p1">Depending on where you live, you may have the right to access, correct, delete or export the personal information we hold about you, or to object to how we use it. To make a request, including asking us to delete your account and license records, email <a href="mailto:contact@cloudless.so">contact@cloudless.so</a> from the address you used at checkout, or include your install ID (run <code>defaults read inc.synth.likely installId</code> in Terminal). We’ll answer within the time the law requires. You can also complain to your local data protection authority.</p>
     <p data-copy-id="privacy.rights.p2">Data on your Mac is already under your control; you can delete it at any time as described above.</p>
 
     <h2 id="children" data-copy-id="privacy.children.title">10. Children</h2>
