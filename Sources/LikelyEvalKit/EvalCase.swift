@@ -32,17 +32,23 @@ public struct EvalCase: Codable, Identifiable, Hashable {
         /// The user's name, sent as `{{userName}}`. Unset: personal cases send no name; fixture cases
         /// (`source: "fixture"`) use the synthetic persona, "Jordan Rivera".
         public var userName: String?
+        /// Whether the agent gets the user's tools (tools.json) for this case. Unset: personal cases
+        /// do, fixture cases don't unless the run passes `--with-tools` (see EvalToolPolicy).
+        public var useTools: Bool?
 
         public init(app: String? = nil, windowTitle: String? = nil, screenshot: String? = nil, button: String? = nil,
-                    userName: String? = nil) {
+                    userName: String? = nil, useTools: Bool? = nil) {
             self.app = app
             self.windowTitle = windowTitle
             self.screenshot = screenshot
             self.button = button
             self.userName = userName
+            self.useTools = useTools
         }
 
-        public var isEmpty: Bool { app == nil && windowTitle == nil && screenshot == nil && button == nil && userName == nil }
+        public var isEmpty: Bool {
+            app == nil && windowTitle == nil && screenshot == nil && button == nil && userName == nil && useTools == nil
+        }
     }
 
     public init(id: String, query: [String], context: Context? = nil, expect: Expectation, tags: [String] = [],

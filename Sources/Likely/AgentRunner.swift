@@ -33,6 +33,9 @@ struct AgentLaunchOptions {
     var appendTranscript = false
     /// Launched by `--eval`: Hermes then never reuses a gateway it didn't start with these rules.
     var isEval = false
+    /// The user's tools this launch may use (allowlist and sandbox profile). nil: the ones the app
+    /// uses (ToolStore's enabled, approved tools). Evals set it per case; [] means none.
+    var tools: [CustomTool]?
 }
 
 /// The raw JSON stream each runner saves to <workDir>/last-run.jsonl.

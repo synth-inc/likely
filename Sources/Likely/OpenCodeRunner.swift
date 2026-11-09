@@ -110,7 +110,7 @@ final class OpenCodeRunner: AgentRunner {
         let configHome = workDir.appendingPathComponent("opencode-config").path
         env["XDG_CONFIG_HOME"] = configHome
         Self.resetConfig(configHome)
-        env["OPENCODE_PERMISSION"] = Self.permission(extra: ToolStore.shared.activeCommands)
+        env["OPENCODE_PERMISSION"] = Self.permission(extra: launchOptions.toolCommands)
         for flag in ["OPENCODE_PURE", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE",
                      "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_LSP_DOWNLOAD"] {
             env[flag] = "1"
