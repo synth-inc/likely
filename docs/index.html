@@ -53,7 +53,7 @@
       <img class="hero-logo" src="assets/logo-512.png" width="88" height="88" alt="">
       <p class="badge"><span class="badge-dot" aria-hidden="true"></span><span data-copy-id="hero.badge">Open source, for macOS</span></p>
       <h1 data-copy-id="hero.title">Why doesn’t macOS <i class="title-accent">already</i> do this?</h1>
-      <p class="subtitle" data-copy-id="hero.subtitle">Describe what you’re looking for in plain English. <b>Likely</b> finds it and puts it in your file picker.</b> finds it.</p>
+      <p class="subtitle" data-copy-id="hero.subtitle">A search bar for every file picker. Describe what you’re looking for in plain English, and <b>Likely</b> finds it.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg">
           <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -103,9 +103,9 @@
     <section id="how" class="wrap section" aria-labelledby="how-h">
       <h2 id="how-h" data-copy-id="how.headline">Anytime you open a file picker...</h2>
       <ul class="panel bullets">
-        <li data-copy-id="how.b1">Recent files are automatically added to your Likely folder.</li>
-        <li data-copy-id="how.b2">Looking for something else? Type it in plain English and Likely kicks off an agent to find it.</li>
-        <li data-copy-id="how.b3">The agent searches your Mac and puts the best matches in the Likely folder.</li>
+        <li data-copy-id="how.b1">The Likely search bar appears above the file picker.</li>
+        <li data-copy-id="how.b2">Type what you need in plain English (e.g. “last year’s tax forms”, “our logo with a transparent background”). Likely kicks off an agent to find it.</li>
+        <li data-copy-id="how.b3">The agent temporarily copies the best matches into the Likely folder.</li>
         <li data-copy-id="how.b4">Not quite right? Give another instruction, and it keeps looking.</li>
       </ul>
       <div class="agents">
@@ -122,6 +122,83 @@
 
 
 
+    <!-- 5. IF IT MISSES, YOU CAN FIX IT (the improvement loop) -->
+    <section id="fix" class="wrap section" aria-labelledby="fix-h">
+      <div class="fx-panel">
+    <h2 id="fix-h" class="fx-title" data-copy-id="fix.title">If it misses, you can fix it</h2>
+    <p class="fx-sub" data-copy-id="fix.sub">Likely is built to be tested, tweaked and improved by you.</p>
+
+    <ol class="fx-steps">
+      <li class="fx-step">
+        <span class="fx-dot">1</span>
+        <div>
+          <h3 data-copy-id="fix.s1.title">Likely misses a file</h3>
+          <p data-copy-id="fix.s1.body">You describe what you need, like “my headshot”, and it comes back with the wrong files.</p>
+        </div>
+      </li>
+
+      <li class="fx-step">
+        <span class="fx-dot">2</span>
+        <div>
+          <h3 data-copy-id="fix.s2.title">Turn the miss into a test</h3>
+          <p data-copy-id="fix.s2.body">In History, click <b>Make Eval</b> and pick the file it should have found.</p>
+        </div>
+      </li>
+
+      <li class="fx-step">
+        <span class="fx-dot">3</span>
+        <div>
+          <h3 data-copy-id="fix.s3.title">Change how it searches</h3>
+          <p data-copy-id="fix.s3.body">Likely gives you several ways to improve results.</p>
+          <ul class="fx-ladder">
+            <li><b data-copy-id="fix.opt.tool.title">Add a tool</b><span data-copy-id="fix.opt.tool.body">Anything that runs in Terminal can become a tool Likely’s agent uses: your company’s file index, Google Drive or Dropbox, photo search, a local vector store.</span></li>
+            <li><b data-copy-id="fix.opt.folders.title">Add folders to search</b><span data-copy-id="fix.opt.folders.body">Point it at more places: an external drive, your Photos library, other apps’ data.</span></li>
+            <li><b data-copy-id="fix.opt.instructions.title">Edit the instructions</b><span data-copy-id="fix.opt.instructions.body">Add your own rules for how the agent should search.</span></li>
+            <li><b data-copy-id="fix.opt.model.title">Switch the model</b><span data-copy-id="fix.opt.model.body">Try a different agent or model.</span></li>
+            <li><b data-copy-id="fix.opt.agent.title">Or just ask your coding agent</b>
+              <div class="fx-ui fx-chat">
+                <div class="fx-bubble" data-copy-id="fix.chat.you">Look at my last failed Likely test and try fixes.</div>
+                <div class="fx-reply" data-copy-id="fix.chat.agent"><b>Claude Code:</b> It’s a photo, so file names don’t help. I added <b>rclip</b> (image search) as a tool and re-ran your tests: 3 of 4 pass now. Approve rclip in Settings → Tools.</div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </li>
+
+      <li class="fx-step">
+        <span class="fx-dot">4</span>
+        <div>
+          <h3 data-copy-id="fix.s4.title">Run your tests</h3>
+          <p data-copy-id="fix.s4.body">See what got better, and check nothing else broke.</p>
+<div class="fx-term"><span class="fx-p">$</span> Likely --eval personal
+<span class="fx-dim">Changed: + rclip</span>
+Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span>
+<span class="fx-ok">✓</span> fixed: "my headshot"
+<span class="fx-dim">  nothing else broke</span></div>
+        </div>
+      </li>
+
+      <li class="fx-step">
+        <span class="fx-dot fx-ok"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <div>
+          <h3 data-copy-id="fix.s5.title">Search again</h3>
+          <p data-copy-id="fix.s5.body">Same words, right file.</p>
+          <div class="fx-ui" aria-label="Search bar showing the right file">
+            <div class="fx-hud"><span class="fx-g" aria-hidden="true"></span><span class="fx-t">my headshot</span><span class="fx-send" aria-hidden="true">↑</span></div>
+            <div class="fx-picker">
+              <div class="fx-side"><span>Favorites</span><span class="fx-on">Likely</span><span>Desktop</span><span>Downloads</span></div>
+              <div class="fx-files">
+                <div class="fx-row fx-hdr"><span>Likely</span><span>1 found</span></div>
+                <div class="fx-row fx-hit"><span>headshot-2025.jpeg</span><span>✓</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+  </div>
+    </section>
+
     <!-- 8. PRICING -->
     <section id="pricing" class="wrap section" aria-labelledby="price-h">
       <h2 id="price-h" data-copy-id="pricing.title">We couldn’t pick a business model…</h2>
@@ -130,7 +207,7 @@
           <p class="vote" data-copy-id="pricing.sub.vote">Recurring</p>
           <!-- PRICING: the subscription period isn't decided. Replace the placeholder below in ?edit mode
            (and check License.swift's "/ month" and the checkout plan match). -->
-          <p class="price"><span data-copy-id="pricing.sub.price">$3</span><small data-copy-id="pricing.sub.unit">/<span class="placeholder">[month or year?]</span></small></p>
+          <p class="price"><span data-copy-id="pricing.sub.price">$3</span><small data-copy-id="pricing.sub.unit">/month</small></p>
           <p class="plan-body" data-copy-id="pricing.sub.body">A subscription gives us an excuse to keep working on this silly little app.</p>
           <a class="btn btn-primary" href="https://github.com/synth-inc/likely/releases/latest/download/Likely.dmg"><span data-copy-id="pricing.sub.cta">Download</span></a>
         </article>
@@ -155,7 +232,7 @@
       <div class="panel faq">
         <details>
           <summary><span data-copy-id="faq.how.q">How does it work?</span></summary>
-          <p data-copy-id="faq.how.a">When a file picker opens, Likely puts your most recently added files in the Likely folder. Your coding agent runs only when you type a request in the bar above the picker and submit it. It can only search and read, and Likely copies the matches into the folder. Whether the picker jumps straight to the Likely folder is a setting. The copies are cleared shortly after you’re done.</p>
+          <p data-copy-id="faq.how.a">When a file picker opens, Likely puts a search bar above it and your most recently added files in the Likely folder. Your coding agent runs only when you type a request in the bar and submit it. It can only search and read, and Likely copies the matches into the folder. Whether the picker jumps straight to the Likely folder is a setting. The copies are cleared shortly after you’re done.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.need.q">What do I need?</span></summary>
@@ -167,7 +244,7 @@
         </details>
         <details>
           <summary><span data-copy-id="faq.agent.q">Can the agent snoop around my Mac?</span></summary>
-          <p data-copy-id="faq.agent.a">It can search and read files to find what you asked for, nothing more. It can’t change or delete anything, and it can’t read Likely’s own data, like your search history or logs. It’s kept out of Photos, Mail, Messages, Contacts, Notes and Safari unless you allow them in Settings → Permissions.</p>
+          <p data-copy-id="faq.agent.a">It can search and read files to find what you asked for. It can’t change or delete anything, and it can’t read Likely’s own data, like your search history or logs. It’s kept out of Photos, Mail, Messages, Contacts, Notes and Safari unless you allow them in Settings → Permissions.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.provider.q">What leaves my Mac?</span></summary>
@@ -183,7 +260,7 @@
                   </thead>
                   <tbody>
                     <tr>
-                      <th scope="row" data-copy-id="leaves.ai.to">The AI provider you picked, through your own coding agent and account</th>
+                      <th scope="row" data-copy-id="leaves.ai.to">The AI agent you picked, through your own account (OpenAI, Anthropic, etc.)</th>
                       <td>
                         <ul>
                           <li data-copy-id="leaves.ai.w1">What you typed</li>

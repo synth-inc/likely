@@ -233,3 +233,70 @@ h1 em { font-style: normal; color: var(--text-2); }
 
 /* "already" in the hero title */
 .title-accent { color: var(--text-2); font-style: normal; }
+
+/* If it misses, you can fix it (the improvement loop). Classes are fx- prefixed to avoid clashing with .panel/.steps. */
+#fix { --panel: rgba(224,229,255,0.07); --good: #3FBF7F; --bad: #E5675B; --surface: #16171A; }
+@media (prefers-color-scheme: light) { #fix { --panel: rgba(112,115,122,0.06); --good: #1E9E5E; --bad: #C9473B; --surface: #F5F5F5; } }
+#fix .fx-title { text-align: center; margin-bottom: 10px; }
+
+#fix .fx-panel { background: var(--panel); border-radius: 22px; padding: 40px 36px 32px; }
+@media (max-width: 560px) { .fx-panel { padding: 28px 18px; } }
+#fix .fx-sub { text-align: center; color: var(--text-2); margin: 10px auto 36px; font-size: 16px; }
+
+/* steps */
+#fix .fx-steps { list-style: none; margin: 0; padding: 0; position: relative; }
+#fix .fx-step:not(:last-child)::before { content: ""; position: absolute; left: 15px; top: 32px; bottom: 0; width: 2px; background: var(--divider); }
+#fix .fx-step { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 18px; padding-bottom: 30px; position: relative; }
+#fix .fx-step:last-child { padding-bottom: 0; }
+#fix .fx-dot { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; display: grid; place-items: center; position: relative; z-index: 1; }
+#fix .fx-dot.fx-ok { background: var(--good); }
+#fix .fx-step h3 { font-size: 18px; margin: 3px 0 4px; text-wrap: balance; }
+#fix .fx-step p { margin: 0 0 12px; color: var(--text-2); font-size: 15px; max-width: 60ch; }
+#fix .fx-step p b { color: var(--text); font-weight: 600; }
+
+/* mini interface */
+#fix .fx-ui { background: var(--surface); border: 1px solid var(--fill-2); border-radius: 12px; padding: 10px; display: grid; gap: 8px; font-size: 13px; width: 100%; max-width: 480px; }
+#fix .fx-hud { display: flex; align-items: center; gap: 8px; background: var(--fill-2); border-radius: 9px; padding: 7px 10px; }
+#fix .fx-hud .fx-g { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); flex: none; }
+#fix .fx-hud .fx-t { flex: 1; min-width: 0; }
+#fix .fx-hud .fx-send { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10px; display: grid; place-items: center; flex: none; }
+#fix .fx-picker { display: grid; grid-template-columns: 96px minmax(0, 1fr); border: 1px solid var(--fill-2); border-radius: 9px; overflow: hidden; }
+#fix .fx-side { background: var(--fill); padding: 8px; display: grid; gap: 3px; align-content: start; font-size: 11px; color: var(--text-2); }
+#fix .fx-side .fx-on { color: var(--text); background: var(--fill-2); border-radius: 5px; padding: 1px 5px; margin: 0 -5px; }
+#fix .fx-files { padding: 6px 8px; display: grid; gap: 2px; font-size: 12px; align-content: start; }
+#fix .fx-row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 5px; border-radius: 4px; }
+#fix .fx-row.fx-hdr { color: var(--text-2); font-size: 11px; }
+#fix .fx-row.fx-miss { color: var(--text-2); }
+#fix .fx-row.fx-miss span:last-child { color: var(--bad); }
+#fix .fx-row.fx-hit { background: rgba(63,191,127,0.18); }
+#fix .fx-row.fx-hit span:last-child { color: var(--good); }
+#fix .fx-hist { display: flex; align-items: center; gap: 10px; background: var(--fill-2); border-radius: 9px; padding: 8px 10px; }
+#fix .fx-hist .fx-q { flex: 1; min-width: 0; }
+#fix .fx-hist small { display: block; color: var(--text-2); font-size: 11px; }
+#fix .fx-btn { background: var(--accent); color: #fff; border-radius: 7px; padding: 3px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+#fix .fx-check { display: grid; gap: 5px; font-size: 12px; padding: 0 2px; }
+#fix .fx-check div { display: flex; gap: 8px; align-items: center; }
+#fix .fx-box { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--divider); display: grid; place-items: center; font-size: 9px; flex: none; }
+#fix .fx-box.fx-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+#fix .fx-dim { color: var(--text-2); }
+#fix .fx-ok { color: var(--good); }
+
+#fix .fx-levers { display: grid; gap: 6px; max-width: 480px; }
+#fix .fx-lever { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; background: var(--fill); border-radius: 10px; padding: 9px 11px; font-size: 14px; }
+#fix .fx-lever .fx-ico { width: 24px; height: 24px; border-radius: 6px; background: var(--fill-2); display: grid; place-items: center; font-size: 12px; }
+#fix .fx-lever small { display: block; color: var(--text-2); font-size: 12px; margin-top: 2px; }
+#fix .fx-or { color: var(--text-2); font-size: 14px; margin: 14px 0 8px; }
+#fix .fx-chat { display: grid; gap: 8px; }
+#fix .fx-bubble { justify-self: start; background: var(--accent); color: #fff; border-radius: 12px 12px 12px 4px; padding: 7px 11px; font-size: 13px; max-width: 90%; }
+#fix .fx-reply { justify-self: start; background: var(--fill-2); border-radius: 12px 12px 12px 4px; padding: 7px 11px; font-size: 13px; color: var(--text-2); max-width: 90%; }
+#fix .fx-reply b { color: var(--text); }
+
+#fix .fx-term { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; background: #0E0F11; color: #E8EAF0; border-radius: 10px; padding: 10px 12px; max-width: 480px; white-space: pre; overflow-x: auto; }
+#fix .fx-term .fx-p { color: #7FA8FF; } .fx-term .fx-ok { color: #57D395; } .fx-term .fx-dim { color: #8A90A0; }
+
+#fix .fx-ladder { list-style: none; counter-reset: lv; border-left: 0; padding-left: 0; display: grid; gap: 14px; max-width: 560px; margin: 4px 0; }
+#fix .fx-ladder li { position: relative; padding-left: 24px; font-size: 14px; color: var(--text-2); }
+#fix .fx-ladder li::before { content: ""; position: absolute; left: 6px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--text-2); }
+#fix .fx-ladder li > b { display: block; color: var(--text); font-size: 15px; }
+#fix .fx-ladder li .fx-chat { margin-top: 10px; }
+
