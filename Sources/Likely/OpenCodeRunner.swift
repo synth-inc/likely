@@ -12,6 +12,7 @@ final class OpenCodeRunner: AgentRunner {
     var onFile: ((String) -> Void)?
     var onTurnFinished: ((AgentOutcome) -> Void)?
     var onExit: ((AgentOutcome) -> Void)?
+    var launchOptions = AgentLaunchOptions()
 
     private(set) var isBusy = false
     private var process: Process?
@@ -62,8 +63,7 @@ final class OpenCodeRunner: AgentRunner {
         self.model = model
         self.workDir = workDir
         let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
-        FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
-        transcript = try? FileHandle(forWritingTo: transcriptURL)
+        transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         var arguments = ["run", "--format", "json", "-m", model]
         if let image { arguments += ["-f", image.path] }
@@ -128,7 +128,7 @@ final class OpenCodeRunner: AgentRunner {
         let process = Process()
         // OpenCode keeps tools it downloads (ripgrep) in <data>/bin: runnable, but not writable inside the sandbox.
         let profile = AgentSandbox.confinedProfile(writable: writable, execAllowed: [dataDir + "/bin"])
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments, profile: profile)
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments, profile: profile, extraRules: launchOptions.extraSandboxRules)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir

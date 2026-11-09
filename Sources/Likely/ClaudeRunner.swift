@@ -16,6 +16,7 @@ final class ClaudeRunner: AgentRunner {
     var onTurnFinished: ((Outcome) -> Void)?
     /// The process ended without being cancelled (crash, auth failure, …).
     var onExit: ((Outcome) -> Void)?
+    var launchOptions = AgentLaunchOptions()
 
     /// Search commands that can't write: `sort` (-o) and `file` (-C) can, so they're left out, like
     /// `find` (-delete/-exec/-fprint) and `tee`.
@@ -68,7 +69,8 @@ final class ClaudeRunner: AgentRunner {
         // With user tools enabled, also no writes outside Claude's own state: the validator can't prove
         // a tool read-only, the sandbox can.
         let profile = userCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.claudeProfile()
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments, profile: profile)
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
         process.executableURL = launcher
         process.arguments = launchArguments
 
@@ -87,8 +89,7 @@ final class ClaudeRunner: AgentRunner {
         process.standardError = stderr
 
         let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
-        FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
-        transcript = try? FileHandle(forWritingTo: transcriptURL)
+        transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData

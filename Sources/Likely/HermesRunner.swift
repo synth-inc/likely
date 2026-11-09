@@ -24,6 +24,7 @@ final class HermesRunner: AgentRunner {
     var onFile: ((String) -> Void)?
     var onTurnFinished: ((AgentOutcome) -> Void)?
     var onExit: ((AgentOutcome) -> Void)?
+    var launchOptions = AgentLaunchOptions()
 
     private(set) var isBusy = false
     private var process: Process?
@@ -59,8 +60,7 @@ final class HermesRunner: AgentRunner {
         self.workDir = workDir
         sessionName = "likely-\(UUID().uuidString.prefix(8).lowercased())"
         let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
-        FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
-        transcript = try? FileHandle(forWritingTo: transcriptURL)
+        transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         var prompt = prompt
         if let image { prompt += "\n\nThe screenshot is at \(image.path)." }
@@ -103,8 +103,9 @@ final class HermesRunner: AgentRunner {
         guard let executable, let workDir, let sessionName else { return }
         isBusy = true
         let generation = self.generation
+        let options = launchOptions
         DispatchQueue.global(qos: .userInitiated).async {
-            let problem = Self.prepare(executable: executable, workDir: workDir)
+            let problem = Self.prepare(executable: executable, workDir: workDir, options: options)
             DispatchQueue.main.async {
                 guard generation == self.generation else { return }
                 if let problem {
@@ -127,7 +128,7 @@ final class HermesRunner: AgentRunner {
 
         let process = Process()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: Self.baseArguments + arguments,
-                                                             profile: Self.sandboxProfile)
+                                                             profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -212,6 +213,7 @@ final class HermesRunner: AgentRunner {
             if !textSinceTool { AgentProtocol.parse(text: event["text"] as? String ?? "", onStatus: onStatus, onFile: reportFile) }
             turnEnded = true
             isBusy = false
+            if launchOptions.isEval { Self.noteEvalGateway(rules: launchOptions.extraSandboxRules) }
             let exitCode = event["exit_code"] as? Int ?? 1
             if exitCode == 0 {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
@@ -317,7 +319,7 @@ extension HermesRunner {
 
     /// Sets up the profile and stub, and makes sure no unsandboxed gateway would serve it.
     /// Returns a message for the user if Hermes can't run safely. Runs off the main thread.
-    private static func prepare(executable: String, workDir: URL) -> String? {
+    private static func prepare(executable: String, workDir: URL, options: AgentLaunchOptions) -> String? {
         let fm = FileManager.default
         // `launchctl print` answers "not found" (113) so Hermes looks no further; anything else fails,
         // which makes it start the gateway as a plain child process.
@@ -350,7 +352,57 @@ extension HermesRunner {
            (json["served_profiles"] as? [String])?.contains(profileName) == true {
             return "Your Hermes gateway is serving the \(profileName) profile; restart it with: hermes gateway restart"
         }
+        if options.isEval, let problem = prepareEvalGateway(executable: executable, rules: options.extraSandboxRules) { return problem }
         return nil
+    }
+
+    // MARK: Evals
+
+    /// The gateway inherits the sandbox of the client that started it, extra eval rules included, and
+    /// then serves every later client. So an eval only reuses a gateway it started itself with the
+    /// same rules; any other gateway for the profile (one the app started, or one from another case)
+    /// is stopped first, and the next client starts a fresh one inside this case's sandbox.
+    private static let evalGatewayLock = NSLock()
+    /// pid nil: our client is starting it (recorded after the first turn).
+    private static var evalGateway: (pid: pid_t?, rules: String)?
+
+    private static func prepareEvalGateway(executable: String, rules: String) -> String? {
+        evalGatewayLock.lock()
+        defer { evalGatewayLock.unlock() }
+        if let pid = gatewayPID(profileDir), pid > 1, kill(pid, 0) == 0 {
+            if let known = evalGateway, known.rules == rules, known.pid == nil || known.pid == pid {
+                evalGateway = (pid, rules)
+                return nil
+            }
+            Log.write("hermes", "eval: restarting gateway pid=\(pid) for this case's sandbox rules")
+            if isSandboxed(pid) { kill(pid, SIGTERM) } else { run(executable, ["-p", profileName, "gateway", "stop"]) }
+            let deadline = Date().addingTimeInterval(10)
+            while kill(pid, 0) == 0, Date() < deadline { usleep(100_000) }
+            if kill(pid, 0) == 0 {
+                return "Couldn't stop the Hermes gateway (pid \(pid)) to restart it inside this test's sandbox; run: hermes -p \(profileName) gateway stop"
+            }
+        }
+        evalGateway = (nil, rules)
+        return nil
+    }
+
+    fileprivate static func noteEvalGateway(rules: String) {
+        evalGatewayLock.lock()
+        defer { evalGatewayLock.unlock() }
+        guard let known = evalGateway, known.rules == rules, known.pid == nil else { return }
+        evalGateway = (gatewayPID(profileDir), rules)
+    }
+
+    /// When an eval exits: stop the gateway it started (it was started with a test's sandbox rules,
+    /// so the app mustn't reuse it).
+    static func stopEvalGateway() {
+        evalGatewayLock.lock()
+        defer { evalGatewayLock.unlock() }
+        guard let known = evalGateway else { return }
+        evalGateway = nil
+        guard let pid = known.pid ?? gatewayPID(profileDir), pid > 1, kill(pid, 0) == 0, isSandboxed(pid) else { return }
+        kill(pid, SIGTERM)
+        Log.write("hermes", "eval: stopped gateway pid=\(pid)")
     }
 
     /// At quit: stop the sandboxed gateway Likely started for the `likely` profile (an unsandboxed one

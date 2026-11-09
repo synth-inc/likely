@@ -1,9 +1,24 @@
 # Likely
 
-Menu bar app that notices when a macOS file picker opens, asks Claude Code what file you probably
-need (based on a screenshot of the window behind the picker), and clones the candidates into `~/Likely`.
-A file named `…<what Claude is doing>…` sits at the top of the folder as a live progress report.
+Menu bar app that notices when a macOS file picker opens and fills `~/Likely` with the files you probably need.
+When the picker opens, the folder instantly gets your most recently added files (see below). When you
+describe what you want in the bar above the picker, Likely asks your coding agent (Claude Code by default; with
+the optional Screenshots permission and Settings → Send a screenshot with searches, it also sees the window
+behind the picker) and clones its candidates into
+`~/Likely` in place of the recent files. A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
 The copies stay until the next picker opens (or 10 minutes after you close one), so apps that read the file later still find it.
+
+**Recent files.** Often the file you want is the one you just downloaded, saved or screenshotted, so the
+moment a picker opens Likely clones the 3 files with the newest Date Added in your search folders into the
+folder, under a ` …Recent…` header (the leading space puts it on top by name; it's also newest by Date
+Added). Folders, packages, hidden/sensitive paths, partial downloads, not-downloaded cloud files, files over
+500 MB or on another volume, and dev/build folders (`node_modules`, `.build`, `DerivedData`, …) are skipped.
+Files that came in one go (a copied folder, an unzipped archive) count once. Files apps write in the
+background are left out: a file is kept if it was opened, is a screenshot or was downloaded, or else if it
+arrived on its own, outside app and project folders (an Obsidian vault, a repo), and isn't still being
+rewritten (`RecentSelector`, tested with `swift test`). The count (1–10) and an off switch are in Settings,
+and `scripts/recent-files.sh [count] [-v]` prints what it would pick (`-v`: and why it skipped the rest). Menu → Jump to Likely Folder When a
+Picker Opens (on by default) selects the folder in the picker's sidebar; when off, only once you search.
 
 ## Build & run
 
@@ -39,7 +54,13 @@ Then commit and deploy the appcast in onit-server (the script prints the command
   `AXWindowCreated`) and the sandboxed system dialog is `OpenPanel`. Button/browser heuristics are the fallback.
 - **Close**: `AXUIElementDestroyed` on the panel, plus a poll for the panel's frame disappearing.
 - **Screenshot** (`WindowCapture`): once open, the picker is drawn into the app's window, so the app
-  snapshots the front window on every click / ⌘-shortcut (in memory) and uses the one from just before the picker.
+  snapshots the front window on every click / ⌘-shortcut (in memory) and keeps the one from just before the picker.
+  It's written to disk (`run/context-<run>.png`, removed when the picker closes) and sent only when you search.
+  Settings → Send a screenshot with searches turns all of it off.
+- **Recent files** (`RecentFiles`, `LikelyFolder.showRecent`): a synchronous `MDQuery` sorted by
+  `kMDItemDateAdded` (last hour, then day, then 30 days), falling back to the top level of Desktop /
+  Downloads / Documents; runs on its own queue, then clones on the Likely folder's copy queue. Copies are
+  tagged with an xattr so ones made just before a crash are removed at the next launch.
 - **Claude** (`ClaudeRunner`): `claude -p --output-format stream-json` with read-only tools
   (Read/Glob/Grep, `mdfind`, `ls`, …). Claude prints `STATUS:` / `FILE:` lines; the app does the copying
   (APFS clones), so Claude never writes anything.
@@ -47,6 +68,14 @@ Then commit and deploy the appcast in onit-server (the script prints the command
   search with rclip), kept in `~/Library/Application Support/Likely/tools.json` and edited in Settings →
   Tools or by a coding agent. Their commands are added to each agent's allowlist and their instructions to
   the prompt. See [docs/TOOLS.md](docs/TOOLS.md).
+
+## Evals
+
+`Likely --eval fixtures --agent opencode` runs the public eval suite (synthetic files in `evals/fixtures`)
+headlessly through the app's real prompt and agent runner, and writes `results.json` + `report.html`.
+Eval mode, Settings → Evals and "Save as test" exist only in dev builds (`./build.sh`), not in release builds.
+Your own cases live in `~/Library/Application Support/Likely/evals/cases.jsonl` ("Save as test" in the bar above a
+picker, Settings → History → Make Eval, Settings → Evals, or automatic saving of picks). See [docs/EVALS.md](docs/EVALS.md).
 
 Logs: `~/Library/Logs/Likely/likely.log` (menu → Verbose AX Logging logs every AX event).
 

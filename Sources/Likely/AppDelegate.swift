@@ -4,14 +4,16 @@ import OnboardingKit
 import SwiftUI
 import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
+    private let jumpItem = NSMenuItem(title: "Jump to Likely Folder When a Picker Opens", action: #selector(toggleJump), keyEquivalent: "")
     private let improveItem = NSMenuItem(title: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "")
 
     private let coordinator = Coordinator()
     private var debugWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var testWindow: NSWindow?
     private var trustTimer: Timer?
     private var started = false
 
@@ -32,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // pickers, in an unpaid state that leads to the license page.
         coordinator.isLicensed = { License.isActive }
         coordinator.onGetLikely = { [weak self] in self?.showLicense() }
+        coordinator.onMakeTest = { [weak self] run in self?.showTestEditor(for: run) }
 
         AgentDetector.shared.scan()
         // Setup (ending with the license page) has to be finished before Likely starts watching.
@@ -120,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateItem.isEnabled = false
         menu.addItem(stateItem)
         menu.addItem(.separator())
+        jumpItem.target = self
+        menu.addItem(jumpItem)
+        menu.delegate = self
+        menu.addItem(.separator())
         improveItem.target = self
         menu.addItem(improveItem)
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
@@ -181,6 +188,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { Updater.shared.checkForUpdates() }
     }
 
+    /// Settings has the same switch, so the check mark is refreshed each time the menu opens.
+    func menuWillOpen(_ menu: NSMenu) {
+        jumpItem.state = Settings.openToLikely ? .on : .off
+    }
+
+    @objc private func toggleJump() {
+        Settings.openToLikely.toggle()
+        jumpItem.state = Settings.openToLikely ? .on : .off
+        Log.write("app", "jump to Likely folder when a picker opens: \(Settings.openToLikely)")
+    }
+
     @objc private func showDebugView() {
         if debugWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(rootView: DebugView(store: .shared)))
@@ -193,6 +211,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         debugWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The eval test editor in its own small window, prefilled from a run.
+    func showTestEditor(for run: DebugRun) {
+        testWindow?.close()
+        EvalCaseStore.shared.reload()
+        let request = EditorRequest.from(run: run)
+        let window = NSWindow(contentViewController: NSHostingController(rootView: EvalCaseEditor(request: request) { [weak self] in
+            self?.testWindow?.close()
+        }))
+        window.title = "Save Search as Test"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        testWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     /// Settings on the Tools tab: extra tools such as photo search give the agent better results.

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LikelyEvalKit
 
 /// Seatbelt (`sandbox-exec`) rules shared by the agent runners.
 ///
@@ -16,6 +17,9 @@ import Foundation
 /// - Accessibility: no `com.apple.axserver` (the AX client port; without it every AX call fails).
 /// - Screen Recording and synthetic input: no WindowServer, replayd or ScreenCaptureKit services.
 /// - No asking TCC directly either.
+/// - Search history: no reading (or writing) Likely's History folder, nor the file's pre-release
+///   location (`historyRules`). Codex isn't wrapped here; CodexRunner denies the same paths in its
+///   own sandbox.
 /// Verified with a probe: under these rules AX reads of Finder fail (-25204), `screencapture` can't
 /// create an image, and AXIsProcessTrusted/CGPreflightScreenCaptureAccess report false.
 public enum AgentSandbox {
@@ -37,7 +41,24 @@ public enum AgentSandbox {
         (global-name "com.apple.coreservices.quarantine-resolver") (global-name "com.apple.dock.server")
         (global-name-prefix "com.apple.pasteboard."))
     (deny process-exec \(blockedExecutables.map { "(literal \(quoted($0)))" }.joined(separator: " ")))
+    \(historyRules)
     """
+
+    /// Real paths of what the agents must never read: the whole History folder (history.jsonl and
+    /// anything written next to it while saving) and the pre-release history.jsonl one level up.
+    public static var historyDeniedPaths: (folders: [String], files: [String]) {
+        // The parent folder exists once Likely has run; the History folder may not yet.
+        let support = realPath(SearchHistoryFile.defaultDirectory.deletingLastPathComponent().path)
+        let folder = SearchHistoryFile.defaultDirectory.lastPathComponent
+        let legacy = SearchHistoryFile.legacyURL.lastPathComponent
+        return ([support + "/" + folder], [support + "/" + legacy])
+    }
+
+    public static var historyRules: String {
+        let denied = historyDeniedPaths
+        let filters = denied.folders.map { "(subpath \(quoted($0)))" } + denied.files.map { "(literal \(quoted($0)))" }
+        return "(deny file-read* file-write* \(filters.joined(separator: " ")))"
+    }
 
     /// For agents with their own write controls (Claude Code, Gemini CLI) while no user tools are
     /// enabled: everything allowed except the privacy-sensitive services above.
@@ -93,9 +114,11 @@ public enum AgentSandbox {
     }
 
     /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
+    /// `extraRules` (evals only, see EvalIsolation) come after the profile, so they win over it.
     /// Every profile ends with `protectionRules`, so no agent can change Likely's own data or settings.
-    public static func wrap(executable: String, arguments: [String], profile: String) -> (URL, [String]) {
-        (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile + "\n" + protectionRules(), executable] + arguments)
+    public static func wrap(executable: String, arguments: [String], profile: String, extraRules: String = "") -> (URL, [String]) {
+        (URL(fileURLWithPath: "/usr/bin/sandbox-exec"),
+         ["-p", profile + (extraRules.isEmpty ? "" : "\n" + extraRules) + "\n" + protectionRules(), executable] + arguments)
     }
 
     // MARK: Likely's own files

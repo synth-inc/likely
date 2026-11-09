@@ -12,12 +12,38 @@ protocol AgentRunner: AnyObject {
     var onExit: ((AgentOutcome) -> Void)? { get set }
 
     var isBusy: Bool { get }
+    /// Per-runner launch settings (evals set these; the app uses the defaults).
+    var launchOptions: AgentLaunchOptions { get set }
 
     /// `image` is the screenshot, for agents that take images as input rather than reading files.
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL)
     /// Sends feedback to the current conversation. Returns false if there's no conversation to continue.
     @discardableResult func send(_ text: String) -> Bool
     func cancel()
+}
+
+/// Settings that belong to one runner, never to the process: with `--eval --jobs n` several runners
+/// launch at once, each for a different case.
+struct AgentLaunchOptions {
+    /// Seatbelt rules appended to the runner's profile (an isolated eval case). Codex ignores them:
+    /// it runs under its own sandbox, which can't be nested.
+    var extraSandboxRules = ""
+    /// Append to last-run.jsonl instead of starting it over (evals keep every turn of a case,
+    /// including relaunches).
+    var appendTranscript = false
+    /// Launched by `--eval`: Hermes then never reuses a gateway it didn't start with these rules.
+    var isEval = false
+}
+
+/// The raw JSON stream each runner saves to <workDir>/last-run.jsonl.
+enum AgentTranscript {
+    static func open(_ url: URL, append: Bool) -> FileHandle? {
+        let fm = FileManager.default
+        if !append || !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
+        if append { _ = try? handle.seekToEnd() }
+        return handle
+    }
 }
 
 struct AgentOutcome {
@@ -82,6 +108,7 @@ final class CodexRunner: AgentRunner {
     var onFile: ((String) -> Void)?
     var onTurnFinished: ((AgentOutcome) -> Void)?
     var onExit: ((AgentOutcome) -> Void)?
+    var launchOptions = AgentLaunchOptions()
 
     private(set) var isBusy = false
     private var process: Process?
@@ -95,8 +122,22 @@ final class CodexRunner: AgentRunner {
 
     /// Run without the user's ~/.codex/config.toml (their default model may not be available to
     /// ChatGPT sign-ins, and their MCP servers/hooks would slow things down). Auth is unaffected.
-    private static let baseArguments = ["--json", "--skip-git-repo-check", "--ignore-user-config",
-                                        "-c", "sandbox_mode=\"read-only\""]
+    /// Sandbox: a permission profile that extends Codex's built-in read-only one and also makes
+    /// Likely's search history unreadable (same paths as AgentSandbox.historyRules). Equivalent to
+    /// `sandbox_mode="read-only"` otherwise; the two can't be combined. Verified with
+    /// `codex sandbox` (codex-cli 0.153): reads under the denied paths fail with EPERM.
+    private static let baseArguments: [String] = {
+        let denied = AgentSandbox.historyDeniedPaths
+        let entries = (denied.folders + denied.files).map { "\(tomlString($0)) = \"none\"" }.joined(separator: ", ")
+        return ["--json", "--skip-git-repo-check", "--ignore-user-config",
+                "-c", "default_permissions=\"likely\"",
+                "-c", "permissions.likely.extends=\":read-only\"",
+                "-c", "permissions.likely.filesystem={ \(entries) }"]
+    }()
+
+    private static func tomlString(_ s: String) -> String {
+        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
 
     func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
         cancel()
@@ -105,8 +146,7 @@ final class CodexRunner: AgentRunner {
         self.model = model
         self.workDir = workDir
         let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
-        FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
-        transcript = try? FileHandle(forWritingTo: transcriptURL)
+        transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         var arguments = ["exec"] + Self.baseArguments + ["-m", model, prompt]
         if let image { arguments += ["-i", image.path] }   // after the prompt: -i takes several values
