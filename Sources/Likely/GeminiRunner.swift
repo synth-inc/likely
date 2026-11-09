@@ -17,6 +17,7 @@ final class GeminiRunner: AgentRunner {
     var onFile: ((String) -> Void)?
     var onTurnFinished: ((AgentOutcome) -> Void)?
     var onExit: ((AgentOutcome) -> Void)?
+    var launchOptions = AgentLaunchOptions()
 
     static let allowedCommands = ["mdfind", "mdls", "ls", "grep", "head", "stat"]
 
@@ -49,8 +50,7 @@ final class GeminiRunner: AgentRunner {
         self.model = model
         self.workDir = workDir
         let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
-        FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
-        transcript = try? FileHandle(forWritingTo: transcriptURL)
+        transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         // `@path` attaches the file as model input; it must be inside the workspace (see baseArguments).
         let fullPrompt = image.map { "@\($0.path)\n\n\(prompt)" } ?? prompt
@@ -110,7 +110,7 @@ final class GeminiRunner: AgentRunner {
         let process = Process()
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
-                                                             profile: AgentSandbox.privacyOnlyProfile)
+                                                             profile: AgentSandbox.privacyOnlyProfile, extraRules: launchOptions.extraSandboxRules)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir

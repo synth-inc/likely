@@ -15,6 +15,9 @@ final class HUDModel: ObservableObject {
     @Published var focusRequest = 0
     var onSend: ((String) -> Void)?
     var onRejectAll: (() -> Void)?
+    /// "Save as test": the test editor opens once the picker closes (see Coordinator).
+    var onSaveAsTest: (() -> Void)?
+    @Published var saveRequested = false
     /// "Get Likely" in the unpaid state.
     var onGetLikely: (() -> Void)?
 }
@@ -57,6 +60,7 @@ final class PickerHUD {
         model.working = true
         model.fileCount = 0
         model.draft = ""
+        model.saveRequested = false
         guard reposition() else { return }
         panel.orderFrontRegardless()
         trackTimer?.invalidate()
@@ -199,6 +203,17 @@ private struct HUDView: View {
                 }
                 .buttonStyle(.plain)
                 .underline()
+                #if LIKELY_DEV
+                Text("·")
+                Button(model.saveRequested ? "Test opens after you pick" : "Save as test") {
+                    model.onSaveAsTest?()
+                    returnFocus()
+                }
+                .buttonStyle(.plain)
+                .underline(!model.saveRequested)
+                .disabled(model.saveRequested)
+                .help("Save this search as an eval test. The editor opens when the picker closes, with what you picked as the answer.")
+                #endif
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)

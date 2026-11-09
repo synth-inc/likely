@@ -40,8 +40,13 @@ if compgen -G "Resources/*" > /dev/null; then cp -R Resources/. "$APP/Contents/R
 # ditto keeps the framework's Versions/Current symlinks intact.
 ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 rm -f "$APP/Contents/Resources/README.md"
-# Dev builds also get the candidate menu bar glyphs (Settings → Debug).
-if [ "$DEV_BUILD" = true ]; then cp -R ResourcesDev/. "$APP/Contents/Resources/"; fi
+# Dev builds also get the candidate menu bar glyphs (Settings → Debug) and the public eval suite
+# (Settings → Evals → Run Suite → Public fixtures; `--eval fixtures`). Release builds have no evals UI.
+if [ "$DEV_BUILD" = true ]; then
+    cp -R ResourcesDev/. "$APP/Contents/Resources/"
+    mkdir -p "$APP/Contents/Resources/evals"
+    cp -R evals/fixtures "$APP/Contents/Resources/evals/"
+fi
 
 IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk '/Apple Development/ {print $2; exit}')}"
 if [ -z "$IDENTITY" ]; then

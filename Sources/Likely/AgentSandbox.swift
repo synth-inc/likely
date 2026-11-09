@@ -92,7 +92,8 @@ enum AgentSandbox {
     }
 
     /// Wraps a launch in `sandbox-exec` with `profile`: returns the executable and arguments to use.
-    static func wrap(executable: String, arguments: [String], profile: String) -> (URL, [String]) {
-        (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile, executable] + arguments)
+    /// `extraRules` (evals only, see EvalIsolation) are appended last, so they win over the profile.
+    static func wrap(executable: String, arguments: [String], profile: String, extraRules: String = "") -> (URL, [String]) {
+        (URL(fileURLWithPath: "/usr/bin/sandbox-exec"), ["-p", profile + (extraRules.isEmpty ? "" : "\n" + extraRules), executable] + arguments)
     }
 }

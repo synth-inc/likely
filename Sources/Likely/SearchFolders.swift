@@ -77,14 +77,18 @@ struct SearchFolder: Identifiable, Hashable {
         Settings.extraSearchFolders.removeAll { $0 == folder.url.path }
     }
 
+    /// Evals only: search exactly these folders instead (the fixture suite's files). Never set in the app.
+    static var evalOverride: [String]?
+
     /// For the prompt: every folder, with a marker for the ones the user explicitly added.
     static var promptDescription: String {
-        all.map { ($0.url.path as NSString).abbreviatingWithTildeInPath + ($0.isCustom ? " (added by the user)" : "") }
+        if let evalOverride { return evalOverride.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: ", ") }
+        return all.map { ($0.url.path as NSString).abbreviatingWithTildeInPath + ($0.isCustom ? " (added by the user)" : "") }
             .joined(separator: ", ")
     }
 
     /// Folders outside the home directory, which the agent needs explicit access to.
     static var outsideHome: [String] {
-        all.map(\.url.path).filter { !$0.hasPrefix(home.path + "/") }
+        (evalOverride ?? all.map(\.url.path)).filter { !$0.hasPrefix(home.path + "/") }
     }
 }
