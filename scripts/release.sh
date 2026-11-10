@@ -28,7 +28,9 @@
 #   - gh authenticated with push access to synth-inc/likely.
 #   - The update feed is docs/appcast.xml in this repo, served by GitHub Pages at $FEED_URL
 #     (https://synth-inc.github.io/likely/appcast.xml). The script commits it to main and pushes;
-#     Sparkle clients see the release once Pages has redeployed (about a minute).
+#     Sparkle clients see the release once Pages has redeployed (a few minutes, plus up to 10 min of CDN cache).
+#   - If a release stops after the tag or GitHub Release is published (e.g. the appcast commit fails), finish by hand:
+#     add the item to docs/appcast.xml (it's in build/release/appcast.xml), commit, and push to main.
 set -euo pipefail
 
 # Releases are the paid edition, built without dev-only switches, whatever the calling shell has set.
@@ -205,8 +207,13 @@ cp "$APPCAST_OUT" "$APPCAST_SRC"
 git add docs/appcast.xml
 git commit -q -m "Likely $VERSION appcast"
 if ! git push -q origin HEAD:main; then
-    echo "Couldn't push the appcast to main. Push this commit (or open a PR) yourself: $(git rev-parse --short HEAD)"
+    # Someone may have pushed to main during notarization: rebase onto it and try once more.
+    git pull --rebase -q origin main && git push -q origin HEAD:main || {
+        echo "ERROR: $TAG is released on GitHub, but the appcast commit isn't on main, so no one is offered the update."
+        echo "Fix: git pull --rebase origin main && git push origin HEAD:main   (commit $(git rev-parse --short HEAD))"
+        exit 1
+    }
 fi
 echo
 echo "Released $TAG: https://github.com/$GH_REPO/releases/tag/$TAG"
-echo "Sparkle clients see it once GitHub Pages has redeployed. Check: curl -s $FEED_URL | head"
+echo "Sparkle clients see it once GitHub Pages has redeployed (a few minutes; the CDN may cache the old feed up to 10 min). Check: curl -s $FEED_URL | head"

@@ -33,14 +33,14 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Only if you turn on Contacts &amp; Calendars under Settings → Permissions → Private data: lets your search agent look in that data.</string>
-	<key>NSContactsUsageDescription</key>
-	<string>Only if you turn on Contacts &amp; Calendars under Settings → Permissions → Private data: lets your search agent look in that data.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Only if you turn on Photos under Settings → Permissions → Private data: lets your search agent look in your Photos library.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Only if you turn on Contacts &amp; Calendars under Settings → Permissions → Private data: lets your search agent look in that data.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Only if you turn on Contacts &amp; Calendars under Settings → Permissions → Private data: lets your search agent look in that data.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Only if you turn on Contacts &amp; Calendars under Settings → Permissions → Private data: lets your search agent look in that data.</string>
 	<key>SUEnableAutomaticChecks</key>
