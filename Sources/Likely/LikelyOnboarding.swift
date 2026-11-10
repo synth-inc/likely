@@ -332,8 +332,8 @@ struct LikelyOnboardingView: View {
             nextDisabled: !licensed,
             onNext: onFinish,
             headerContent: {
-                OnboardingTitle("Should Likely keep getting better?",
-                                subtitle: "Improving it takes ongoing revenue. You decide.")
+                OnboardingTitle("We couldn't decide on a business model…",
+                                subtitle: "So we decided to leave it to you. Take your pick.")
             },
             bodyContent: {
                 VStack(spacing: 14) {
@@ -387,11 +387,11 @@ struct LikelyOnboardingView: View {
         )
     }
 
-    /// "Yes, keep improving" (subscription) vs "No, it's fine as it is" (one-time).
+    /// The two plans' headlines: subscription vs one-time.
     private var voteToggle: some View {
         HStack(spacing: 0) {
-            voteSegment("Yes, keep improving", selected: keepImproving) { keepImproving = true }
-            voteSegment("No, it's fine as it is", selected: !keepImproving) { keepImproving = false }
+            voteSegment(License.plans[0].headline, selected: keepImproving) { keepImproving = true }
+            voteSegment(License.plans[1].headline, selected: !keepImproving) { keepImproving = false }
         }
         .padding(3)
         .background(Color.onboardingFillQuiet, in: RoundedRectangle(cornerRadius: 10))
