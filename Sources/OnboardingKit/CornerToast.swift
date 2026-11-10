@@ -44,7 +44,7 @@ public final class CornerToast {
     ///   - duration: seconds before it dismisses itself; nil keeps it until clicked.
     ///   - screen: defaults to the screen with the key window (else the main screen).
     public func show(title: String, message: String, icon: NSImage? = nil, duration: TimeInterval? = 6,
-                     anchor: Anchor = .rightCenter, screen: NSScreen? = nil) {
+                     anchor: Anchor = .topRight, screen: NSScreen? = nil) {
         tearDown()
         guard let screen = screen ?? NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
 
@@ -162,6 +162,7 @@ public struct CornerToastView: View {
     }
 
     private static let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+    static let textWidth: CGFloat = 244
 
     public var body: some View {
         VStack(spacing: 10) {
@@ -179,8 +180,11 @@ public struct CornerToastView: View {
                 Text(message)
                     .font(.system(size: 13))
                     .foregroundStyle(Color.toastSecondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .multilineTextAlignment(.center)
+            // A fixed width: long messages wrap onto more lines instead of widening the toast.
+            .frame(width: Self.textWidth)
         }
         .padding(.vertical, 14)
         .padding(.horizontal, 28)
