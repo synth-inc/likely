@@ -89,7 +89,7 @@ public final class OnboardingWindowManager: NSObject, NSWindowDelegate {
 }
 
 /// Accepts the first click without the window having to be activated first.
-private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
