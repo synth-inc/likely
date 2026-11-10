@@ -6,6 +6,16 @@
         <description>Likely updates</description>
         <language>en</language>
         <item>
+            <title>Version 0.2.0</title>
+            <pubDate>Tue, 10 Nov 2026 01:23:18 GMT</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <link>https://github.com/synth-inc/likely/releases/tag/v0.2.0</link>
+            <description><![CDATA[<p>Likely 0.2.0</p><p>Faster, smarter searches</p><p>- A rewritten search prompt: fewer steps, quicker first results, and better at &quot;my …&quot; requests like your photo or resume.</p><p>- Uses Spotlight details (transparency, image size, download source, dates) instead of opening files one by one.</p><p>Make it your own</p><p>- New Tools tab: add command-line tools your agent can use (approve each one), and turn built-in tools on or off.</p><p>- Search history in Settings, which you can turn off.</p><p>Privacy</p><p>- Likely&#x27;s data files are readable only by you, and search history is encrypted with a key in your Keychain.</p><p>- Photos, Mail, Messages and other private data are off-limits to the agent by default, with switches to allow them.</p><p>- No screenshots are stored, and logs leave out what you search for.</p><p>Polish</p><p>- Recent files skip files apps write in the background.</p><p>- A short demo on the first onboarding screen, and a &quot;Likely is running&quot; note when setup finishes.</p><p>- A simpler menu bar, plus Terms and Privacy links.</p><p>- Updates now come from GitHub Pages.</p>]]></description>
+            <enclosure url="https://github.com/synth-inc/likely/releases/download/v0.2.0/Likely.dmg" type="application/octet-stream" sparkle:edSignature="FQjs3wb5bgNK+AvMNlL7aVmUocADxwulX3b2WSLyH1T4kKvPHxIXYRP+dmt9ZhXZixQPqv0kpKUPDExadeehDQ==" length="3955649"/>
+        </item>
+        <item>
             <title>Version 0.1.0</title>
             <pubDate>Wed, 04 Nov 2026 23:30:19 GMT</pubDate>
             <sparkle:version>1</sparkle:version>
