@@ -41,9 +41,11 @@ public enum EvalReport {
         return lines.joined(separator: "\n")
     }
 
+    /// Tests that went from failing to passing and back. Skipped tests (not run) count in neither run.
     public static func caseChanges(_ run: EvalRun, _ previous: EvalRun) -> (fixed: [String], broke: [String]) {
-        let before = Dictionary(grouping: previous.cases, by: \.id).mapValues { $0.allSatisfy(\.pass) }
-        let after = Dictionary(grouping: run.cases, by: \.id).mapValues { $0.allSatisfy(\.pass) }
+        let ran = { (cases: [EvalCaseResult]) in cases.filter { $0.status != "skipped" } }
+        let before = Dictionary(grouping: ran(previous.cases), by: \.id).mapValues { $0.allSatisfy(\.pass) }
+        let after = Dictionary(grouping: ran(run.cases), by: \.id).mapValues { $0.allSatisfy(\.pass) }
         var fixed: [String] = []
         var broke: [String] = []
         for (id, pass) in after.sorted(by: { $0.key < $1.key }) {

@@ -154,15 +154,41 @@ which tools you approved, and "Allow command-line test runs") live in Likely's p
 program running as you can change (`defaults write`, or `-key value` arguments when launching the app). In
 builds with a provisioning profile (official releases), each of them is stored with an HMAC-SHA256 keyed
 from the data key in the data-protection keychain (see Encryption), which only Likely's own builds can
-read. A value changed any other way has no valid HMAC: Likely ignores it, uses the default (the detected
-agent, the default prompt, no approvals, command-line runs off), logs the setting's name, and Settings
-shows which settings it ignored; choosing them again in Settings stores them properly. The first launch
-of a version with this protection seals the values already saved, once, and records that in the keychain,
-where nothing outside Likely can undo it. While the keychain doesn't answer, these settings fall back to
-their defaults too.
+read. A value changed any other way has no valid HMAC: Likely ignores it, uses the default (Claude Code
+as the agent, the default prompt, no approvals, command-line runs off), and logs the setting's name.
+
+Settings shows each ignored setting, and why: changed outside this copy of Likely (its HMAC doesn't
+match, e.g. another program, or an older version of Likely after a downgrade), or saved without an HMAC
+(by a build that can't protect settings, such as one built from source without a provisioning profile,
+or by another program). **Keep This Value…** shows the value first (for the prompt, its length and the
+full text; for tool approvals, each tool's commands) and seals it only when you confirm; **Use Default**
+removes it. Until you choose, the prompt editor shows this notice instead of the default, and saves
+nothing, so it can't overwrite your saved prompt; tool approvals can't be changed either (a change would
+replace the saved ones).
+
+The first launch of a version with this protection seals the values already saved in Likely's own
+preferences (never launch arguments or the global domain, and never "Allow command-line test runs",
+which is new with the protection), once, and records that in the keychain, where nothing outside Likely
+can undo it. A value that can't be sealed is skipped and stays ignored. Until that's done (the keychain
+doesn't answer yet, e.g. before the first unlock), unsealed values count as "couldn't check" rather than
+as changed outside Likely: Likely uses the defaults for now and tries again when a setting is read (at
+most every 30 seconds), when the Mac wakes, and from **Try Again** in Settings. While the keychain doesn't
+answer, these settings fall back to their defaults too.
 
 Builds without a provisioning profile have no data key, so these settings are stored plainly, as other
-preferences are, and can be changed from outside Likely.
+preferences are, and can be changed from outside Likely. When such a build saves one of them, it removes
+the HMAC an official build stored, so the official build later shows the value as "saved without an
+HMAC" (Keep This Value… applies) rather than as tampered.
+
+**Run Tests in Settings.** With "Allow command-line test runs" off, only Settings → Tests → Run Tests can
+start `Likely --eval`. Before it starts the run, Likely stores a one-time token record (a SHA-256 of a
+random token, and an expiry 60 seconds later), sealed with the same HMAC, and gives the token itself only
+to the process it starts, in its environment. The run checks the record's HMAC, the expiry and the token,
+deletes the record, and removes the token from its environment before starting any agent. Something that
+can write Likely's preferences can't make a record that verifies, and reading the record doesn't reveal
+the token. Known limitation: a program running as you that copies a sealed record and reads the token
+from the run's environment within those 60 seconds could put the record back and use the token once
+more; a generation counter to prevent that is planned.
 
 ## The log
 

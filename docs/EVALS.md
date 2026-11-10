@@ -40,8 +40,8 @@ administrator password, never over a file Likely didn't write, and not while Lik
 temporary copy macOS makes of a fresh download) so `likely --json` runs your tests.
 
 **Allow command-line test runs** (off by default) has to be on for the command below to run in a release
-build: until then it exits with status 4 and says so. Run Tests in Settings works either way (the run it
-starts is a child of the app itself). In builds with a provisioning profile the switch is a protected
+build: until then it exits with status 4 and says so. Run Tests in Settings works either way (it hands the run
+it starts a one-time token, valid for 60 seconds; see [PRIVACY.md](PRIVACY.md#protected-settings)). In builds with a provisioning profile the switch is a protected
 setting (see [PRIVACY.md](PRIVACY.md#protected-settings)): turning it on with `defaults write` doesn't count.
 
 ### From the command line, or your coding agent

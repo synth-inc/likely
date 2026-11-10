@@ -1,3 +1,4 @@
+import LikelyStorage
 import XCTest
 @testable import LikelyEvalKit
 
@@ -143,6 +144,12 @@ final class EvalCommandLineTests: XCTestCase {
         XCTAssertEqual(withLaunchd["HTTPS_PROXY"], "http://proxy.corp:8080")
         XCTAssertNil(withLaunchd["NODE_EXTRA_CA_CERTS"])
         XCTAssertNil(withLaunchd["DYLD_INSERT_LIBRARIES"])
+        // Run Tests' one-time token survives the restart, only with a token's shape (RunToken).
+        let token = RunToken.make()
+        XCTAssertEqual(EvalEnvironment.sanitized(caller.merging([RunToken.environmentKey: token]) { $1 }, home: "/Users/me", user: "me",
+                                                 shell: "/bin/zsh", tmpdir: nil)[RunToken.environmentKey], token)
+        XCTAssertNil(EvalEnvironment.sanitized(caller.merging([RunToken.environmentKey: "$(id) x"]) { $1 }, home: "/Users/me", user: "me",
+                                               shell: "/bin/zsh", tmpdir: nil)[RunToken.environmentKey])
         // Deterministic, so the restart happens at most once.
         XCTAssertEqual(EvalEnvironment.sanitized(clean, home: "/Users/me", user: "me", shell: "/bin/zsh", tmpdir: "/var/folders/xy/T/"), clean)
     }

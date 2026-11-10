@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 
 /// `Likely --eval …`'s exit status. See docs/EVALS.md.
 public enum EvalExit {
@@ -197,6 +198,9 @@ public enum EvalEnvironment {
         for key in launchdKeys {
             if let v = launchd[key], !v.isEmpty, v.count < 4096, !v.contains(where: { $0.isNewline || $0 == "\u{0}" }) { clean[key] = v }
         }
+        // Settings → Tests → Run Tests' one-time token (RunToken): kept across the restart when it has
+        // a token's shape; it only counts if the app's sealed record matches it.
+        if let v = env[RunToken.environmentKey], RunToken.isWellFormed(v) { clean[RunToken.environmentKey] = v }
         for key in passThrough { if let v = env[key] { clean[key] = v } }
         return clean
     }
@@ -247,7 +251,7 @@ public struct EvalCLIResult: Codable, Equatable {
         public var id: String
         public var attempt: Int
         public var pass: Bool
-        /// ok, timeout, error, cancelled, unscored
+        /// ok, timeout, error, cancelled, unscored, skipped (not run: a screenshot-only test from an older version)
         public var status: String
         /// 1-based rank of the first expected file among the suggestions; nil if none was suggested.
         public var rank: Int?

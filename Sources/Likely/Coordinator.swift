@@ -812,7 +812,10 @@ enum ClaudeLocator {
             DispatchQueue.main.async {
                 if let found {
                     path = found
-                    ProtectedSettings.set(found, forKey: ProtectedSettings.claudePath)
+                    // Not over a saved location that's waiting for the user in Settings (unverified).
+                    if !ProtectedSettings.isIgnored(ProtectedSettings.claudePath) {
+                        ProtectedSettings.set(found, forKey: ProtectedSettings.claudePath)
+                    }
                 }
                 Log.write("claude", found == nil ? "shell lookup: not found" : "shell lookup: \(path: found)")
                 completion?()

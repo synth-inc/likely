@@ -352,6 +352,13 @@ private struct AgentSettings: View {
         .onChange(of: agentID) { _, id in if Settings.agentID != id { Settings.agentID = id } }
         .onChange(of: model) { _, m in if Settings.model != m { Settings.model = m } }
         .onChange(of: codexModel) { _, m in if Settings.codexModel != m { Settings.codexModel = m } }
+        // Kept or reset in the notice above the tabs: show what's now in effect.
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in
+            agentID = Settings.agentID
+            model = Settings.model
+            codexModel = Settings.codexModel
+            modelRefresh += 1
+        }
     }
 }
 
@@ -359,6 +366,10 @@ private struct AgentSettings: View {
 
 private struct PromptSettings: View {
     @State private var text = Settings.promptTemplate
+    /// The saved prompt couldn't be verified (ProtectedSettings): searches use the default, and this
+    /// editor neither shows nor saves anything until the user keeps it or chooses the default.
+    @State private var unverified = ProtectedSettings.isIgnored(ProtectedSettings.promptTemplate)
+    @State private var reviewing: ProtectedValueReview.Item?
     @AppStorage("includeUserName") private var includeUserName = true
 
     var body: some View {
@@ -367,15 +378,39 @@ private struct PromptSettings: View {
                 Text("Instructions sent to your agent each time a picker opens.").foregroundStyle(.secondary)
                 Spacer()
                 Button("Reset to Default") { text = PromptTemplate.default }
-                    .disabled(text == PromptTemplate.default)
+                    .disabled(unverified || text == PromptTemplate.default)
             }
-            TextEditor(text: $text)
-                .font(.system(size: 12, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-                .onChange(of: text) { _, value in Settings.promptTemplate = value }
+            if unverified {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Your saved prompt couldn't be verified", systemImage: "exclamationmark.shield")
+                        .font(.headline).foregroundStyle(.orange)
+                    Text("It was changed outside this copy of Likely, saved by a build that can't protect settings, or the Keychain didn't answer. Searches use the default prompt for now. Editing is off so your saved prompt isn't overwritten: look at it and keep it, or use the default.")
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Keep This Value…") {
+                            if let value = ProtectedSettings.storedValue(ProtectedSettings.promptTemplate) {
+                                reviewing = .init(key: ProtectedSettings.promptTemplate, value: value)
+                            } else {
+                                reload()
+                            }
+                        }
+                        Button("Use Default") { ProtectedSettings.useDefault(ProtectedSettings.promptTemplate) }
+                        Button("Try Again") { ProtectedSettings.retry() }
+                    }
+                    .controlSize(.small)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            } else {
+                TextEditor(text: $text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                    .onChange(of: text) { _, value in save(value) }
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text("Placeholders").font(.caption.bold())
                 ForEach(PromptTemplate.placeholders, id: \.name) { item in
@@ -388,6 +423,24 @@ private struct PromptSettings: View {
             Text("Sends your full name (\(NSFullUserName())) as {{userName}} so the agent can recognize your own documents. Prompts without {{userName}} never include it.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .sheet(item: $reviewing) { item in ProtectedValueReview(item: item) }
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in reload() }
+    }
+
+    /// Autosave, unless the saved prompt became unverifiable meanwhile (changed outside Likely while
+    /// this was open): then nothing is written over it.
+    private func save(_ value: String) {
+        guard !unverified else { return }
+        if ProtectedSettings.isIgnored(ProtectedSettings.promptTemplate) {
+            unverified = true
+            return
+        }
+        if value != Settings.promptTemplate { Settings.promptTemplate = value }
+    }
+
+    private func reload() {
+        unverified = ProtectedSettings.isIgnored(ProtectedSettings.promptTemplate)
+        if !unverified { text = Settings.promptTemplate }
     }
 }
 
@@ -510,6 +563,11 @@ private struct ToolsSettings: View {
             if !store.pending.isEmpty {
                 Section {
                     ApprovalBanner(pending: store.pending, approve: store.approvePending)
+                }
+            }
+            if let problem = store.approvalsProblem {
+                Section {
+                    Text(problem).font(.caption).foregroundStyle(.orange)
                 }
             }
             if let needsProblem {
@@ -663,6 +721,7 @@ private struct ToolsSettings: View {
             detectRclip()
             disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
         }
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in agentID = Settings.agentID }
         .sheet(isPresented: $settingUpPhotos) {
             PhotoSearchSetupSheet(installed: rclipInstalled, checkAgain: detectRclip) { settingUpPhotos = false }
         }

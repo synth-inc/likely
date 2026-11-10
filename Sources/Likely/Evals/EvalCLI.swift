@@ -206,10 +206,16 @@ enum EvalCLI {
         if kind.id == "hermes", options.jobs > 1 {
             usageError("Hermes runs one test at a time (its gateway is shared by every case): use --jobs 1.")
         }
-        // Screenshots aren't part of test runs (Likely no longer sends them with searches).
-        let withScreenshots = cases.filter { $0.evalCase.context?.screenshot != nil }.count
-        if withScreenshots > 0 {
-            printErr("note: \(withScreenshots) test\(withScreenshots == 1 ? " has" : "s have") a screenshot; test runs don't use screenshots, so \(withScreenshots == 1 ? "it runs" : "they run") without")
+        // Screenshots aren't part of test runs (Likely no longer sends them with searches): a test that
+        // has a query runs without its screenshot, and a screenshot-only test (no query) is skipped.
+        let withScreenshots = cases.filter { $0.evalCase.context?.screenshot != nil }
+        if !withScreenshots.isEmpty {
+            let screenshotOnly = withScreenshots.filter { !$0.evalCase.hasQuery }.count
+            let withQuery = withScreenshots.count - screenshotOnly
+            var parts: [String] = []
+            if withQuery > 0 { parts.append("\(withQuery) test\(withQuery == 1 ? " runs" : "s run") without \(withQuery == 1 ? "its" : "their") screenshot") }
+            if screenshotOnly > 0 { parts.append("\(screenshotOnly) screenshot-only test\(screenshotOnly == 1 ? " is" : "s are") skipped (add a query to run \(screenshotOnly == 1 ? "it" : "them"))") }
+            printErr("note: test runs don't use screenshots: " + parts.joined(separator: "; "))
         }
 
         if options.dryRun {   // dev builds only
@@ -328,29 +334,18 @@ enum EvalCLI {
     }
 
     /// Whether this run may start: "Allow command-line test runs" is on (sealed setting; plain in builds
-    /// without a profile), or Settings → Tests → Run Tests started it (the parent process is this same
-    /// app; nothing else starts Likely's executable as a child of Likely).
+    /// without a profile), or Settings → Tests → Run Tests started it: the app passed a one-time token
+    /// (RunToken) that matches the sealed record it stored, unexpired. The token is redeemed (deleted)
+    /// here whatever the switch says, and taken out of the environment so no agent inherits it.
     static var commandLineRunsAllowed: Bool {
+        let token = ProcessInfo.processInfo.environment[RunToken.environmentKey]
+        unsetenv(RunToken.environmentKey)
+        let startedFromSettings = token != nil && RunToken.redeem(token, seal: ProtectedSettings.seal)
         #if LIKELY_EVAL_TEST_SEAM
-        if let value = ProcessInfo.processInfo.environment["LIKELY_EVAL_TEST_ALLOW"] { return value == "1" }
+        // scripts/test-eval-cli.sh: "1" stands in for the switch being on; anything else for it being off.
+        if let value = ProcessInfo.processInfo.environment["LIKELY_EVAL_TEST_ALLOW"] { return value == "1" || startedFromSettings }
         #endif
-        return ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true || startedByThisApp
-    }
-
-    /// The parent process runs this very executable (Settings → Tests → Run Tests).
-    static var startedByThisApp: Bool {
-        let parent = getppid()
-        guard parent > 1 else { return false }
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(parent, &buffer, UInt32(buffer.count)) > 0,
-              let parentPath = realpath(buffer, nil) else { return false }
-        defer { free(parentPath) }
-        var size = UInt32(0)
-        _NSGetExecutablePath(nil, &size)
-        var own = [CChar](repeating: 0, count: Int(size) + 1)
-        guard _NSGetExecutablePath(&own, &size) == 0, let ownPath = realpath(own, nil) else { return false }
-        defer { free(ownPath) }
-        return strcmp(parentPath, ownPath) == 0
+        return startedFromSettings || ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true
     }
 
     private static var signalSources: [DispatchSourceSignal] = []

@@ -70,7 +70,8 @@ chmod 755 "$H/.local/bin/codex"
 # Runs a binary the way a coding agent would, in a deliberately dirty environment.
 run() {   # run <binary> <args…>; sets OUT, ERR, CODE
     set +e
-    OUT="$(env -i CFFIXED_USER_HOME="$H" HOME="$H" LIKELY_EVAL_TEST_ALLOW="${ALLOW-1}" PATH="/tmp/attacker:/usr/bin:/bin" NODE_OPTIONS="--require /tmp/x.js" \
+    OUT="$(env -i CFFIXED_USER_HOME="$H" HOME="$H" LIKELY_EVAL_TEST_ALLOW="${ALLOW-1}" ${TOKEN:+LIKELY_RUN_TOKEN="$TOKEN"} \
+           PATH="/tmp/attacker:/usr/bin:/bin" NODE_OPTIONS="--require /tmp/x.js" \
            DYLD_FALLBACK_LIBRARY_PATH=/tmp/attacker ZDOTDIR=/tmp/attacker LIKELY_FIXTURES=/tmp/attacker \
            "$@" 2>"$WORK/stderr")"
     CODE=$?
@@ -107,6 +108,9 @@ expect_code 4 "command-line runs switched off"
 echo "$ERR" | grep -q "Allow command-line test runs" && pass "says how to turn them on" || fail "switch message"
 ALLOW= run "$FREE" --eval personal
 expect_code 4 "switch never set (default off)"
+# Run Tests in Settings passes a one-time token whose record Likely stored; a made-up one doesn't count.
+ALLOW=0 TOKEN=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA run "$FREE" --eval personal --json
+expect_code 4 "made-up run token with the switch off"
 
 echo "==> Licensing"
 run "$PAID" --eval personal --json
@@ -125,7 +129,7 @@ cat > "$DATA/evals/cases.jsonl" <<'CASES'
 CASES
 
 echo "==> First run"
-run "$FREE" --eval personal --agent claude --case shared --case utilities --json
+TOKEN=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA run "$FREE" --eval personal --agent claude --case shared --case utilities --json
 expect_code 0 "run completes although a test fails"
 [ "$(json 'd["summary"]["passed"], d["summary"]["scored"]')" = "(1, 2)" ] && pass "1 of 2 passed" || fail "counts: $(json 'd.get("summary")')"
 [ "$(json '[c["id"] + ":" + str(c["pass"]) + ":" + str(c.get("rank")) for c in d["cases"]]')" = "['shared:True:1', 'utilities:False:None']" ] \
@@ -144,6 +148,7 @@ expect_code 2 "--agent hermes --jobs 2"
 
 echo "==> Clean environment"
 grep -q 'NODE_OPTIONS\|DYLD_\|ZDOTDIR\|LIKELY_FIXTURES\|/tmp/attacker' "$H/agent-env.txt" && fail "caller's environment reached the agent" || pass "caller's environment dropped"
+grep -q 'LIKELY_RUN_TOKEN' "$H/agent-env.txt" && fail "run token reached the agent" || pass "run token not passed to the agent"
 grep -q '^PATH=.*/usr/bin:/bin:/usr/sbin:/sbin' "$H/agent-env.txt" && pass "agent PATH built from the clean PATH" || fail "agent PATH: $(grep ^PATH= "$H/agent-env.txt")"
 [ "$(cat "$H/agent-signals.txt")" = "DEFAULT DEFAULT" ] && pass "agent doesn't inherit ignored SIGINT/SIGTERM" || fail "agent signals: $(cat "$H/agent-signals.txt")"
 

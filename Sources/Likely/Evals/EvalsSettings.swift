@@ -173,6 +173,9 @@ struct EvalsSettings: View {
             EvalCaseEditor(request: request) { editing = nil }
         }
         .sheet(isPresented: $showingRun) { RunTestsSheet(tags: store.allTags) { showingRun = false } }
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in
+            allowCLI = ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true
+        }
     }
 
     /// The command for the user's coding agent, to re-run the tests after adding a tool.
@@ -759,6 +762,19 @@ final class EvalJob: ObservableObject {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        // Release builds: a one-time token lets this run start with "Allow command-line test runs" off
+        // (RunToken). Only this child gets it; the record it's checked against is sealed.
+        if EvalCLI.policy == .release {
+            do {
+                var environment = ProcessInfo.processInfo.environment
+                environment[RunToken.environmentKey] = try RunToken.issue(seal: ProtectedSettings.seal)
+                process.environment = environment
+            } catch {
+                Log.write("evals", "couldn't authorize the test run: \(error: error)")
+                output.append("Couldn't start: Likely couldn't reach the Keychain to authorize the run. Try again.")
+                return
+            }
+        }
         // The results are read once the run has exited and both pipes reached end of file.
         collector = ProcessOutputCollector(process: process, onStderrLine: { [weak self] line in self?.consume(line) },
                                            completion: { [weak self] out, status in self?.finish(stdout: out, status: status) })
