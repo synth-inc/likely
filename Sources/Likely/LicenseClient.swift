@@ -1,4 +1,5 @@
 import Foundation
+import LicenseCore
 import Security
 
 /// Talks to the shared Onit server for licensing: device login, Stripe checkout / billing portal, and
@@ -30,24 +31,10 @@ actor LicenseClient {
         case lifetime = "likely_lifetime"
     }
 
-    /// `GET /v1/entitlements?product=likely`.
-    struct Entitlement: Codable, Equatable {
-        var product: String?
-        var active: Bool
-        /// "subscription", "one_time" or "promo".
-        var kind: String?
-        var status: String?
-        /// ISO 8601.
-        var currentPeriodEnd: String?
-        var cancelAtPeriodEnd: Bool?
-
-        var periodEnd: Date? { currentPeriodEnd.flatMap(Self.parseDate) }
-
-        static func parseDate(_ string: String) -> Date? {
-            let fractional = ISO8601DateFormatter()
-            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return fractional.date(from: string) ?? ISO8601DateFormatter().date(from: string)
-        }
+    /// `GET /v1/entitlements?product=likely`. Only `signed` is read: the unsigned fields beside it
+    /// (`active`, `kind`...) are for Likely 0.1.0 and could be anything, so this build never decodes them.
+    struct Entitlement: Decodable {
+        var signed: SignedEntitlement?
     }
 
     enum ClientError: LocalizedError {
@@ -56,6 +43,10 @@ actor LicenseClient {
         case unavailable
         case server(status: Int, message: String?)
         case badResponse
+        /// The server didn't sign the entitlement (no signing key configured yet).
+        case unsigned
+        /// Signed, but not by a key this build knows, or not for this install.
+        case untrusted
 
         var errorDescription: String? {
             switch self {
@@ -64,6 +55,8 @@ actor LicenseClient {
             // Server messages are developer-facing (zod validation etc.), so they only go to the log.
             case .server(let status, _): return "The Likely server returned an error (\(status)). Try again later."
             case .badResponse: return "The Likely server sent a response Likely didn't understand."
+            case .unsigned: return "The Likely server didn't send a signed license. Try again later."
+            case .untrusted: return "Likely couldn't verify the license the server sent. Try again later, or update Likely."
             }
         }
     }

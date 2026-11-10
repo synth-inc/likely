@@ -134,6 +134,28 @@ generated entitlements, the hardened runtime and a secure timestamp. After signi
 
 A release can't be built without a profile.
 
+### License signing key
+
+Paid builds only trust entitlements the Onit server signed with Ed25519 for this install
+(`Sources/LicenseCore`, `License.entitlementPublicKeys`). The cache in UserDefaults is the signed blob,
+re-verified on every read, so writing `active: true` into Likely's preferences unlocks nothing.
+`build.sh` refuses a release (`LIKELY_DISTRIBUTION=1`) while the public key is still the placeholder.
+
+Setting it up (once; keep the `.pem` offline, e.g. in a password manager, and never commit it). Use
+OpenSSL 3 (`brew install openssl@3`): macOS's `/usr/bin/openssl` is LibreSSL, which has no Ed25519.
+
+    openssl genpkey -algorithm ed25519 -out likely-entitlement-signing.pem
+    # Server: LIKELY_ENTITLEMENT_SIGNING_KEY (and LIKELY_ENTITLEMENT_SIGNING_KID=likely-1), see onit-server .env.example
+    base64 < likely-entitlement-signing.pem | tr -d '\n'
+    # App: the raw 32-byte public key, base64, into License.entitlementPublicKeys["likely-1"]
+    openssl pkey -in likely-entitlement-signing.pem -pubout -outform DER | tail -c 32 | base64
+
+Deploy the server with the key before shipping an app that requires it. To rotate, add the new key
+under a new kid to the app and ship that first, then switch the server. Never remove an old kid: a
+one-time purchase signed with it never expires and must keep working offline, even with the server
+gone. Offline, subscriptions keep working 14 days past their signed expiry (30 days after each check)
+and past the end of their billing period.
+
 ### Renewing the profile
 
 A release embeds the profile, and an app whose embedded profile has expired may stop launching.

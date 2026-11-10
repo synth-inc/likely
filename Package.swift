@@ -32,9 +32,13 @@ let package = Package(
         // Foundation-only rules for picking recent files (batches, files apps write in the background),
         // split out so they can be unit tested.
         .target(name: "RecentFilesCore", path: "Sources/RecentFilesCore"),
+        // Verifies the server-signed license (Ed25519 via CryptoKit): signature, key id, install, expiry
+        // and offline grace. Foundation/CryptoKit only, unit-tested with throwaway keys.
+        .target(name: "LicenseCore", path: "Sources/LicenseCore"),
+        .testTarget(name: "LicenseCoreTests", dependencies: ["LicenseCore"], path: "Tests/LicenseCoreTests"),
         .executableTarget(
             name: "Likely",
-            dependencies: ["OnboardingKit", "LikelyEvalKit", "LikelyStorage", "LikelyTools", "RecentFilesCore",
+            dependencies: ["OnboardingKit", "LicenseCore", "LikelyEvalKit", "LikelyStorage", "LikelyTools", "RecentFilesCore",
                            .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Likely",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
