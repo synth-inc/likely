@@ -16,7 +16,7 @@ Files that came in one go (a copied folder, an unzipped archive) count once. Fil
 background are left out: a file is kept if it was opened, is a screenshot or was downloaded, or else if it
 arrived on its own, outside app and project folders (an Obsidian vault, a repo), and isn't still being
 rewritten (`RecentSelector`, tested with `swift test`). The count (1–10) and an off switch are in Settings,
-and `scripts/recent-files.sh [count] [-v]` prints what it would pick (`-v`: and why it skipped the rest). Menu → Jump to Likely Folder When a
+and `scripts/recent-files.sh [count] [-v]` prints what it would pick (`-v`: and why it skipped the rest). Settings → General → Jump to the Likely folder when a
 Picker Opens (on by default) selects the folder in the picker's sidebar; when off, only once you search.
 
 ## Build & run
