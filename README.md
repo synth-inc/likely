@@ -87,7 +87,7 @@ to check a tool helps, run evals on your own files (below).
 
 ## Privacy
 
-Likely doesn't run an AI, and the app has no analytics, telemetry or crash reporting of its own. Searches go to
+Likely doesn't run an AI. Searches go to
 the AI provider you choose, through your own CLI and account, only when you submit one: your query and
 follow-ups, the app name, window title and picker button, your name (on by default; Settings → Prompt), a
 screenshot if you turn that on (off by default), your Likely and search folder paths, the output of the agent's
