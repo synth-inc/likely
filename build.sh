@@ -31,6 +31,10 @@ FLAGS=()
 DEV_BUILD=true
 [ "${LIKELY_DISTRIBUTION:-}" = "1" ] && DEV_BUILD=false
 [ "$DEV_BUILD" = true ] && FLAGS+=(-Xswiftc -DLIKELY_DEV)
+# A paid release with the placeholder entitlement key would license nobody (License.entitlementPublicKeys).
+if [ "$DEV_BUILD" = false ] && [ "${LIKELY_FREE:-}" != "1" ] && grep -q "REPLACE_ME_WITH_BASE64_RAW_ED25519_PUBLIC_KEY" Sources/Likely/License.swift; then
+    echo "Sources/Likely/License.swift still has the placeholder entitlement public key; see License.entitlementPublicKeys"; exit 1
+fi
 swift build -c release ${FLAGS[@]+"${FLAGS[@]}"}
 BIN_DIR="$(swift build -c release --show-bin-path)"
 # Signing identity and, with a profile, the entitlements: checked before the old app is replaced.
