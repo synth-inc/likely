@@ -48,8 +48,7 @@ enum License {
         Plan(kind: .oneTime,
              headline: "Just the app, please",
              price: "$29", priceUnit: "once",
-             // TODO(legal): the owner decides the update period; keep it in sync with the Terms.
-             detail: "One payment, and you can use the app for as long as you like. Includes updates for [update period].",
+             detail: "One payment, and you can use the app for as long as you like.",
              disclosure: nil,
              serverPlan: .lifetime,
              buttonTitle: "Buy Once"),
