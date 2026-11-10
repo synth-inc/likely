@@ -98,7 +98,8 @@ follow-ups, the app name, window title and picker button, your name (on by defau
 searches and the contents of files it opens, your prompt, and your tools' instructions. The license server gets
 a random install ID, records each request in PostHog (analytics: path, IP address, user agent, account number),
 and stores the purchase details Stripe sends it (email, name, billing address, card brand, last 4 digits and
-expiry). Checkout goes through Stripe. Your files, search history, eval cases and logs stay on your
+expiry). The app sends usage analytics to PostHog (such as versions, how searches perform, test results, errors,
+and tools' names and commands; never your searches, window titles, file names or files), unless you turn off "Share usage analytics" in Settings. Checkout goes through Stripe. Your files, search history, eval cases and logs stay on your
 Mac. Details:
 [Privacy Policy](https://synth-inc.github.io/likely/privacy.html) ([source](docs/privacy.html)).
 
