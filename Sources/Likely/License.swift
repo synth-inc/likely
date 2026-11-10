@@ -19,44 +19,49 @@ enum License {
         /// Shown smaller beside the price ("/ month", "once").
         let priceUnit: String
         let detail: String
-        /// Billing terms shown right beside the offer (auto-renewal for subscriptions); nil for none.
-        let disclosure: String?
+        /// Renews every `priceUnit` until cancelled; gets the renewal disclosure beside the offer.
+        let autoRenews: Bool
         /// What the server sells for this plan; nil for "build it yourself".
         let serverPlan: LicenseClient.Plan?
         let buttonTitle: String
+
+        /// Legal copy beside a subscription offer, e.g. "$3/month, renews automatically until you cancel. …".
+        var disclosure: String? {
+            guard autoRenews else { return nil }
+            let unit = priceUnit.replacingOccurrences(of: " ", with: "")   // "/ month" -> "/month"
+            return "\(price)\(unit), renews automatically until you cancel. Cancel anytime in Settings → General → License, or email contact@cloudless.so."
+        }
     }
 
     static let sourceURL = URL(string: "https://github.com/synth-inc/likely")!
     static let termsURL = URL(string: "https://synth-inc.github.io/likely/terms.html")!
     static let privacyURL = URL(string: "https://synth-inc.github.io/likely/privacy.html")!
 
-    /// The welcome screen tells people Likely registers an anonymous install ID with the license
-    /// server, so nothing goes to the server (device login included) until they've continued past it.
-    /// Anyone who already finished onboarding keeps checking at launch, as before.
-    static var mayContactServer: Bool {
-        !isFreeBuild && (Settings.onboarded || LikelyOnboardingStep.saved != .welcome)
-    }
+    /// Whether Likely may talk to the license server (`LicenseClient`): only once the user has seen
+    /// the welcome screen's install-ID notice (`Settings.sawServerNotice`). Covers the license server
+    /// only, not Sparkle's update checks.
+    static var mayContactServer: Bool { !isFreeBuild && Settings.sawServerNotice }
 
     static let plans: [Plan] = [
         Plan(kind: .subscription,
              headline: "I want Likely to keep getting better",
              price: "$3", priceUnit: "/ month",                                                          // TODO: confirm price
              detail: "New features and improvements as they ship.",
-             disclosure: "$3/month, renews automatically until you cancel. Cancel anytime in Settings → License or by email.",
+             autoRenews: true,
              serverPlan: .monthly,
              buttonTitle: "Subscribe"),
         Plan(kind: .oneTime,
              headline: "Just the app, please",
              price: "$29", priceUnit: "once",
              detail: "One payment, and you can use the app for as long as you like.",
-             disclosure: nil,
+             autoRenews: false,
              serverPlan: .lifetime,
              buttonTitle: "Buy Once"),
         Plan(kind: .free,
              headline: "I'm allergic to paying",
              price: "Free", priceUnit: "",
              detail: "You can use Likely for free, but we're not going to make it easy for you.",
-             disclosure: nil,
+             autoRenews: false,
              serverPlan: nil,
              buttonTitle: "Open GitHub"),
     ]

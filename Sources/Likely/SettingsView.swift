@@ -246,7 +246,11 @@ private struct LicenseSection: View {
                     if !store.isActive {
                         Button("Buy…") { actions.showLicense() }
                     }
-                    Button("Check Again") { Task { await store.refresh() } }.disabled(store.isChecking)
+                    if License.mayContactServer {
+                        Button("Check Again") { Task { await store.refresh() } }.disabled(store.isChecking)
+                    } else {
+                        Text("Finish setting up Likely first").foregroundStyle(.secondary)
+                    }
                 }
             }
             if let message = portalError ?? store.lastError, !License.isFreeBuild {

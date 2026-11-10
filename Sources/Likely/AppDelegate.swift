@@ -301,11 +301,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Onboarding opened straight on the license page (lapsed subscription, "Buy…" in Settings).
     func showLicense() {
+        // Before the welcome screen's notice, `showOnboarding` starts there instead.
         if !License.isFreeBuild { LikelyOnboardingStep.saved = .license }
         showOnboarding()
     }
 
     @objc func showOnboarding() {
+        // Nothing past the welcome screen (license page included) until its install-ID notice was seen.
+        if !License.isFreeBuild && !Settings.sawServerNotice { LikelyOnboardingStep.saved = .welcome }
         Log.write("app", "showing onboarding at step \(meta: LikelyOnboardingStep.saved.rawValue)")
         CopyEditor.shared.saveURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely/debug/onboarding-copy.json")

@@ -81,11 +81,7 @@ struct LikelyOnboardingView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: step)
-        .onChange(of: step) { _, newStep in
-            LikelyOnboardingStep.saved = newStep
-            // Past the welcome screen's notice: the license server may now hear from us.
-            if newStep != .welcome { LicenseStore.shared.startPeriodicChecks() }
-        }
+        .onChange(of: step) { _, newStep in LikelyOnboardingStep.saved = newStep }
         .onAppear {
             state.refresh()
             agents.scan()
@@ -109,7 +105,12 @@ struct LikelyOnboardingView: View {
         OnboardingPage(
             nextButtonText: "Get Started",
             nextButtonIcon: "arrow.right",
-            onNext: { step = .permissions },
+            onNext: {
+                // The footer's install-ID notice has been shown: the license server may now hear from us.
+                Settings.sawServerNotice = true
+                LicenseStore.shared.startPeriodicChecks()
+                step = .permissions
+            },
             headerContent: {
                 OnboardingTitlePill(systemIcon: "doc.viewfinder", text: "Likely")
                 OnboardingTitle("Why doesn't macOS do this?")
