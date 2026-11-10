@@ -1,8 +1,11 @@
 # Your data
 
 Likely keeps everything on this Mac. Nothing listed here is uploaded by Likely itself. The search
-agent you choose does send your query, the screenshot (if you turned that on) and what it reads while
+agent you choose does send your query, the app name, the window title and what it reads while
 searching to its model provider; that's how the search works.
+
+Likely takes no screenshots and doesn't ask for Screen Recording. (Earlier versions could send a
+screenshot of the window behind the picker; at launch Likely deletes any they left, see "Less on disk".)
 
 ## What Likely stores, and where
 
@@ -10,14 +13,11 @@ searching to its model provider; that's how the search works.
 | --- | --- | --- |
 | Search history (what you typed, the app, suggestions, the pick; last 500) | `~/Library/Application Support/Likely/History/history.enc.jsonl` (encrypted), or `history.jsonl` in builds without encryption | Encrypted (official releases), owner-only, agents can't read it |
 | Your test cases and drafts | `…/Likely/evals/cases.jsonl`, `drafts.jsonl` | Plaintext (see below), owner-only, agents can't read them |
-| Screenshots saved with tests | `…/Likely/evals/screenshots/<id>.png.enc`, or `<id>.png` in builds without encryption | Encrypted (official releases), owner-only, agents can't read them |
 | Eval runs (results, reports, transcripts) | `…/Likely/evals/runs/` (dev builds only) | Owner-only, agents can't read them (a running case reads only its own folder) |
 | Your extra agent tools | `…/Likely/tools.json` | Plaintext (see below), owner-only, agents can't read it |
-| The screenshot sent with a search | `…/Likely/run/context-<id>.png` | Owner-only; only on disk while the agent works on a turn (see below) |
 | Agent transcript of the last search | `…/Likely/transcripts/last-run.jsonl`, only while "Log details for troubleshooting" is on (dev builds: always) | Owner-only, agents can't read it; deleted when details turn off and at launch |
 | The agent CLIs' own session files | Their own folders (see "The agents' own session files") | Turned off or deleted when the picker closes; other agents can't read them |
 | Copies Likely made in the Likely folder (bookkeeping) | `…/Likely/likely-manifest.json` | Owner-only |
-| Debug view screenshots | In memory only. Dev builds also write `…/Likely/debug/<id>.png` | Owner-only (dev builds) |
 | Log (events, timings, counts; no queries, titles, paths or agent text, see "The log") | `~/Library/Logs/Likely/likely.log` | Owner-only, agents can't read it |
 | Detailed log, only while "Log details for troubleshooting" is on (dev builds: always) | `~/Library/Logs/Likely/likely-details.log` | Owner-only, agents can't read it; deleted when details turn off and at launch |
 | Settings, tool approvals | `~/Library/Preferences/inc.synth.likely.plist` | Agents can't write them |
@@ -36,9 +36,8 @@ fixes anything older versions (or an editor saving tools.json) left wider.
 `~/Library/Application Support/Likely` and `~/Library/Logs/Likely`: `sandbox-exec` for Claude Code, Gemini
 CLI, OpenCode and Hermes (`AgentSandbox.protectionRules`), Codex's own permission profile for Codex
 (`AgentSandbox.codexFilesystem`). The only exception is the run's work folder: `…/Likely/run` for a search
-(the screenshot for this search, OpenCode's config, Gemini's settings, Hermes's helper), and the case's own
-folder's `agent` subfolder for an eval. That folder holds only what the agent needs: the screenshot and
-the agents' config files. Transcripts, the prompt and results are kept next to it, never in it (Codex's
+(OpenCode's config, Gemini's settings, Hermes's helper), and the case's own folder's `agent` subfolder
+for an eval. That folder holds only what the agent needs: the agents' config files. Transcripts, the prompt and results are kept next to it, never in it (Codex's
 sandbox can only allow or deny whole paths, so a transcript inside would be readable to Codex); the
 `sandbox-exec` profiles also deny `*.jsonl` in it. So a prompt-injected or curious agent can't read your
 history, your tests and their expected answers, earlier eval reports, transcripts, or the log. tools.json
@@ -56,7 +55,7 @@ profile (`./build.sh` by default). Settings → History shows which: "Encryption
 in this build (no provisioning profile)" with a link to [BUILDING.md](BUILDING.md), which explains how to
 turn it on with your own Apple team.
 
-With encryption on, search history and screenshots saved with tests are encrypted with AES-256-GCM. The
+With encryption on, search history is encrypted with AES-256-GCM. The
 random key is kept in the data-protection keychain, in Likely's own access group
 (`<team id>.inc.synth.likely`). Only apps signed by Likely's team with that group in their entitlements
 can read it, and no other app can be given access to it. It's readable after first unlock, on this
@@ -69,9 +68,8 @@ If the Keychain doesn't answer in a build that encrypts (it's locked before the 
 something else is wrong), that's an error, not "encryption off": nothing meant to be encrypted is
 written in plaintext. Settings → History shows "Encryption: on, but the Keychain isn't answering"
 in orange. New searches wait in memory, and are saved, encrypted, once the Keychain answers (with the
-next search, or Likely's own check every minute). They're lost if Likely quits first. Screenshots for
-new tests aren't saved, and the test is kept without one. Saved history shows as "can't be opened
-right now", and is kept as it is.
+next search, or Likely's own check every minute). They're lost if Likely quits first. Saved history
+shows as "can't be opened right now", and is kept as it is.
 
 History is encrypted line by line (`lk1:<key id>:<base64>` per line) rather than as one blob, so it
 keeps the guarantees it has in plaintext:
@@ -82,17 +80,16 @@ keeps the guarantees it has in plaintext:
 The cost is that the number of entries and their approximate sizes are visible.
 
 Encrypted and plaintext history are kept in separate files (`history.enc.jsonl`, `history.jsonl`). A
-build with encryption encrypts plaintext history and saved test screenshots on launch, then deletes the
-plaintext. A build without encryption leaves encrypted data alone: Settings → History says "History is
-encrypted by another build of Likely", it keeps its own history unencrypted, and an encrypted test
-screenshot shows as unreadable. Nothing is wiped.
+build with encryption encrypts plaintext history on launch, then deletes the plaintext. A build without
+encryption leaves encrypted history alone: Settings → History says "History is encrypted by another
+build of Likely", and it keeps its own history unencrypted. Nothing is wiped.
 
 Without encryption, the data has every other protection here: owner-only files, the agents can't read
 it, and it's kept out of Spotlight. There's deliberately no weaker fallback, such as a key file next to
 the data, or the login keychain with its "wants to use your confidential information" prompts.
 
 **The agents' own session files.** The agent CLIs keep their own record of every conversation, with
-your queries and, for most, the screenshot. Likely keeps them only as long as it needs them:
+your queries. Likely keeps them only as long as it needs them:
 - Claude Code runs with `--no-session-persistence`, so it writes nothing to `~/.claude/projects`.
   Follow-ups go to the same running process.
 - Codex, Gemini CLI, OpenCode and Hermes need theirs to continue the conversation when you type a
@@ -115,13 +112,12 @@ session in place. Agents can't read any of these. Earlier versions of Likely did
 delete Likely's folders in `~/.claude/projects` (their names contain `Application-Support-Likely`) to
 remove what they left.
 
-**Less on disk.** The screenshot sent with a search is written when you submit the search and deleted as
-soon as the agent's turn finishes. Likely keeps it in memory while the picker is open, because a follow-up
-("not these, the signed one") may need it: the agent may look again, and an agent restarted after a crash
-gets it attached again. So it's written back just before each follow-up turn and deleted again after it,
-and dropped from memory when the picker closes. Release builds keep debug-view screenshots in memory only,
-and delete any `debug/*.png` older versions left. An eval run that was killed before it could delete the
-decrypted screenshot of a case leaves `screenshot-<id>.png` behind; Likely deletes those at launch.
+**Less on disk.** Earlier versions could take screenshots. At every launch Likely deletes any they left
+(`LegacyScreenshots`): screenshots saved with tests (`…/Likely/evals/screenshots/`, encrypted or not), the
+screenshot sent with a search (`…/Likely/run/context*.png`), the debug view's copies
+(`…/Likely/debug/*.png`) and decrypted copies a killed eval run left (`screenshot-<id>.png` under
+`…/Likely/evals/runs`). It deletes only files with those names in those folders, and follows no links out
+of Likely's folder. Test cases that still name a screenshot keep working; the field is ignored.
 
 **Spotlight.** `~/Library/Application Support/Likely` and `~/Library/Logs/Likely` are kept out of the
 Spotlight index, so eval reports, test cases and the log never turn up in an agent's `mdfind` (an eval's

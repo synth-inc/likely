@@ -468,8 +468,6 @@ final class EvalCaseRun {
         let kind: AgentKind
         let path: String
         let model: String
-        /// Everything except Claude Code gets the screenshot attached (as in Coordinator).
-        var takesImages: Bool { kind.id != "claude" }
         /// Codex runs under its own sandbox, which can't be nested: no isolation rules for it.
         var canIsolate: Bool { kind.id != "codex" }
     }
@@ -481,9 +479,9 @@ final class EvalCaseRun {
     let attempt: Int
     /// The case's folder: its prompt, transcript and results. Agents can't read it.
     let workDir: URL
-    /// What the agent may read (and runs in): `<case>/agent`, holding only the decrypted screenshot
-    /// and the agent's config files. Transcripts stay one level up, out of its reach (Codex's
-    /// sandbox can't deny a file pattern inside a folder it may read).
+    /// What the agent may read (and runs in): `<case>/agent`, holding only the agent's config files.
+    /// Transcripts stay one level up, out of its reach (Codex's sandbox can't deny a file pattern
+    /// inside a folder it may read).
     var agentDir: URL { workDir.appendingPathComponent("agent", isDirectory: true) }
 
     private var runner: AgentRunner?
@@ -499,22 +497,6 @@ final class EvalCaseRun {
     private var timeoutWork: DispatchWorkItem?
 
     private var evalCase: EvalCase { item.evalCase }
-    /// The case's screenshot as a file the agent can read. Saved test screenshots are encrypted in
-    /// builds with encryption (evals/screenshots/*.png.enc, see EvalScreenshots): those are decrypted into a temporary 0600
-    /// file in this case's `agent` folder (the one folder of Likely's its sandbox may read), deleted
-    /// when the case ends. Plain PNGs (the repo's fixtures) are used as they are.
-    private lazy var screenshot: URL? = {
-        guard let path = evalCase.context?.screenshot.map({ EvalPath.resolve($0, relativeTo: item.base) }) else { return nil }
-        do {
-            let file = try EvalScreenshots.materialize(path, in: agentDir, cipher: DataProtection.cipher)
-            if file.isTemporary { temporaryScreenshot = file.url }
-            return file.url
-        } catch {
-            Log.write("eval", "\(sensitive: evalCase.id): can't read the screenshot \(path: path): \(error: error)")
-            return nil
-        }
-    }()
-    private var temporaryScreenshot: URL?
     private var searchFolders: [String]? { evalCase.searchFolders?.map { EvalPath.resolve($0, relativeTo: item.base) } }
     /// The case asks for isolation: the prompt points at its folders only.
     private var wantsIsolation: Bool { options.isolate && searchFolders != nil }
@@ -544,9 +526,9 @@ final class EvalCaseRun {
         // Never the real user's name: the case's own, the fixture persona, or none.
         let userName = context?.userName ?? (evalCase.source == "fixture" ? EvalCLI.fixturePersona : nil)
         let base = PromptBuilder.initial(PromptBuilder.Context(appName: context?.app ?? "an app", windowTitle: context?.windowTitle,
-                                                               buttonTitle: context?.button, screenshot: screenshot,
+                                                               buttonTitle: context?.button,
                                                                userName: userName, tools: tools),
-                                         imageAttached: agent.takesImages, template: template)
+                                         template: template)
         var prompt = base
         if wantsIsolation, let folders = searchFolders {
             // The default template invites searching the rest of ~; a test run must not.
@@ -610,8 +592,7 @@ final class EvalCaseRun {
         let work = DispatchWorkItem { [weak self] in self?.finish(status: "timeout", error: "no answer within \(Int(self?.options.timeout ?? 0))s") }
         timeoutWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + options.timeout, execute: work)
-        runner.start(executable: agent.path, model: agent.model, prompt: prompt,
-                     image: agent.takesImages ? screenshot : nil, workDir: agentDir)
+        runner.start(executable: agent.path, model: agent.model, prompt: prompt, workDir: agentDir)
     }
 
     /// The dry-run sink: what LikelyFolder.add would accept, without copying.
@@ -644,8 +625,7 @@ final class EvalCaseRun {
         turnSuggestions.append([])
         applyEnvironment()
         if !runner.send(message) {
-            runner.start(executable: agent.path, model: agent.model, prompt: lastPrompt + "\n\n" + message,
-                         image: agent.takesImages ? screenshot : nil, workDir: agentDir)
+            runner.start(executable: agent.path, model: agent.model, prompt: lastPrompt + "\n\n" + message, workDir: agentDir)
         }
     }
 
@@ -655,7 +635,6 @@ final class EvalCaseRun {
         timeoutWork?.cancel()
         runner?.cancel()
         runner = nil
-        if let temporaryScreenshot { try? FileManager.default.removeItem(at: temporaryScreenshot) }
         let total = Date().timeIntervalSince(started)
         let transcript = workDir.appendingPathComponent("last-run.jsonl")
         let transcriptCopy = workDir.appendingPathComponent("transcript.jsonl")

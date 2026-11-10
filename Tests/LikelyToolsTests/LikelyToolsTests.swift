@@ -353,10 +353,10 @@ final class DataSandboxTests: XCTestCase {
     private func populate() throws {
         for path in ["History/history.jsonl", "history.jsonl", "evals/cases.jsonl", "evals/drafts.jsonl",
                      "evals/screenshots/case.png.enc", "evals/runs/r1/report.html", "evals/runs/r1/cases/001-a/prompt.txt",
-                     "evals/runs/r1/cases/001-a/agent/screenshot-1.png", "evals/runs/r1/cases/001-a/transcript.jsonl",
+                     "evals/runs/r1/cases/001-a/agent/gemini-settings.json", "evals/runs/r1/cases/001-a/transcript.jsonl",
                      "evals/runs/r1/cases/001-a/last-run.jsonl", "transcripts/last-run.jsonl",
                      "debug/run.png", "tools.json", "likely-manifest.json",
-                     "run/context-ABC.png", "run/last-run.jsonl", "run/gemini-settings.json",
+                     "run/last-run.jsonl", "run/gemini-settings.json",
                      "run/opencode-config/opencode/opencode.jsonc", "run/hermes-bin/launchctl"] {
             try put(path, in: support)
         }
@@ -386,7 +386,7 @@ final class DataSandboxTests: XCTestCase {
         }
         XCTAssertNotEqual(try run(["/bin/ls", support.path + "/"], profile: profile, readable: [runDir]), 0, "listing", file: file, line: line)
         XCTAssertNotEqual(try run(["/bin/ls", logs.path + "/"], profile: profile, readable: [runDir]), 0, "listing logs", file: file, line: line)
-        for path in ["run/context-ABC.png", "run/gemini-settings.json", "run/opencode-config/opencode/opencode.jsonc",
+        for path in ["run/gemini-settings.json", "run/opencode-config/opencode/opencode.jsonc",
                      "run/hermes-bin/launchctl"].map({ support.appendingPathComponent($0).path }) {
             XCTAssertEqual(try run(["/bin/cat", path], profile: profile, readable: [runDir]), 0, "not readable: \(path)", file: file, line: line)
         }
@@ -394,11 +394,11 @@ final class DataSandboxTests: XCTestCase {
         XCTAssertNotEqual(try run(["/usr/bin/touch", runDir + "/new.txt"], profile: profile, readable: [runDir]), 0, file: file, line: line)
         XCTAssertNotEqual(try run(["/usr/bin/touch", logs.path + "/new.log"], profile: profile, readable: [runDir]), 0, file: file, line: line)
 
-        // An eval case's agent reads its `agent` folder (the decrypted screenshot), not the case's prompt,
+        // An eval case's agent reads its `agent` folder (its config files), not the case's prompt,
         // transcripts or the run's report.
         let caseDir = support.appendingPathComponent("evals/runs/r1/cases/001-a").path
         let agentDir = caseDir + "/agent"
-        XCTAssertEqual(try run(["/bin/cat", agentDir + "/screenshot-1.png"], profile: profile, readable: [agentDir]), 0, file: file, line: line)
+        XCTAssertEqual(try run(["/bin/cat", agentDir + "/gemini-settings.json"], profile: profile, readable: [agentDir]), 0, file: file, line: line)
         for name in ["prompt.txt", "transcript.jsonl", "last-run.jsonl"] {
             XCTAssertNotEqual(try run(["/bin/cat", caseDir + "/" + name], profile: profile, readable: [agentDir]), 0, name, file: file, line: line)
         }
@@ -427,7 +427,7 @@ final class DataSandboxTests: XCTestCase {
         let real = support.path + ".noindex"
         XCTAssertNotEqual(try run(["/bin/cat", real + "/History/history.jsonl"], profile: AgentSandbox.privacyOnlyProfile,
                                   readable: [support.path + "/run"]), 0)
-        XCTAssertEqual(try run(["/bin/cat", real + "/run/context-ABC.png"], profile: AgentSandbox.privacyOnlyProfile,
+        XCTAssertEqual(try run(["/bin/cat", real + "/run/gemini-settings.json"], profile: AgentSandbox.privacyOnlyProfile,
                                readable: [support.path + "/run"]), 0)
     }
 
@@ -470,7 +470,7 @@ final class DataSandboxTests: XCTestCase {
         }
     }
 
-    /// Agents' own session stores (queries, screenshots) are unreadable to the other agents, and to
+    /// Agents' own session stores (queries) are unreadable to the other agents, and to
     /// none of them their own (they need it to run).
     func testAgentsCantReadEachOthersSessions() throws {
         let stores: [AgentSessions: String] = [

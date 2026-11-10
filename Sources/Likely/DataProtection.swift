@@ -7,7 +7,7 @@ import LikelyStorage
 /// - owner-only permissions on everything under ~/Library/Application Support/Likely and
 ///   ~/Library/Logs/Likely (set at creation by OwnerOnly; `prepareAtLaunch` fixes older files);
 /// - the agents' sandboxes can't read either folder (AgentSandbox.protectionRules, CodexRunner);
-/// - in builds with a provisioning profile, search history and saved test screenshots are encrypted
+/// - in builds with a provisioning profile, search history is encrypted
 ///   with a key in the data-protection keychain (`cipher`, see EncryptionAvailability); other builds
 ///   keep them in plaintext (docs/BUILDING.md);
 /// - both folders are kept out of Spotlight (SpotlightExclusion).
@@ -57,34 +57,15 @@ enum DataProtection {
             let changed = OwnerOnly.repair(folder)
             if changed > 0 { Log.write("privacy", "made \(changed) item(s) in \(path: folder) owner-only") }
         }
-        #if !LIKELY_DEV
-        // Release builds keep debug screenshots in memory only.
-        DebugStore.removeSavedScreenshots()
-        #endif
     }
 
     static func migrateInBackground() {
         DispatchQueue.global(qos: .utility).async {
-            // Decrypted test screenshots an eval run left behind when it was killed.
-            let removed = EvalScreenshots.removeTemporaryCopies()
-            if removed > 0 { Log.write("privacy", "removed \(removed) leftover decrypted test screenshot(s)") }
+            // Likely no longer takes screenshots: delete any an older version left.
+            let removed = LegacyScreenshots.removeAll()
+            if removed > 0 { Log.write("privacy", "removed \(removed) screenshot(s) left by an older version") }
             // Search history: SearchHistoryStore moves and encrypts it on its own queue.
             SearchHistoryStore.shared.convertPlaintext()
-            encryptScreenshots()
-        }
-    }
-
-    /// Plain test screenshots (older versions, or a build without encryption) → `.png.enc`. Also run
-    /// again when the Keychain answers after an error.
-    static func encryptScreenshots() {
-        guard let cipher else { return }
-        do {
-            let count = try EvalScreenshots.encryptExisting(cipher: cipher)
-            if count > 0 { noteKeyResult(nil) }   // 0: the key wasn't needed, so this says nothing about it
-            if count > 0 { Log.write("privacy", "encrypted \(count) saved test screenshot(s)") }
-        } catch {
-            noteKeyResult(error)
-            Log.write("privacy", "couldn't encrypt saved test screenshots (left as they are): \(error: error)")
         }
     }
 
@@ -92,7 +73,6 @@ enum DataProtection {
     fileprivate static func keychainRecovered() {
         SearchHistoryStore.shared.flushPending()
         SearchHistoryStore.shared.convertPlaintext()
-        DispatchQueue.global(qos: .utility).async { encryptScreenshots() }
     }
 }
 

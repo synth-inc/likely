@@ -68,7 +68,7 @@ public final class KeychainKeyStore: DataKeyStore {
         query[kSecValueData as String] = key
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         query[kSecAttrLabel as String] = "Likely data key"
-        query[kSecAttrDescription as String] = "Encrypts Likely's search history and saved test screenshots"
+        query[kSecAttrDescription as String] = "Encrypts Likely's search history"
         return query
     }
 

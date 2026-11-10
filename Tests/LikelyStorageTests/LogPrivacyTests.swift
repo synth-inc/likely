@@ -215,7 +215,7 @@ final class LogFileTests: TempDirTestCase {
 final class LogPrivacySourceTests: XCTestCase {
     /// Each source line with `meta:` values ("<path under Sources>: <line, whitespace collapsed>") and
     /// how many. Reviewed: app names, agent ids, models, AX roles/identifiers/notification names,
-    /// constants passed through String parameters (close reasons, pick methods, capture modes, refusal
+    /// constants passed through String parameters (close reasons, pick methods, refusal
     /// reasons), license/update server paths and states.
     static let reviewedMeta: [String: Int] = [
         "Likely/PrivateDataPermission.swift: Log.write(\"privacy\", \"\\(meta: area.rawValue): \\(public: outcome == .granted ? \"allowed\" : \"not allowed\")\")": 1,
@@ -235,7 +235,6 @@ final class LogPrivacySourceTests: XCTestCase {
         "Likely/AppDelegate.swift: Log.write(\"app\", \"showing onboarding at step \\(meta: LikelyOnboardingStep.saved.rawValue)\")": 1,
         "Likely/ClaudeRunner.swift: Log.write(\"claude\", \"started \\(path: claudePath) model=\\(meta: model) pid=\\(process.processIdentifier)\")": 1,
         "Likely/Coordinator.swift: : \"\\(meta: agentName) error kind=\\(AgentFailureKind.classify(outcome.summary)) – \\(sensitive: outcome.summary.prefix(60))\"": 1,
-        "Likely/Coordinator.swift: Log.write(\"capture\", \"\\(meta: capture.mode) title=\\(sensitive: capture.windowTitle)\")": 1,
         "Likely/Coordinator.swift: Log.write(\"detect\", \"\\(meta: appName) \\(meta: notification) \\(AX.describe(window)) → \\(verdict.logLine)\")": 2,
         "Likely/Coordinator.swift: Log.write(\"detect\", \"panel service window #\\(window.id) while \\(meta: picker.appName) is frontmost\")": 1,
         "Likely/Coordinator.swift: Log.write(\"evals\", \"picker closed without a confirmed pick (\\(meta: pick.how))\")": 1,

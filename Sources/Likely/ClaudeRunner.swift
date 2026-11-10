@@ -6,7 +6,7 @@ import LikelyTools
 ///
 /// Input is stream-json too, so the process stays alive while the picker is open and `send(_:)` can
 /// add user feedback at any time: mid-turn messages are picked up after Claude's current step,
-/// later ones start a new turn with the whole conversation (screenshot, earlier searches) in context.
+/// later ones start a new turn with the whole conversation (earlier searches) in context.
 final class ClaudeRunner: AgentRunner {
     typealias Outcome = AgentOutcome
 
@@ -39,8 +39,7 @@ final class ClaudeRunner: AgentRunner {
     /// True between sending a message and its result.
     private(set) var isBusy = false
 
-    /// Claude Code reads the screenshot itself (its path is in the prompt), so `image` is unused.
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         start(claudePath: executable, model: model, prompt: prompt, workDir: workDir)
     }
 
@@ -59,7 +58,7 @@ final class ClaudeRunner: AgentRunner {
             // Skip the user's settings (hooks etc.) and MCP servers: faster startup, no side effects.
             "--setting-sources", "local",
             "--strict-mcp-config",
-            // No transcript in ~/.claude/projects (the queries and the screenshot, in plaintext, where
+            // No transcript in ~/.claude/projects (the queries, in plaintext, where
             // later agents could read them). Follow-ups go to this same process, so nothing needs resuming.
             "--no-session-persistence",
             "--tools", "Read,Glob,Grep,Bash",
