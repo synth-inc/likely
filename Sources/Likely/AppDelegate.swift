@@ -5,10 +5,9 @@ import OnboardingKit
 import SwiftUI
 import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
-    private let jumpItem = NSMenuItem(title: "Jump to Likely Folder When a Picker Opens", action: #selector(toggleJump), keyEquivalent: "")
     private let improveItem = NSMenuItem(title: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "")
 
     private let coordinator = Coordinator()
@@ -168,10 +167,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         stateItem.isEnabled = false
         menu.addItem(stateItem)
         menu.addItem(.separator())
-        jumpItem.target = self
-        menu.addItem(jumpItem)
-        menu.delegate = self
-        menu.addItem(.separator())
         improveItem.target = self
         menu.addItem(improveItem)
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
@@ -231,17 +226,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func checkForUpdates() {
         MainActor.assumeIsolated { Updater.shared.checkForUpdates() }
-    }
-
-    /// Settings has the same switch, so the check mark is refreshed each time the menu opens.
-    func menuWillOpen(_ menu: NSMenu) {
-        jumpItem.state = Settings.openToLikely ? .on : .off
-    }
-
-    @objc private func toggleJump() {
-        Settings.openToLikely.toggle()
-        jumpItem.state = Settings.openToLikely ? .on : .off
-        Log.write("app", "jump to Likely folder when a picker opens: \(Settings.openToLikely)")
     }
 
     @objc private func showDebugView() {
