@@ -135,6 +135,14 @@ final class EvalCommandLineTests: XCTestCase {
         XCTAssertEqual(EvalEnvironment.differences(started, from: clean), [])
         XCTAssertEqual(EvalEnvironment.differences(caller, from: clean).contains("CFFIXED_USER_HOME"), true)
         XCTAssertEqual(EvalEnvironment.differences(caller, from: clean).contains("PATH"), true)
+        // Proxy and CA settings come from launchd only (never the caller), and never with a newline.
+        let withLaunchd = EvalEnvironment.sanitized(caller.merging(["HTTPS_PROXY": "http://attacker:1"]) { $1 }, home: "/Users/me",
+                                                    user: "me", shell: "/bin/zsh", tmpdir: nil,
+                                                    launchd: ["HTTPS_PROXY": "http://proxy.corp:8080", "NODE_EXTRA_CA_CERTS": "/a\nb",
+                                                              "DYLD_INSERT_LIBRARIES": "/tmp/x"])
+        XCTAssertEqual(withLaunchd["HTTPS_PROXY"], "http://proxy.corp:8080")
+        XCTAssertNil(withLaunchd["NODE_EXTRA_CA_CERTS"])
+        XCTAssertNil(withLaunchd["DYLD_INSERT_LIBRARIES"])
         // Deterministic, so the restart happens at most once.
         XCTAssertEqual(EvalEnvironment.sanitized(clean, home: "/Users/me", user: "me", shell: "/bin/zsh", tmpdir: "/var/folders/xy/T/"), clean)
     }
@@ -214,7 +222,7 @@ final class EvalCommandLineTests: XCTestCase {
     }
 
     func testExitCodes() {
-        XCTAssertEqual([EvalExit.completed, EvalExit.failed, EvalExit.usage, EvalExit.unlicensed], [0, 1, 2, 3])
+        XCTAssertEqual([EvalExit.completed, EvalExit.failed, EvalExit.usage, EvalExit.unlicensed, EvalExit.notAllowed], [0, 1, 2, 3, 4])
         XCTAssertEqual(EvalExit.interrupted(by: SIGINT), 130)
         XCTAssertEqual(EvalExit.interrupted(by: SIGTERM), 143)
     }
@@ -249,5 +257,118 @@ final class EvalFileLockingTests: XCTestCase {
         }
         XCTAssertEqual(try SearchHistoryFile.load(url, cipher: nil).count, 20)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent(".likely.lock").path))
+    }
+}
+
+final class EvalReviewFixes2Tests: XCTestCase {
+    private var dir: URL!
+
+    override func setUpWithError() throws {
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("evalfix-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: dir) }
+
+    func testAgentsOnlyFromFixedFoldersAndSavedPathMustMatch() throws {
+        let home = dir.path
+        for sub in [".local/bin", ".nvm/versions/node/v18.2.0/bin", ".nvm/versions/node/v22.12.0/bin"] {
+            try FileManager.default.createDirectory(atPath: "\(home)/\(sub)", withIntermediateDirectories: true)
+        }
+        for path in ["\(home)/.nvm/versions/node/v18.2.0/bin/claude", "\(home)/.nvm/versions/node/v22.12.0/bin/claude"] {
+            FileManager.default.createFile(atPath: path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+        }
+        let folders = AgentLocations.folders(home: home)
+        XCTAssertEqual(Array(folders.prefix(4)), ["\(home)/.local/bin", "\(home)/.claude/local", "/opt/homebrew/bin", "/usr/local/bin"])
+        let nvm = folders.filter { $0.contains(".nvm") }
+        XCTAssertEqual(nvm, ["\(home)/.nvm/versions/node/v22.12.0/bin", "\(home)/.nvm/versions/node/v18.2.0/bin"], "newest first")
+        let candidates = AgentLocations.candidates("claude", in: nvm)
+        XCTAssertEqual(candidates.count, 2)
+        XCTAssertEqual(AgentLocations.choose(saved: candidates[1], candidates: candidates), candidates[1], "a saved path detection also finds")
+        XCTAssertEqual(AgentLocations.choose(saved: "/tmp/evil/claude", candidates: candidates), candidates[0], "any other saved path is ignored")
+        XCTAssertNil(AgentLocations.choose(saved: "/tmp/evil/claude", candidates: []))
+    }
+
+    func testSymlinkedEvalsOrRunsFolderIsRefused() throws {
+        let root = dir.appendingPathComponent("evals")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("runs"), withIntermediateDirectories: true)
+        XCTAssertNil(EvalStorage.symlinkedFolder(root: root))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("runs"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("runs"), withDestinationURL: dir)
+        XCTAssertEqual(EvalStorage.symlinkedFolder(root: root), root.appendingPathComponent("runs").path)
+        let linkedRoot = dir.appendingPathComponent("evals-link")
+        try FileManager.default.createSymbolicLink(at: linkedRoot, withDestinationURL: root)
+        XCTAssertEqual(EvalStorage.symlinkedFolder(root: linkedRoot), linkedRoot.path)
+    }
+
+    func testRunFoldersAreUnique() throws {
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let a = try EvalStorage.makeRunFolder(in: dir, date: date, agent: "claude", model: "anthropic/claude haiku")
+        let b = try EvalStorage.makeRunFolder(in: dir, date: date, agent: "claude", model: "anthropic/claude haiku")
+        XCTAssertNotEqual(a, b)
+        XCTAssertTrue(b.lastPathComponent.hasSuffix("-2"))
+        XCTAssertFalse(a.lastPathComponent.contains("/"))
+        XCTAssertFalse(a.lastPathComponent.contains(" "))
+    }
+
+    func testPruningKeeps20AndNothingOlderThan30Days() {
+        let now = Date()
+        let runs = (0..<25).map { (url: URL(fileURLWithPath: "/runs/\($0)"), date: now.addingTimeInterval(-Double($0) * 3600)) }
+        XCTAssertEqual(Set(EvalStorage.runsToPrune(runs, now: now)), Set((20..<25).map { URL(fileURLWithPath: "/runs/\($0)") }))
+        let old = [(url: URL(fileURLWithPath: "/runs/new"), date: now), (url: URL(fileURLWithPath: "/runs/old"), date: now.addingTimeInterval(-31 * 86_400))]
+        XCTAssertEqual(EvalStorage.runsToPrune(old, now: now), [URL(fileURLWithPath: "/runs/old")])
+        XCTAssertEqual(EvalStorage.runsToPrune(old, now: now, protected: [URL(fileURLWithPath: "/runs/old")]), [])
+    }
+
+    func testPruneRunsDeletesOnlyRunFolders() throws {
+        let runs = dir.appendingPathComponent("runs")
+        let old = runs.appendingPathComponent("20200101-000000-claude-haiku")
+        try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_577_836_800)], ofItemAtPath: old.path)
+        let other = runs.appendingPathComponent("notes")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        XCTAssertEqual(EvalStorage.pruneRuns(in: runs), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+    }
+
+    private func run(at: String, interrupted: Bool? = nil, repeatCount: Int? = nil) -> EvalRun {
+        EvalRun(suite: "personal", suiteFiles: [], agent: "claude", model: "haiku", startedAt: at, finishedAt: at, k: 8,
+                timeoutSeconds: 120, tags: [], isolated: false, promptHash: "x", likelyVersion: "1", cases: [],
+                interrupted: interrupted, repeatCount: repeatCount)
+    }
+
+    func testPreviousSkipsInterruptedRunsAndRepeatIsASetting() throws {
+        let runs = dir.appendingPathComponent("runs")
+        let first = runs.appendingPathComponent("a"), stopped = runs.appendingPathComponent("b")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stopped, withIntermediateDirectories: true)
+        try run(at: "2026-11-01T00:00:00Z").write(to: first.appendingPathComponent("results.json"))
+        try run(at: "2026-11-02T00:00:00Z", interrupted: true).write(to: stopped.appendingPathComponent("results.json"))
+        let now = run(at: "2026-11-03T00:00:00Z")
+        XCTAssertEqual(EvalRun.previous(of: now, in: runs, excluding: nil)?.1.lastPathComponent, "a")
+        XCTAssertEqual(run(at: "x", repeatCount: 3).mismatches(with: now), ["repeat 1"])
+        XCTAssertEqual(run(at: "x", repeatCount: 1).mismatches(with: now), [])
+    }
+
+    /// The child exits while a grandchild still holds stdout: the result must include what the
+    /// grandchild writes afterwards (Run Tests parses the JSON only after end of file).
+    func testOutputCollectorWaitsForEndOfFile() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "printf '{\"a\":'; echo progress >&2; (sleep 0.4; printf '1}') & exit 7"]
+        let done = expectation(description: "done")
+        var lines: [String] = []
+        var result: (Data, Int32)?
+        let queue = DispatchQueue(label: "collector-test")
+        let collector = ProcessOutputCollector(process: process, queue: queue, onStderrLine: { lines.append($0) },
+                                               completion: { out, status in result = (out, status); done.fulfill() })
+        XCTAssertNoThrow(try process.run())
+        wait(for: [done], timeout: 5)
+        _ = collector
+        XCTAssertEqual(result.map { String(decoding: $0.0, as: UTF8.self) }, "{\"a\":1}")
+        XCTAssertEqual(result?.1, 7)
+        queue.sync {}
+        XCTAssertEqual(lines, ["progress"])
     }
 }

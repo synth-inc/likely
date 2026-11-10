@@ -84,7 +84,7 @@ can run it too):
 /Applications/Likely.app/Contents/MacOS/Likely --eval personal --json
 ```
 
-It runs headlessly through the app's real prompt, agent runner and sandbox, writes `results.json` +
+Turn on **Allow command-line test runs** in Settings → Tests first. It runs headlessly through the app's real prompt, agent runner and sandbox, writes `results.json` +
 `report.html`, and compares with your previous run. Release builds run only your own tests, with agents
 Likely detected; dev builds (`./build.sh`) also run the public suite (`--eval fixtures`, synthetic files in
 `evals/fixtures`) and take developer options. Your tests live in

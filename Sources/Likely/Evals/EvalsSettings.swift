@@ -144,6 +144,7 @@ struct EvalsSettings: View {
     @State private var copiedCommand = false
     @State private var copiedPrompt = false
     @State private var shimMessage: String?
+    @State private var allowCLI = ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true
 
     enum Section: Hashable { case tests, drafts }
 
@@ -207,6 +208,19 @@ struct EvalsSettings: View {
     /// The command for the user's coding agent, to re-run the tests after adding a tool.
     private var commandLine: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if EvalCLI.policy == .release {
+                VStack(alignment: .leading, spacing: 1) {
+                    Toggle("Allow command-line test runs", isOn: Binding(
+                        get: { allowCLI },
+                        set: { on in
+                            ProtectedSettings.set(on, forKey: ProtectedSettings.allowCommandLineTests)
+                            allowCLI = ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true
+                        }))
+                    Text("Lets Terminal and your coding agent run your tests with the command below. Off: only Run Tests here can."
+                         + (ProtectedSettings.isProtected ? "" : " (This build has no provisioning profile, so the switch is stored like any other preference.)"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             HStack(spacing: 6) {
                 Text(EvalCommand.command + " --json")
                     .font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
@@ -304,11 +318,13 @@ enum EvalCommand {
         comparison.nowPassing and comparison.nowFailing, and whether comparison.toolsChanged is true \
         (comparison.toolChanges lists +added, -removed and ~edited tools). The second run compares itself with the first.
 
+        If it exits with status 4, ask me to turn on “Allow command-line test runs” in Likely → Settings → Tests.
+
         Notes: a new or changed tool isn't used until I approve it in Likely → Settings → Tools \
         (tools.pendingApproval lists tools waiting for that), so ask me to approve it before the second run. \
         `--without-tools` runs without any of my tools, to see what they add. Exit status 0 means the run \
         completed (whatever the pass rate), 1 an error (the message is in "error"), 2 a usage error, 3 Likely isn't \
-        licensed. Each test sends its query to my search agent's provider, as using Likely does, and can take up \
+        licensed, 4 command-line runs are off. Each test sends its query to my search agent's provider, as using Likely does, and can take up \
         to two minutes. Don't run two at once.
         """
     }
@@ -321,6 +337,7 @@ enum EvalCommand {
 
     /// The shim's script: always `--eval`, so `likely` alone never starts a second copy of the app.
     static func shimScript(executable: String) -> String {
+        let executable = executable.filter { !$0.isNewline && $0 != "\u{0}" }
         let quoted = "'" + executable.replacingOccurrences(of: "'", with: "'\\''") + "'"
         return """
         #!/bin/sh
@@ -336,6 +353,11 @@ enum EvalCommand {
     /// line for the user.
     static func installShim() -> String {
         guard let executable = Bundle.main.executablePath else { return "Can't find Likely's executable." }
+        // Opened straight from the download (macOS runs it from a random, temporary copy): that path
+        // stops working once Likely quits.
+        if executable.contains("/AppTranslocation/") {
+            return "Move Likely to your Applications folder and open it from there first: it's running from a temporary copy macOS made."
+        }
         let url = shimURL
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) || (try? fm.destinationOfSymbolicLink(atPath: url.path)) != nil {
@@ -350,9 +372,8 @@ enum EvalCommand {
         } catch {
             return "Couldn't write \(EvalPath.display(url.path)): \(error)"
         }
-        let onPath = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").contains { $0 == url.deletingLastPathComponent().path }
-        return "Installed \(EvalPath.display(url.path)): run `likely --json`."
-            + (onPath ? "" : " If your shell doesn't find it, add ~/.local/bin to your PATH.")
+        return "Installed \(EvalPath.display(url.path)): run `likely --json`. If `command -v likely` prints nothing in Terminal, "
+            + "add ~/.local/bin to your PATH (e.g. in ~/.zshrc: export PATH=\"$HOME/.local/bin:$PATH\")."
     }
 }
 
@@ -796,8 +817,6 @@ final class EvalJob: ObservableObject {
     @Published var report: URL?
     @Published var result: EvalCLIResult?
     private var process: Process?
-    private var buffer = Data()
-    private var stdout = Data()
     private var quitObserver: NSObjectProtocol?
 
     init() {
@@ -812,6 +831,8 @@ final class EvalJob: ObservableObject {
         if let process, process.isRunning { process.terminate() }
     }
 
+    private var collector: ProcessOutputCollector?
+
     func start(arguments: [String]) {
         guard let executable = Bundle.main.executableURL else { return }
         output = ["$ Likely " + arguments.joined(separator: " ")]
@@ -820,45 +841,26 @@ final class EvalJob: ObservableObject {
         report = nil
         result = nil
         finished = false
-        stdout = Data()
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
-        let errPipe = Pipe()
-        let outPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        errPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            DispatchQueue.main.async { self?.consume(data) }
-        }
-        outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            DispatchQueue.main.async { self?.stdout.append(data) }
-        }
-        process.terminationHandler = { [weak self] p in
-            DispatchQueue.main.async {
-                errPipe.fileHandleForReading.readabilityHandler = nil
-                outPipe.fileHandleForReading.readabilityHandler = nil
-                if let rest = try? errPipe.fileHandleForReading.readToEnd() { self?.consume(rest) }
-                if let rest = try? outPipe.fileHandleForReading.readToEnd() { self?.stdout.append(rest) }
-                self?.finish(status: p.terminationStatus)
-            }
-        }
+        // The results are read once the run has exited and both pipes reached end of file.
+        collector = ProcessOutputCollector(process: process, onStderrLine: { [weak self] line in self?.consume(line) },
+                                           completion: { [weak self] out, status in self?.finish(stdout: out, status: status) })
         do {
             try process.run()
             self.process = process
             isRunning = true
         } catch {
+            collector = nil
             output.append("Couldn't start: \(error.localizedDescription)")
         }
     }
 
-    private func finish(status: Int32) {
+    private func finish(stdout: Data, status: Int32) {
         isRunning = false
         finished = true
+        collector = nil
         if let parsed = try? JSONDecoder().decode(EvalCLIResult.self, from: stdout) {
             result = parsed
             if let path = parsed.reportPath, FileManager.default.fileExists(atPath: path) { report = URL(fileURLWithPath: path) }
@@ -880,19 +882,14 @@ final class EvalJob: ObservableObject {
         while process.isRunning, Date() < deadline { usleep(50_000) }
     }
 
-    private func consume(_ data: Data) {
-        buffer.append(data)
-        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
-            buffer.removeSubrange(buffer.startIndex...newline)
-            output.append(line)
-            if line.hasPrefix("Running "), let n = line.split(separator: " ").dropFirst().first.flatMap({ Int($0) }) { total = n }
-            if line.hasPrefix("["), let slash = line.firstIndex(of: "/"), let close = line.firstIndex(of: "]"),
-               let i = Int(line[line.index(after: line.startIndex)..<slash]), let n = Int(line[line.index(after: slash)..<close]) {
-                done = i
-                total = n
-            }
-            if line.hasPrefix("Report: ") { report = URL(fileURLWithPath: String(line.dropFirst("Report: ".count))) }
+    private func consume(_ line: String) {
+        output.append(line)
+        if line.hasPrefix("Running "), let n = line.split(separator: " ").dropFirst().first.flatMap({ Int($0) }) { total = n }
+        if line.hasPrefix("["), let slash = line.firstIndex(of: "/"), let close = line.firstIndex(of: "]"),
+           let i = Int(line[line.index(after: line.startIndex)..<slash]), let n = Int(line[line.index(after: slash)..<close]) {
+            done = i
+            total = n
         }
+        if line.hasPrefix("Report: ") { report = URL(fileURLWithPath: String(line.dropFirst("Report: ".count))) }
     }
 }

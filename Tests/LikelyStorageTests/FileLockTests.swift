@@ -81,3 +81,34 @@ final class FileLockTests: XCTestCase {
         XCTAssertEqual(String(decoding: (try? Data(contentsOf: file)) ?? Data(), as: UTF8.self), "50")
     }
 }
+
+final class FileLockSafetyTests: XCTestCase {
+    func testLockFilesAreNeverFollowedThroughSymlinksOrNonFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("filelock-safety-\(UUID().uuidString)")
+        try OwnerOnly.createDirectory(dir)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("victim")
+        try Data("keep".utf8).write(to: target)
+        let link = dir.appendingPathComponent(".run.lock")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        XCTAssertThrowsError(try FileLock.tryHold(link))
+        var ran = false
+        FileLock.withLock(link) { ran = true }   // goes ahead unlocked, but never opens the target
+        XCTAssertTrue(ran)
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "keep")
+        let folderLock = dir.appendingPathComponent("folder.lock")
+        try FileManager.default.createDirectory(at: folderLock, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try FileLock.tryHold(folderLock))
+    }
+
+    func testReadersDontCreateLockFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("filelock-reader-\(UUID().uuidString)")
+        try OwnerOnly.createDirectory(dir)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let lock = FileLock.url(for: dir)
+        FileLock.withLockIfPresent(lock) {}
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lock.path))
+        FileLock.withLock(lock) {}
+        XCTAssertTrue(FileManager.default.fileExists(atPath: lock.path))
+    }
+}

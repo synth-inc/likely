@@ -83,7 +83,8 @@ public enum ToolPrompts {
         comparison.nowFailing, and comparison.toolChanges (it should list +<your tool id>). If \
         tools.pendingApproval lists the tool, I haven't approved it yet and the run didn't use it.
         Exit status 0 means the run completed, whatever the pass rate; 1 is an error (see "error": for example, no \
-        saved tests yet, in which case skip this), 2 a usage error, 3 Likely isn't licensed. Each test sends its \
+        saved tests yet, in which case skip this), 2 a usage error, 3 Likely isn't licensed, 4 command-line runs are \
+        off (ask me to turn on “Allow command-line test runs” in Likely → Settings → Tests). Each test sends its \
         query to my search agent's provider, as using Likely does, and can take up to two minutes. Run one at a time.
         """
     }

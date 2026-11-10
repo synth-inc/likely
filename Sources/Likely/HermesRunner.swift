@@ -478,7 +478,7 @@ extension HermesRunner {
     /// best effort.
     static func deleteSession(_ id: String, executable: String) {
         guard id.range(of: #"^[A-Za-z0-9_.:-]+$"#, options: .regularExpression) != nil else { return }
-        DispatchQueue.global(qos: .utility).async {
+        AgentSessionCleanup.run {
             run(executable, ["-p", profileName, "sessions", "delete", id, "--yes"])
         }
     }

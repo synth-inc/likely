@@ -10,6 +10,8 @@ public enum EvalExit {
     public static let usage: Int32 = 2
     /// A paid build without an active license (the same check as searches).
     public static let unlicensed: Int32 = 3
+    /// Release builds: "Allow command-line test runs" (Settings → Tests) is off.
+    public static let notAllowed: Int32 = 4
     /// Stopped by a signal (SIGINT 130, SIGTERM 143): partial results are written.
     public static func interrupted(by signal: Int32) -> Int32 { 128 + signal }
 }
@@ -175,8 +177,14 @@ public enum EvalEnvironment {
 
     static let localeKeys = ["LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES"]
 
+    /// Network settings people set for GUI apps with `launchctl setenv` (proxies, a corporate CA): the
+    /// app gets them from launchd, so the run takes them from launchd too (never from the caller).
+    public static let launchdKeys = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy",
+                                     "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE"]
+
+    /// `launchd`: values of `launchdKeys` as `launchctl getenv` reports them (others are ignored).
     public static func sanitized(_ env: [String: String], home: String, user: String, shell: String, tmpdir: String?,
-                                 passThrough: Set<String> = []) -> [String: String] {
+                                 launchd: [String: String] = [:], passThrough: Set<String> = []) -> [String: String] {
         var clean: [String: String] = ["HOME": home, "USER": user, "LOGNAME": user, "SHELL": shell, "PATH": path]
         if let tmpdir, !tmpdir.isEmpty { clean["TMPDIR"] = tmpdir }
         for key in localeKeys {
@@ -185,6 +193,9 @@ public enum EvalEnvironment {
         if let v = env["__CF_USER_TEXT_ENCODING"],
            v.range(of: #"^0x[0-9A-Fa-f]{1,8}:0x[0-9A-Fa-f]{1,8}:0x[0-9A-Fa-f]{1,8}$"#, options: .regularExpression) != nil {
             clean["__CF_USER_TEXT_ENCODING"] = v
+        }
+        for key in launchdKeys {
+            if let v = launchd[key], !v.isEmpty, v.count < 4096, !v.contains(where: { $0.isNewline || $0 == "\u{0}" }) { clean[key] = v }
         }
         for key in passThrough { if let v = env[key] { clean[key] = v } }
         return clean
@@ -332,5 +343,96 @@ public struct EvalCLIResult: Codable, Equatable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return String(decoding: (try? encoder.encode(self)) ?? Data("{}".utf8), as: UTF8.self)
+    }
+}
+
+/// Where `--eval` looks for agents in release builds: fixed install folders only, never a login shell
+/// (whose rc files anything can edit) and never a saved path that detection doesn't also find.
+public enum AgentLocations {
+    /// The folders, in order: ~/.local/bin, ~/.claude/local, Homebrew, /usr/local/bin, npm's and bun's
+    /// global bins, then each nvm Node version's bin (newest first).
+    public static func folders(home: String, fileManager fm: FileManager = .default) -> [String] {
+        var dirs = ["\(home)/.local/bin", "\(home)/.claude/local", "/opt/homebrew/bin", "/usr/local/bin",
+                    "\(home)/.npm-global/bin", "\(home)/.bun/bin"]
+        let nvm = "\(home)/.nvm/versions/node"
+        let versions = ((try? fm.contentsOfDirectory(atPath: nvm)) ?? []).filter { $0.hasPrefix("v") && !$0.contains("/") }
+        dirs += versions.sorted { $0.compare($1, options: .numeric) == .orderedDescending }.map { "\(nvm)/\($0)/bin" }
+        return dirs
+    }
+
+    /// Every executable named `name` in `folders`, in order.
+    public static func candidates(_ name: String, in folders: [String], fileManager fm: FileManager = .default) -> [String] {
+        folders.map { "\($0)/\(name)" }.filter { fm.isExecutableFile(atPath: $0) }
+    }
+
+    /// The saved path (Settings) when it's one of the candidates, else the first candidate.
+    public static func choose(saved: String?, candidates: [String]) -> String? {
+        if let saved, candidates.contains(saved) { return saved }
+        return candidates.first
+    }
+}
+
+/// Collects a child process's stdout and stderr and reports once the process has exited AND both pipes
+/// have reached end of file, so nothing written just before exit is lost (a process can exit while a
+/// child it started still holds the pipe; the termination handler alone fires too early).
+public final class ProcessOutputCollector {
+    public private(set) var stdout = Data()
+    private let group = DispatchGroup()
+    private let lock = NSLock()
+
+    /// `onStderrLine`: each complete stderr line, as it arrives (on `queue`). `completion`: once, on `queue`,
+    /// with everything stdout wrote and the exit status.
+    public init(process: Process, queue: DispatchQueue = .main, onStderrLine: @escaping (String) -> Void,
+                completion: @escaping (_ stdout: Data, _ status: Int32) -> Void) {
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        group.enter()
+        group.enter()
+        group.enter()
+        var errBuffer = Data()
+        outPipe.fileHandleForReading.readabilityHandler = { [weak self, group] handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                group.leave()
+                return
+            }
+            self?.lock.lock()
+            self?.stdout.append(data)
+            self?.lock.unlock()
+        }
+        errPipe.fileHandleForReading.readabilityHandler = { [group] handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                if !errBuffer.isEmpty {
+                    let rest = String(decoding: errBuffer, as: UTF8.self)
+                    queue.async { onStderrLine(rest) }
+                    errBuffer = Data()
+                }
+                group.leave()
+                return
+            }
+            errBuffer.append(data)
+            while let newline = errBuffer.firstIndex(of: UInt8(ascii: "\n")) {
+                let line = String(decoding: errBuffer[errBuffer.startIndex..<newline], as: UTF8.self)
+                errBuffer.removeSubrange(errBuffer.startIndex...newline)
+                queue.async { onStderrLine(line) }
+            }
+        }
+        var status: Int32 = 0
+        process.terminationHandler = { [group] p in
+            status = p.terminationStatus
+            group.leave()
+        }
+        group.notify(queue: queue) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let out = self.stdout
+            self.lock.unlock()
+            completion(out, status)
+        }
     }
 }

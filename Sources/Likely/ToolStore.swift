@@ -17,12 +17,13 @@ final class ToolStore: ObservableObject {
     @Published private(set) var loadError: String?
     /// Entries skipped or fixed up while reading.
     @Published private(set) var issues: [String] = []
-    /// What the user approved, by tool id (UserDefaults; agents can't write Likely's preferences).
+    /// What the user approved, by tool id (UserDefaults, sealed: see ProtectedSettings).
     @Published private(set) var approvals: ToolApproval.Approvals = ToolStore.loadApprovals()
 
     /// Posted (main thread) when tools start waiting for approval; AppDelegate badges the menu bar.
     static let approvalNeeded = Notification.Name("ToolStore.approvalNeeded")
-    private static let approvalsKey = "approvedTools"
+    /// Sealed (ProtectedSettings): approvals written outside Likely are ignored, so those tools wait for Approve.
+    private static let approvalsKey = ProtectedSettings.approvedTools
     private var announcedPending: [String] = []
 
     private struct Signature: Equatable {
@@ -71,7 +72,7 @@ final class ToolStore: ObservableObject {
     // MARK: Approval
 
     private static func loadApprovals() -> ToolApproval.Approvals {
-        guard let data = UserDefaults.standard.data(forKey: approvalsKey),
+        guard let data = ProtectedSettings.data(approvalsKey),
               let approvals = try? JSONDecoder().decode(ToolApproval.Approvals.self, from: data) else { return [:] }
         return approvals
     }
@@ -79,7 +80,7 @@ final class ToolStore: ObservableObject {
     /// `check: false` when the tools are about to be rewritten (the reload checks then).
     private func storeApprovals(_ approvals: ToolApproval.Approvals, check: Bool = true) {
         self.approvals = approvals
-        UserDefaults.standard.set(try? JSONEncoder().encode(approvals), forKey: Self.approvalsKey)
+        ProtectedSettings.set(try? JSONEncoder().encode(approvals), forKey: Self.approvalsKey)
         if check { checkPending() }
     }
 

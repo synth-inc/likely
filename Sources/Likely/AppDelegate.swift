@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Licensing gates the search, not the watching: an unlicensed Likely still shows its bar above
         // pickers, in an unpaid state that leads to the license page.
-        coordinator.isLicensed = { License.isActive }
+        coordinator.isLicensed = { License.permitsSearches() }
         coordinator.onGetLikely = { [weak self] in self?.showLicense() }
         coordinator.onMakeTest = { [weak self] run in self?.showTestEditor(for: run) }
 
@@ -309,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Settings.onboarded = true
             LikelyOnboardingStep.clearSaved()
             if Settings.agentID == "claude", let path = AgentDetector.shared.path(for: AgentKind.all[0]) {
-                UserDefaults.standard.set(path, forKey: "claudePath")
+                ProtectedSettings.set(path, forKey: ProtectedSettings.claudePath)
                 ClaudeLocator.resolve()
             }
             Log.write("app", "onboarding finished, agent=\(meta: Settings.agentID)")

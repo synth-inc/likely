@@ -12,6 +12,8 @@ Log.details.turnOff()
 // Owner-only permissions, Spotlight exclusion, release builds' debug screenshots: before the
 // coordinator (created with the delegate) touches the folders. Then encrypt older plaintext data.
 DataProtection.prepareAtLaunch()
+// Seal the settings older versions saved (once), before anything reads them (ProtectedSettings).
+ProtectedSettings.adoptAtLaunch()
 DataProtection.migrateInBackground()
 
 let app = NSApplication.shared

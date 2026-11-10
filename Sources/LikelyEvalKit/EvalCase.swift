@@ -221,7 +221,8 @@ public enum EvalCaseFile {
         guard FileManager.default.fileExists(atPath: url.path) else { return ([], []) }
         // Under the folder's lock: an append in another process (the app saving a test while an eval
         // run reads the file) is never seen half written.
-        let text = try FileLock.withLock(lockURL(for: url)) { try String(contentsOf: url, encoding: .utf8) }
+        // Readers never create the lock file: a fixtures file or one in an app bundle gets none.
+        let text = try FileLock.withLockIfPresent(lockURL(for: url)) { try String(contentsOf: url, encoding: .utf8) }
         return parse(text)
     }
 
@@ -366,6 +367,73 @@ public enum EvalStorage {
     /// Settings and the user's coding agent can both start one, and they'd share the runs folder,
     /// last-run.txt and Hermes' eval gateway.
     public static var runLockURL: URL { root.appendingPathComponent(".run.lock") }
+
+    /// Folders a run writes in that must not be symlinks (a link could send results, transcripts and
+    /// decrypted data somewhere else): `evals/` and `evals/runs/`. Only the data folder itself may be
+    /// one (Application Support/Likely → Likely.noindex, see SpotlightExclusion). Returns the first
+    /// offending path.
+    public static func symlinkedFolder(root: URL = EvalStorage.root) -> String? {
+        for url in [root, root.appendingPathComponent("runs")] {
+            var st = stat()
+            if lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFLNK { return url.path }
+        }
+        return nil
+    }
+
+    /// A new run folder `<time>-<agent>-<model>` in `runs`, created (0700) with mkdir so it's never one
+    /// that exists: `-2`, `-3`, … when two runs start in the same second. Times use en_US_POSIX.
+    public static func makeRunFolder(in runs: URL = EvalStorage.runsURL, date: Date, agent: String, model: String) throws -> URL {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let safeModel = String(model.map { $0.isLetter || $0.isNumber || "._-".contains($0) ? $0 : "_" }.prefix(60))
+        let base = "\(f.string(from: date))-\(EvalCase.slug(agent, fallback: "agent"))-\(safeModel)"
+        try OwnerOnly.createDirectory(runs)
+        for n in 1...1000 {
+            let url = runs.appendingPathComponent(n == 1 ? base : "\(base)-\(n)", isDirectory: true)
+            if mkdir(url.path, OwnerOnly.directoryMode) == 0 {
+                chmod(url.path, OwnerOnly.directoryMode)
+                return url
+            }
+            guard errno == EEXIST else { throw OwnerOnly.Failure("Can't create", url.path) }
+        }
+        throw OwnerOnly.Failure("Can't create", runs.appendingPathComponent(base).path, errno: EEXIST)
+    }
+
+    /// Runs kept: the newest `keep`, and none older than `maxAge` (see docs/PRIVACY.md). `protected`
+    /// (the run just written, the one it compared with) are always kept.
+    public static let keptRuns = 20
+    public static let maxRunAge: TimeInterval = 30 * 24 * 3600
+
+    /// Which of `runs` (folder, start time) to delete.
+    public static func runsToPrune(_ runs: [(url: URL, date: Date)], now: Date = Date(), keep: Int = keptRuns,
+                                   maxAge: TimeInterval = maxRunAge, protected: [URL] = []) -> [URL] {
+        let protectedPaths = Set(protected.map(\.standardizedFileURL.path))
+        let newestFirst = runs.sorted { $0.date > $1.date }
+        return newestFirst.enumerated().compactMap { index, run in
+            if protectedPaths.contains(run.url.standardizedFileURL.path) { return nil }
+            return index >= keep || now.timeIntervalSince(run.date) > maxAge ? run.url : nil
+        }
+    }
+
+    /// Deletes old runs from `runs`: only real folders (no symlinks) that hold a results.json or are
+    /// named like a run. Returns how many were deleted.
+    @discardableResult
+    public static func pruneRuns(in runs: URL = EvalStorage.runsURL, now: Date = Date(), protected: [URL] = []) -> Int {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: runs.path)) ?? []
+        var found: [(url: URL, date: Date)] = []
+        for name in names where name.range(of: #"^\d{8}-\d{6}-"#, options: .regularExpression) != nil {
+            let url = runs.appendingPathComponent(name, isDirectory: true)
+            var st = stat()
+            guard lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { continue }
+            let date = Date(timeIntervalSince1970: TimeInterval(st.st_mtimespec.tv_sec))
+            found.append((url, date))
+        }
+        var removed = 0
+        for url in runsToPrune(found, now: now, protected: protected) where (try? fm.removeItem(at: url)) != nil { removed += 1 }
+        return removed
+    }
 
     /// Path of the newest run's report, written after every run.
     public static var lastRunURL: URL { root.appendingPathComponent("last-run.txt") }

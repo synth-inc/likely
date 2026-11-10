@@ -134,6 +134,8 @@ public struct EvalRun: Codable {
     public var caseFilter: [String]?
     /// True when the run was stopped (SIGTERM/SIGINT) before every case finished.
     public var interrupted: Bool?
+    /// `--repeat` (absent in older results, and when 1).
+    public var repeatCount: Int?
     /// SHA-256 prefix of the prompt template, to tell prompt versions apart.
     public var promptHash: String
     /// The user's tools the agent got in this run (none if no case used them); cases with
@@ -146,8 +148,10 @@ public struct EvalRun: Codable {
 
     public init(suite: String, suiteFiles: [String], agent: String, model: String, startedAt: String, finishedAt: String,
                 k: Int, timeoutSeconds: Double, tags: [String], isolated: Bool, promptHash: String, likelyVersion: String,
-                cases: [EvalCaseResult], caseFilter: [String]? = nil, interrupted: Bool? = nil, tools: EvalToolSet? = nil) {
+                cases: [EvalCaseResult], caseFilter: [String]? = nil, interrupted: Bool? = nil, tools: EvalToolSet? = nil,
+                repeatCount: Int? = nil) {
         self.suite = suite
+        self.repeatCount = repeatCount == 1 ? nil : repeatCount
         self.tools = tools
         self.caseFilter = caseFilter
         self.interrupted = interrupted
@@ -188,6 +192,7 @@ public struct EvalRun: Codable {
         if other.model != model { out.append("model \(other.model)") }
         if other.k != k { out.append("k=\(other.k)") }
         if other.tags != tags { out.append(other.tags.isEmpty ? "no tag filter" : "tags \(other.tags.joined(separator: ","))") }
+        if (other.repeatCount ?? 1) != (repeatCount ?? 1) { out.append("repeat \(other.repeatCount ?? 1)") }
         if (other.caseFilter ?? []) != (caseFilter ?? []) {
             out.append((other.caseFilter ?? []).isEmpty ? "no case filter" : "cases \(other.caseFilter!.joined(separator: ","))")
         }
@@ -212,8 +217,9 @@ public struct EvalRun: Codable {
         var best: (EvalRun, URL)?
         var bestMatching: (EvalRun, URL)?
         for dir in dirs where dir.standardizedFileURL != current?.standardizedFileURL {
+            // An interrupted run's missing cases would look like regressions: never compare with one.
             guard let other = load(dir.appendingPathComponent("results.json")), other.suite == run.suite,
-                  other.startedAt < run.startedAt else { continue }
+                  other.startedAt < run.startedAt, other.interrupted != true else { continue }
             if best == nil || other.startedAt > best!.0.startedAt { best = (other, dir) }
             if run.mismatches(with: other).isEmpty, bestMatching == nil || other.startedAt > bestMatching!.0.startedAt {
                 bestMatching = (other, dir)

@@ -48,7 +48,8 @@ tells it to run
 before and after adding the tool and report the difference (`summary.passed`, `comparison.nowPassing`,
 `comparison.toolsChanged`; field list and exit codes in [EVALS.md](EVALS.md#from-the-command-line-or-your-coding-agent)).
 Settings → Tests shows the exact command for your copy of Likely, with **Copy Command** and **Copy for Coding
-Agent**. A tool the agent added waits for your Approve, and the run lists it under
+Agent**; turn on **Allow command-line test runs** there first (off by default; the command exits with status
+4 until then). A tool the agent added waits for your Approve, and the run lists it under
 `tools.pendingApproval` and doesn't use it until then: the agent can't approve it, and can't make the run
 use anything but your approved tools, the agents Likely found and your saved prompt.
 

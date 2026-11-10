@@ -218,6 +218,10 @@ final class LogPrivacySourceTests: XCTestCase {
     /// constants passed through String parameters (close reasons, pick methods, capture modes, refusal
     /// reasons), license/update server paths and states.
     static let reviewedMeta: [String: Int] = [
+        // Fixed setting names (ProtectedSettings.keys), never user text.
+        "Likely/ProtectedSettings.swift: Log.write(\"privacy\", \"can't check \\(meta: key) (Keychain); using the default\")": 1,
+        "Likely/ProtectedSettings.swift: Log.write(\"privacy\", \"ignored \\(meta: key): changed outside Likely; using the default\")": 1,
+        "Likely/ProtectedSettings.swift: Log.write(\"privacy\", \"couldn't save \\(meta: key): \\(error: error)\")": 1,
         "Likely/PrivateDataPermission.swift: Log.write(\"privacy\", \"\\(meta: area.rawValue): \\(public: outcome == .granted ? \"allowed\" : \"not allowed\")\")": 1,
         "Likely/PrivateDataPermission.swift: Log.write(\"privacy\", \"\\(meta: area.rawValue): blocked for agents again\")": 1,
         "Likely/AX.swift: if let id = string(element, kAXIdentifierAttribute) { line = \"\\(line) id=\\(meta: id)\" }": 1,

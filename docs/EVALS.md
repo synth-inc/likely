@@ -36,7 +36,13 @@ report.
 The row at the bottom is for the command line: the exact command with **Copy Command**, **Copy for Coding
 Agent** (instructions for Claude Code, Codex, …: run the tests before and after a change and report the
 difference), and **Install Command…**, which writes a small `likely` script to `~/.local/bin` (never with an
-administrator password, never over a file Likely didn't write) so `likely --json` runs your tests.
+administrator password, never over a file Likely didn't write, and not while Likely runs from the
+temporary copy macOS makes of a fresh download) so `likely --json` runs your tests.
+
+**Allow command-line test runs** (off by default) has to be on for the command below to run in a release
+build: until then it exits with status 4 and says so. Run Tests in Settings works either way (the run it
+starts is a child of the app itself). In builds with a provisioning profile the switch is a protected
+setting (see [PRIVACY.md](PRIVACY.md#protected-settings)): turning it on with `defaults write` doesn't count.
 
 ### From the command line, or your coding agent
 
@@ -52,13 +58,13 @@ It opens no window, no menu bar item and no onboarding, and works while the menu
 | Option | Default | |
 |---|---|---|
 | `--eval personal` | | your tests: `~/Library/Application Support/Likely/evals/cases.jsonl` |
-| `--agent <id>` | Settings | `claude`, `codex`, `gemini`, `opencode`, `hermes`: only one Likely found on this Mac, run from where it found it |
+| `--agent <id>` | Settings | `claude`, `codex`, `gemini`, `opencode`, `hermes`: only one installed in a fixed place (below), run from there |
 | `--model <name>` | Settings | e.g. `haiku`, `sonnet`, `opencode/deepseek-v4.1-flash-free` |
 | `--case <id>` | all | only these tests (repeat the option, or separate ids with commas) |
 | `--tag <tag>` | all | only tests with one of these tags (repeatable; `--tags a,b` works too) |
 | `--k <n>` | 8 | pass if an expected file is in the top n (1-8) |
 | `--timeout <sec>` | 120 | per test, all turns included (10-600) |
-| `--jobs <n>` | 1 | tests in parallel (1-4); keep 1 when comparing times |
+| `--jobs <n>` | 1 | tests in parallel (1-4; Hermes: 1); keep 1 when comparing times |
 | `--repeat <n>` | 1 | run each test n times (1-5; agents aren't deterministic) |
 | `--with-tools` / `--without-tools` | with | your approved tools, or the built-in search commands only, for every test |
 | `--json` | | machine-readable results on stdout |
@@ -85,22 +91,39 @@ stderr. The summary goes to stdout, ending with the paths of `results.json` and 
 | | |
 |---|---|
 | 0 | the run completed, whatever the pass rate |
-| 1 | an error: the agent isn't installed, no saved tests, another run in progress, results couldn't be written |
+| 1 | an error: the agent isn't installed (or the one chosen in Settings can't run tests), no saved tests, another run in progress, `evals/` or `runs/` is a symbolic link, results couldn't be written |
 | 2 | a usage error: an unknown option, an option release builds refuse (below), a bad value |
 | 3 | Likely isn't licensed (paid builds; the same check as searches, from the license Likely last confirmed: open Likely to buy, restore or re-check one). Free builds (`LIKELY_FREE`) never check |
+| 4 | command-line runs are off: turn on **Allow command-line test runs** in Settings → Tests |
 | 130 / 143 | stopped by Ctrl-C (SIGINT) or SIGTERM: running tests are cancelled, partial results written |
 
 **What release builds refuse.** Anything that would let the caller choose a program, file or folder that
 Likely then uses: `--agent-path`, `--prompt-file`, `--out`, a cases file or `fixtures`/`all` as the suite,
-`--no-isolate`/`--isolate`, `--dry-run`, any other or single-dash argument (Foundation would read
-`-claudePath /x` as a preference), and option values starting with `-`. `--model` must look like a model
-name. A test's screenshot is only attached if it's one Likely saved (in `evals/screenshots`). The run
-re-executes itself in a clean environment rebuilt from your user account (home, user, shell, the
-standard `PATH`, temporary folder, locale): nothing the caller sets, such as `DYLD_*`, `NODE_OPTIONS`, `PATH`,
-`ZDOTDIR` or `CFFIXED_USER_HOME`, reaches Likely or the agents, so agents start exactly as they do from the
-app. `LIKELY_EVALS_DIR` and `LIKELY_FIXTURES` are dev-only. Everything else is what the app does: the same
-agent lookup, prompt, sandbox profiles, tool approval (an unapproved tool isn't used, and the run says so),
-private data rules, owner-only files and redacted log.
+`--no-isolate`/`--isolate`, `--dry-run`, any other or single-dash argument, and option values starting
+with `-`. That parser is the guarantee against preference overrides: Foundation reads `-claudePath /x`
+anywhere on the command line as a preference, so no such argument gets through. `--model` must look like a
+model name.
+
+- **Agents** are found only in fixed places: `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin`,
+  `/usr/local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, and each nvm Node version's `bin` (newest first). No
+  login shell runs (its startup files are anyone's to edit), and the Claude path saved in Settings is used
+  only if it's one of those places.
+- **Settings** that decide what runs (agent, models, Claude path, prompt, tool approvals, the switch above)
+  are protected in builds with a provisioning profile: a value changed outside Likely is ignored and the
+  default used (see [PRIVACY.md](PRIVACY.md#protected-settings)).
+- **Screenshots** are never used by test runs: a case's `context.screenshot` is ignored (nothing is decrypted
+  or copied).
+- **Environment.** The run re-executes itself in a clean environment rebuilt from your user account (home,
+  user, shell, the standard `PATH`, temporary folder, locale), plus the proxy and certificate settings
+  launchd gives apps (`launchctl getenv` of `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY` and their
+  lowercase forms, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`). Nothing the
+  caller sets, such as `DYLD_*`, `NODE_OPTIONS`, `PATH`, `ZDOTDIR` or `CFFIXED_USER_HOME`, reaches Likely or
+  the agents, so agents start as they do from the app. `LIKELY_EVALS_DIR` and `LIKELY_FIXTURES` are dev-only.
+- **Sessions.** Codex's and Hermes' saved conversations are deleted before the run exits, whichever way it
+  ends (finished, an error, Ctrl-C), not in the background. Agents start with default signal handling.
+
+Everything else is what the app does: the same prompt, sandbox profiles, tool approval (an unapproved tool
+isn't used, and the run says so), private data rules, owner-only files and redacted log.
 
 **Running next to the app.** A run and the app share files, so:
 - One run at a time: a run holds `evals/.run.lock` (flock) while it runs; a second one (from Settings or a
@@ -109,9 +132,15 @@ private data rules, owner-only files and redacted log.
   folder (`.likely.lock`), so an append in one process is never seen half written or lost by another.
   A run only reads your cases and never writes history.
 - Hermes: runs use their own profile, `likely-eval` (a copy of the app's `likely` profile when it has
-  one), so a run never stops the app's gateway or leaves one with a test's sandbox rules for the app.
-- Decrypted test screenshots live in the run's case folder and are deleted when the case ends; the app
-  only clears leftovers older than an hour, so it never deletes a running test's copy.
+  one), so a run never stops the app's gateway or leaves one with a test's sandbox rules for the app. They
+  also run one test at a time (`--jobs 1`): the gateway is shared by every case and runs in the sandbox of
+  the case that started it, which may read that case's folder, so parallel cases could see each other's.
+- Run folders get unique names (`-2`, … when two start in the same second), and are never written through
+  a symlinked `evals/` or `runs/` (only the data folder itself may be a link, to `Likely.noindex`). Lock
+  files are opened without following symlinks and must be regular files; on a file system without locks
+  (`ENOTSUP`) the lock is skipped everywhere alike.
+- Runs are pruned after each run: the newest 20 are kept, and none older than 30 days. A run that was
+  stopped early is never used as "the previous run".
 
 ### Dev builds
 
@@ -157,7 +186,7 @@ Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-
 - `cases/<n>-<id>/prompt.txt` and `cases/<n>-<id>/transcript.jsonl`: the exact first message and the
   agent's raw stream (every turn, relaunches included). `<n>` is the case's position in the suite, so
   cases that share an id keep separate folders. The agent runs in `cases/<n>-<id>/agent/`, the only part
-  it may read: the decrypted screenshot and its config files, never the prompt or transcript files.
+  it may read: its config files, never the prompt or transcript files.
 - `prompt-template.txt`: the template used (its hash is in the report, to tell prompt versions apart).
 
 A case passes only if it ran to the end: a timeout or error counts as a failure even if the right file was
@@ -179,7 +208,7 @@ One JSON object per line. Blank lines and lines starting with `#` or `//` are ig
 | `query` | required | a string, or an array of successive messages: the first starts the search, each later one is sent like typing again in the bar ("not these, …"; the previous suggestions count as rejected) |
 | `context.app` | optional | app that opened the picker (default: "an app") |
 | `context.windowTitle` | optional | title of the window behind the picker |
-| `context.screenshot` | optional | path to a screenshot of that window. With one, the case runs like automatic mode (screenshot + "the user already added: …"); without, input-first (typed description only) |
+| `context.screenshot` | optional | path to a screenshot of that window. Kept for older cases, but ignored: test runs never send screenshots |
 | `context.button` | optional | the picker's confirm button ("Open", "Upload", …) |
 | `context.userName` | optional | the name sent as `{{userName}}` ("The user is …"). Unset: none for personal cases (evals never send your real name), "Jordan Rivera" for `source: "fixture"` cases |
 | `context.useTools` | optional | `true`/`false`: whether the agent gets your tools (tools.json) for this case. Unset: personal cases do, fixture cases don't (see Your tools) |

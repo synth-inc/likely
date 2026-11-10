@@ -20,6 +20,24 @@ public enum FileLock {
         var depth = 0
     }
 
+    /// Opens (creating 0600 if needed) a lock file: never through a symlink (O_NOFOLLOW), and only a
+    /// regular file. -1 if it can't (errno set).
+    static func openLockFile(_ path: String, create: Bool = true) -> Int32 {
+        let fd = open(path, O_RDWR | O_CLOEXEC | O_NOFOLLOW | (create ? O_CREAT : 0), OwnerOnly.fileMode)
+        guard fd >= 0 else { return -1 }
+        var st = stat()
+        guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG else {
+            close(fd)
+            errno = EFTYPE
+            return -1
+        }
+        return fd
+    }
+
+    /// File systems without flock (some network volumes) answer ENOTSUP: then the lock is skipped,
+    /// by `withLock` and `tryHold` alike, and the work goes ahead unlocked, as it did before locks.
+    static func unsupported(_ code: Int32) -> Bool { code == ENOTSUP || code == EOPNOTSUPP }
+
     private static let registryLock = NSLock()
     private static var entries: [String: Entry] = [:]
 
@@ -42,9 +60,11 @@ public enum FileLock {
         defer { e.lock.unlock() }
         if e.depth == 0 {
             try? OwnerOnly.createDirectory(lockURL.deletingLastPathComponent())
-            let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, OwnerOnly.fileMode)
+            let fd = openLockFile(path)
             if fd >= 0 {
-                while flock(fd, LOCK_EX) != 0 && errno == EINTR {}
+                var result: Int32
+                repeat { result = flock(fd, LOCK_EX) } while result != 0 && errno == EINTR
+                // Locked, or (ENOTSUP) a file system without locks: either way go ahead.
                 e.fd = fd
             }
         }
@@ -60,12 +80,25 @@ public enum FileLock {
         return try body()
     }
 
+    /// `withLock`, but only if the lock file already exists (a writer made it): for readers of files that
+    /// may not be Likely's (the repo's fixtures, an app bundle), next to which no lock file is created.
+    public static func withLockIfPresent<T>(_ lockURL: URL, _ body: () throws -> T) rethrows -> T {
+        var st = stat()
+        guard lstat(lockURL.path, &st) == 0 else { return try body() }
+        return try withLock(lockURL, body)
+    }
+
     /// A lock held until `release()` or the process exits: for "only one of these at a time" (an eval
     /// run). Never inherited by child processes (O_CLOEXEC), so an agent or a daemon an agent starts
     /// can't keep it after Likely is gone.
     public final class Held {
         private var fd: Int32
-        fileprivate init(fd: Int32) { self.fd = fd }
+        /// False on a file system without flock (see `unsupported`): nothing is actually held.
+        public let isLocked: Bool
+        fileprivate init(fd: Int32, isLocked: Bool = true) {
+            self.fd = fd
+            self.isLocked = isLocked
+        }
         public func release() {
             guard fd >= 0 else { return }
             flock(fd, LOCK_UN)
@@ -79,13 +112,14 @@ public enum FileLock {
     /// Throws if the lock file can't be created.
     public static func tryHold(_ lockURL: URL) throws -> Held? {
         try OwnerOnly.createDirectory(lockURL.deletingLastPathComponent())
-        let fd = open(lockURL.path, O_RDWR | O_CREAT | O_CLOEXEC, OwnerOnly.fileMode)
+        let fd = openLockFile(lockURL.path)
         guard fd >= 0 else { throw OwnerOnly.Failure("Can't open", lockURL.path) }
         fchmod(fd, OwnerOnly.fileMode)
         while true {
             if flock(fd, LOCK_EX | LOCK_NB) == 0 { return Held(fd: fd) }
             if errno == EINTR { continue }
             let code = errno
+            if unsupported(code) { return Held(fd: fd, isLocked: false) }
             close(fd)
             if code == EWOULDBLOCK { return nil }
             throw OwnerOnly.Failure("Can't lock", lockURL.path, errno: code)

@@ -28,7 +28,7 @@ enum EvalCLI {
 
     /// The command a user (or their coding agent) runs: this executable, quoted for the shell.
     static var commandPath: String {
-        let path = Bundle.main.executablePath ?? "/Applications/Likely.app/Contents/MacOS/Likely"
+        let path = (Bundle.main.executablePath ?? "/Applications/Likely.app/Contents/MacOS/Likely").filter { !$0.isNewline }
         return path.contains(where: { " '\"$`\\!&;()<>|*?[]#~".contains($0) }) ? "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'" : path
     }
 
@@ -56,9 +56,11 @@ enum EvalCLI {
     Progress goes to stderr; the summary (or, with --json, the results) to stdout. Every run also writes
     results.json and report.html to ~/Library/Application Support/Likely/evals/runs/<time>-<agent>-<model>/.
 
+    Command-line runs are off until you turn on “Allow command-line test runs” in Settings → Tests.
+
     Exit status: 0 the run completed (whatever the pass rate); 1 error (no agent found, no tests, another
-    run in progress, results not written); 2 usage error; 3 Likely isn't licensed; 130/143 stopped by
-    SIGINT/SIGTERM (partial results are written).
+    run in progress, results not written); 2 usage error; 3 Likely isn't licensed; 4 command-line runs
+    are off; 130/143 stopped by SIGINT/SIGTERM (partial results are written).
     """
 
     static let devUsage = """
@@ -127,20 +129,27 @@ enum EvalCLI {
             exit(EvalExit.completed)
         }
         if policy == .release {
-            // Before anything reads a preference, a file in ~ or starts a process.
+            // Before anything reads a preference, a file in ~ or starts a process. (No `-key value`
+            // preference overrides can be on the command line: EvalOptions refuses every such argument.)
             restartWithCleanEnvironmentIfNeeded(arguments)
-            // `-key value` arguments override preferences for this process (NSArgumentDomain); the parser
-            // refused any, and none may count.
-            UserDefaults.standard.removeVolatileDomain(forName: UserDefaults.argumentDomain)
         }
         Log.echoToStderr = options.verbose
         Log.write("eval", "eval mode: \(sensitive: arguments.dropFirst().joined(separator: " "))")
 
-        // Same gate as searches (Coordinator.isLicensed): the cached entitlement, no network, no UI.
+        // Off by default: the user turns it on in Settings → Tests (sealed, see ProtectedSettings).
+        if policy == .release, !commandLineRunsAllowed {
+            fail(EvalExit.notAllowed, "Command-line test runs are off. Turn on “Allow command-line test runs” in Likely → Settings → Tests, then run this again.")
+        }
+        // Same gate as searches (License.permitsSearches): no network, no UI.
         // Dev builds don't check: eval mode there is a developer tool.
-        if policy == .release, !License.isActive {
+        if policy == .release, !License.permitsSearches() {
             fail(EvalExit.unlicensed, "Likely isn't licensed on this Mac, so it can't run searches or tests. Open Likely to buy or "
                  + "restore a license (a subscription is re-checked when Likely runs), then try again.")
+        }
+
+        // Results, transcripts and run files stay in the data folder: never through a symlinked evals/ or runs/.
+        if let link = EvalStorage.symlinkedFolder() {
+            fail("\(link) is a symbolic link; Likely only writes test runs into its own folder. Remove the link and try again.")
         }
 
         let suite: Suite
@@ -178,6 +187,8 @@ enum EvalCLI {
 
         let agentID = options.agent ?? Settings.agentID
         guard let kind = AgentKind.with(id: agentID), kind.isSupported else {
+            // The agent saved in Settings: not a usage error.
+            if options.agent == nil { fail("The agent chosen in Settings (\(agentID)) can't run tests. Choose another in Settings → Agent, or pass --agent.") }
             usageError("Unknown or unsupported agent \"\(agentID)\". Supported: \(AgentKind.all.filter(\.isSupported).map(\.id).joined(separator: ", "))")
         }
         let model = options.model ?? AgentModels.selected(for: agentID)
@@ -189,8 +200,16 @@ enum EvalCLI {
                      + "Codex can read any of your files (only the prompt asks it to stay in the test folder). "
                      + "The run is recorded as not isolated.")
         }
-        if wantsIsolation, kind.id == "hermes", options.jobs > 1 {
-            usageError("Hermes serves every case through one gateway, which runs inside the sandbox of the case that started it. Isolated Hermes runs need --jobs 1 (or --no-isolate).")
+        // Hermes serves every case through one gateway, which runs inside the sandbox of the case that
+        // started it (that case's folder readable): with cases in parallel, one case's agent could read
+        // another's folder, or each would restart the gateway under the other. So one at a time.
+        if kind.id == "hermes", options.jobs > 1 {
+            usageError("Hermes runs one test at a time (its gateway is shared by every case): use --jobs 1.")
+        }
+        // Screenshots aren't part of test runs (Likely no longer sends them with searches).
+        let withScreenshots = cases.filter { $0.evalCase.context?.screenshot != nil }.count
+        if withScreenshots > 0 {
+            printErr("note: \(withScreenshots) test\(withScreenshots == 1 ? " has" : "s have") a screenshot; test runs don't use screenshots, so \(withScreenshots == 1 ? "it runs" : "they run") without")
         }
 
         if options.dryRun {   // dev builds only
@@ -224,6 +243,9 @@ enum EvalCLI {
         }
         // Hermes: a profile of its own, so the run never stops or reuses the app's gateway (see HermesRunner).
         HermesRunner.usesEvalProfile = true
+        // Codex and Hermes keep each conversation; they're deleted right away, not in the background,
+        // since this process exits as soon as the run ends.
+        AgentSessionCleanup.synchronous = true
         // Codex can't use sandbox patterns: find Photos libraries now, as the app does at launch.
         if kind.id == "codex", PrivateDataAccess.blocked().contains(.photos) { PhotoLibraries.refreshNow() }
 
@@ -253,11 +275,12 @@ enum EvalCLI {
         var passThrough: Set<String> = []
         #if LIKELY_EVAL_TEST_SEAM
         // scripts/test-eval-cli.sh only: a build made for that test lets it use a fake home folder.
-        passThrough = ["CFFIXED_USER_HOME", "HOME", "LIKELY_EVALS_DIR"]
+        passThrough = ["CFFIXED_USER_HOME", "HOME", "LIKELY_EVALS_DIR", "LIKELY_EVAL_TEST_ALLOW"]
         #endif
         let marker = "__LIKELY_EVAL_CLEAN_ENV"
         let current = ProcessInfo.processInfo.environment
-        var clean = EvalEnvironment.sanitized(current, home: home, user: user, shell: shell, tmpdir: tmpdir, passThrough: passThrough)
+        var clean = EvalEnvironment.sanitized(current, home: home, user: user, shell: shell, tmpdir: tmpdir,
+                                              launchd: launchdValues(EvalEnvironment.launchdKeys), passThrough: passThrough)
         clean[marker] = "1"
         let differences = EvalEnvironment.differences(current, from: clean)
         guard !differences.isEmpty else { return }
@@ -281,12 +304,64 @@ enum EvalCLI {
         fail("Can't restart with a clean environment: \(String(cString: strerror(code)))")
     }
 
+    /// `launchctl getenv` for each key (what launchd gives GUI apps, e.g. a proxy set with `launchctl
+    /// setenv`). /bin/launchctl, with an empty environment; values with newlines are dropped later.
+    private static func launchdValues(_ keys: [String]) -> [String: String] {
+        var values: [String: String] = [:]
+        for key in keys {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            p.arguments = ["getenv", key]
+            p.environment = [:]
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = FileHandle.nullDevice
+            p.standardInput = FileHandle.nullDevice
+            guard (try? p.run()) != nil else { continue }
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            var value = String(decoding: data, as: UTF8.self)
+            if value.hasSuffix("\n") { value.removeLast() }
+            if p.terminationStatus == 0, !value.isEmpty { values[key] = value }
+        }
+        return values
+    }
+
+    /// Whether this run may start: "Allow command-line test runs" is on (sealed setting; plain in builds
+    /// without a profile), or Settings → Tests → Run Tests started it (the parent process is this same
+    /// app; nothing else starts Likely's executable as a child of Likely).
+    static var commandLineRunsAllowed: Bool {
+        #if LIKELY_EVAL_TEST_SEAM
+        if let value = ProcessInfo.processInfo.environment["LIKELY_EVAL_TEST_ALLOW"] { return value == "1" }
+        #endif
+        return ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true || startedByThisApp
+    }
+
+    /// The parent process runs this very executable (Settings → Tests → Run Tests).
+    static var startedByThisApp: Bool {
+        let parent = getppid()
+        guard parent > 1 else { return false }
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(parent, &buffer, UInt32(buffer.count)) > 0,
+              let parentPath = realpath(buffer, nil) else { return false }
+        defer { free(parentPath) }
+        var size = UInt32(0)
+        _NSGetExecutablePath(nil, &size)
+        var own = [CChar](repeating: 0, count: Int(size) + 1)
+        guard _NSGetExecutablePath(&own, &size) == 0, let ownPath = realpath(own, nil) else { return false }
+        defer { free(ownPath) }
+        return strcmp(parentPath, ownPath) == 0
+    }
+
     private static var signalSources: [DispatchSourceSignal] = []
 
-    /// Ctrl-C, or Stop in Settings (SIGTERM): stop the agents and write what finished.
+    /// Ctrl-C, or Stop in Settings (SIGTERM): stop the agents and write what finished. The signals get a
+    /// do-nothing handler rather than SIG_IGN (the dispatch sources do the work): a handled signal goes
+    /// back to its default in the agents Likely starts, an ignored one would be inherited, and an agent
+    /// that ignores SIGTERM couldn't be stopped.
     private static func handleSignals(_ session: EvalSession) {
         for sig in [SIGINT, SIGTERM] {
-            signal(sig, SIG_IGN)
+            signal(sig, evalSignalNoop)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
             source.setEventHandler { session.interrupt(signal: sig) }
             source.resume()
@@ -296,20 +371,38 @@ enum EvalCLI {
 
     /// Where the app would run the agent from: the saved Claude path, then AgentDetector's lookup (fixed
     /// install folders, then the user's login shell).
-    private static func locate(_ agentID: String) -> String? {
+    /// Release builds: fixed install folders only (AgentLocations), never a login shell, and the saved
+    /// Claude path only if it's one of the places found. Dev builds: the app's lookup.
+    static func locate(_ agentID: String) -> String? {
+        guard let kind = AgentKind.with(id: agentID) else { return nil }
+        if policy == .release {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let folders = AgentLocations.folders(home: home)
+            let candidates = kind.executables.flatMap { AgentLocations.candidates($0, in: folders) }
+            let saved = agentID == "claude" ? ProtectedSettings.string(ProtectedSettings.claudePath) : nil
+            return AgentLocations.choose(saved: saved, candidates: candidates)
+        }
         let fm = FileManager.default
-        if agentID == "claude", let saved = UserDefaults.standard.string(forKey: "claudePath"), fm.isExecutableFile(atPath: saved) {
+        if agentID == "claude", let saved = ProtectedSettings.string(ProtectedSettings.claudePath), fm.isExecutableFile(atPath: saved) {
             return saved
         }
         return AgentDetector.locateAll()[agentID]
+    }
+
+    /// Exits after stopping the running cases' agents, deleting their Codex/Hermes sessions and stopping
+    /// the eval's Hermes gateway: every way out of a run goes through here.
+    static func terminate(_ status: Int32) -> Never {
+        current?.cancelRunning()
+        HermesRunner.stopEvalGateway()
+        fflush(stdout)
+        exit(status)
     }
 
     /// A setup or run error: exit 1 (or `status`).
     static func fail(_ status: Int32 = EvalExit.failed, _ message: String) -> Never {
         printErr(message)
         if json { print(EvalCLIResult.failure(message, exitCode: status).encoded()) }
-        fflush(stdout)
-        exit(status)
+        terminate(status)
     }
 
     static func fail(_ message: String) -> Never { fail(EvalExit.failed, message) }
@@ -435,8 +528,10 @@ final class EvalSession {
         self.agent = agent
         self.template = template
         self.options = options
-        if let out = options.out {
+        if let out = options.out {   // dev builds only
             runDir = URL(fileURLWithPath: (out as NSString).expandingTildeInPath, isDirectory: true)
+        } else if let made = try? EvalStorage.makeRunFolder(date: startedAt, agent: agent.kind.id, model: agent.model) {
+            runDir = made
         } else {
             let f = DateFormatter()
             f.dateFormat = "yyyyMMdd-HHmmss"
@@ -487,16 +582,14 @@ final class EvalSession {
     /// SIGINT/SIGTERM: cancel the running cases (their agents are stopped), skip the rest, and write
     /// partial results. A second signal, or 10 s without the cases settling, exits at once.
     func interrupt(signal: Int32) {
-        if interruptedBy != nil { exit(128 + signal) }
+        if interruptedBy != nil { finish() }
         interruptedBy = signal
         EvalCLI.printErr("\nStopping: cancelling \(running.count) running case\(running.count == 1 ? "" : "s"), skipping \(queue.count); writing partial results…")
         queue.removeAll()
         if running.isEmpty { return finish() }
         for run in running { run.cancel() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-            HermesRunner.stopEvalGateway()
-            exit(128 + signal)
-        }
+        // Cases that don't settle within 10 s are dropped; what finished is still written.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in self?.finish() }
     }
 
     private func finished(_ raw: EvalCaseResult, index: Int, relativeTo workDir: URL) {
@@ -515,7 +608,19 @@ final class EvalSession {
         fill()
     }
 
+    /// Cancels the cases still running (their agents stop and their sessions are deleted).
+    func cancelRunning() {
+        let runs = running
+        running.removeAll()
+        for run in runs { run.cancel() }
+    }
+
+    private var finishing = false
+
     private func finish() {
+        guard !finishing else { return }
+        finishing = true
+        cancelRunning()
         let iso = ISO8601DateFormatter()
         HermesRunner.stopEvalGateway()
         // Keep suite order stable (parallel runs finish out of order). By index: ids can repeat.
@@ -529,7 +634,8 @@ final class EvalSession {
                           promptHash: String(hash), likelyVersion: version, cases: ordered,
                           caseFilter: options.caseIDs.isEmpty ? nil : options.caseIDs.sorted(),
                           interrupted: interruptedBy == nil ? nil : true,
-                          tools: EvalCLI.toolSet(cases.contains { EvalCaseRun.usesTools($0, options: options) } ? EvalCLI.userTools : []))
+                          tools: EvalCLI.toolSet(cases.contains { EvalCaseRun.usesTools($0, options: options) } ? EvalCLI.userTools : []),
+                          repeatCount: options.repeatCount)
         let previous = EvalRun.previous(of: run, in: runDir.deletingLastPathComponent(), excluding: runDir)
         let status: Int32 = interruptedBy.map(EvalExit.interrupted(by:)) ?? EvalExit.completed
         let report = runDir.appendingPathComponent("report.html")
@@ -541,6 +647,10 @@ final class EvalSession {
         } catch {
             EvalCLI.fail("Couldn't write results: \(error)")
         }
+        // Keep the newest 20 runs, none older than 30 days (docs/PRIVACY.md).
+        if options.out == nil {
+            EvalStorage.pruneRuns(in: runDir.deletingLastPathComponent(), protected: [runDir] + (previous.map { [$0.1] } ?? []))
+        }
         var summary = EvalReport.textSummary(run, previous: previous?.0)
         if !pendingTools.isEmpty { summary += "\nNot used (waiting for approval in Settings → Tools): " + pendingTools.joined(separator: ", ") }
         summary += "\nResults: \(runDir.appendingPathComponent("results.json").path)\nReport: \(report.path)"
@@ -551,8 +661,7 @@ final class EvalSession {
             print("")
             print(summary)
         }
-        fflush(stdout)
-        exit(status)
+        EvalCLI.terminate(status)
     }
 }
 
@@ -597,28 +706,9 @@ final class EvalCaseRun {
     private var timeoutWork: DispatchWorkItem?
 
     private var evalCase: EvalCase { item.evalCase }
-    /// The case's screenshot as a file the agent can read. Saved test screenshots are encrypted in
-    /// builds with encryption (evals/screenshots/*.png.enc, see EvalScreenshots): those are decrypted into a temporary 0600
-    /// file in this case's `agent` folder (the one folder of Likely's its sandbox may read), deleted
-    /// when the case ends. Plain PNGs (the repo's fixtures) are used as they are.
-    private lazy var screenshot: URL? = {
-        guard let path = evalCase.context?.screenshot.map({ EvalPath.resolve($0, relativeTo: item.base) }) else { return nil }
-        // Release builds attach only screenshots Likely saved with the tests (evals/screenshots), never
-        // another file a cases file points at.
-        if EvalCLI.policy == .release, !EvalPath.isInside(path, EvalPath.normalize(EvalStorage.screenshotsURL.path)) {
-            EvalCLI.printErr("warning: \(evalCase.id): its screenshot isn't one Likely saved, so it runs without it")
-            return nil
-        }
-        do {
-            let file = try EvalScreenshots.materialize(path, in: agentDir, cipher: DataProtection.cipher)
-            if file.isTemporary { temporaryScreenshot = file.url }
-            return file.url
-        } catch {
-            Log.write("eval", "\(sensitive: evalCase.id): can't read the screenshot \(path: path): \(error: error)")
-            return nil
-        }
-    }()
-    private var temporaryScreenshot: URL?
+    /// Test runs never attach a screenshot (a case's `screenshot` is ignored): nothing is decrypted or
+    /// copied for the agent.
+    private let screenshot: URL? = nil
     private var searchFolders: [String]? { evalCase.searchFolders?.map { EvalPath.resolve($0, relativeTo: item.base) } }
     /// The case asks for isolation: the prompt points at its folders only.
     private var wantsIsolation: Bool { options.isolate && searchFolders != nil }
@@ -760,7 +850,6 @@ final class EvalCaseRun {
         timeoutWork?.cancel()
         runner?.cancel()
         runner = nil
-        if let temporaryScreenshot { try? FileManager.default.removeItem(at: temporaryScreenshot) }
         let total = Date().timeIntervalSince(started)
         let transcript = workDir.appendingPathComponent("last-run.jsonl")
         let transcriptCopy = workDir.appendingPathComponent("transcript.jsonl")
@@ -817,3 +906,6 @@ final class EvalCaseRun {
         return cost
     }
 }
+
+/// The SIGINT/SIGTERM handler: does nothing (EvalCLI's dispatch sources react). See handleSignals.
+private func evalSignalNoop(_ signal: Int32) {}

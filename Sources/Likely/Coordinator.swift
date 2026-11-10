@@ -839,15 +839,20 @@ enum AgentModels {
         }
     }
 
+    /// The chosen model (ProtectedSettings: a model set outside Likely is ignored).
     static func selected(for agentID: String) -> String {
-        UserDefaults.standard.string(forKey: key(for: agentID)) ?? defaultModel(for: agentID)
+        ProtectedSettings.string(key(for: agentID)) ?? defaultModel(for: agentID)
+    }
+
+    static func select(_ model: String, for agentID: String) {
+        ProtectedSettings.set(model, forKey: key(for: agentID))
     }
 }
 
 enum Settings {
     static var model: String {
-        get { UserDefaults.standard.string(forKey: "model") ?? "sonnet" }
-        set { UserDefaults.standard.set(newValue, forKey: "model") }
+        get { AgentModels.selected(for: "claude") }
+        set { AgentModels.select(newValue, for: "claude") }
     }
     static var openToLikely: Bool {
         get { UserDefaults.standard.object(forKey: "openToLikely") as? Bool ?? true }
@@ -897,8 +902,8 @@ enum Settings {
         set { UserDefaults.standard.set(newValue, forKey: "recentFileCount") }
     }
     static var codexModel: String {
-        get { UserDefaults.standard.string(forKey: "codexModel") ?? "gpt-5.6-luna" }
-        set { UserDefaults.standard.set(newValue, forKey: "codexModel") }
+        get { AgentModels.selected(for: "codex") }
+        set { AgentModels.select(newValue, for: "codex") }
     }
     /// Send the user's full name (`{{userName}}`) so the agent can recognize their own documents.
     static var includeUserName: Bool {
@@ -906,16 +911,13 @@ enum Settings {
         set { UserDefaults.standard.set(newValue, forKey: "includeUserName") }
     }
     static var agentID: String {
-        get { UserDefaults.standard.string(forKey: "agentID") ?? "claude" }
-        set { UserDefaults.standard.set(newValue, forKey: "agentID") }
+        get { ProtectedSettings.string(ProtectedSettings.agentID) ?? "claude" }
+        set { ProtectedSettings.set(newValue, forKey: ProtectedSettings.agentID) }
     }
     /// The user's edited prompt, or the default.
     static var promptTemplate: String {
-        get { UserDefaults.standard.string(forKey: "promptTemplate") ?? PromptTemplate.default }
-        set {
-            if newValue == PromptTemplate.default { UserDefaults.standard.removeObject(forKey: "promptTemplate") }
-            else { UserDefaults.standard.set(newValue, forKey: "promptTemplate") }
-        }
+        get { ProtectedSettings.string(ProtectedSettings.promptTemplate) ?? PromptTemplate.default }
+        set { ProtectedSettings.set(newValue == PromptTemplate.default ? nil : newValue, forKey: ProtectedSettings.promptTemplate) }
     }
 }
 
@@ -927,7 +929,7 @@ enum ClaudeLocator {
     /// Cheap checks run right away; the login-shell lookup (slow, and a broken ~/.zshrc can hang it)
     /// runs off the main thread with a timeout and calls `completion` on the main thread.
     static func resolve(completion: (() -> Void)? = nil) {
-        if let saved = UserDefaults.standard.string(forKey: "claudePath"), FileManager.default.isExecutableFile(atPath: saved) {
+        if let saved = ProtectedSettings.string(ProtectedSettings.claudePath), FileManager.default.isExecutableFile(atPath: saved) {
             path = saved
             completion?()
             return
@@ -946,7 +948,7 @@ enum ClaudeLocator {
             DispatchQueue.main.async {
                 if let found {
                     path = found
-                    UserDefaults.standard.set(found, forKey: "claudePath")
+                    ProtectedSettings.set(found, forKey: ProtectedSettings.claudePath)
                 }
                 Log.write("claude", found == nil ? "shell lookup: not found" : "shell lookup: \(path: found)")
                 completion?()

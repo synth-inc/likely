@@ -24,6 +24,8 @@ struct SettingsView: View {
     @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
+        VStack(spacing: 8) {
+        ProtectedSettingsWarning()
         TabView(selection: $navigation.tab) {
             GeneralSettings(actions: actions).tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsNavigation.Tab.general)
             AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }.tag(SettingsNavigation.Tab.agent)
@@ -35,6 +37,7 @@ struct SettingsView: View {
             if MenuBarGlyph.isDebugEnabled {
                 DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }.tag(SettingsNavigation.Tab.debug)
             }
+        }
         }
         .padding(20)
         .frame(width: 680, height: 520)
@@ -273,9 +276,10 @@ private struct LicenseSection: View {
 
 private struct AgentSettings: View {
     @ObservedObject private var agents = AgentDetector.shared
-    @AppStorage("agentID") private var agentID = "claude"
-    @AppStorage("model") private var model = "sonnet"
-    @AppStorage("codexModel") private var codexModel = "gpt-5.6-luna"
+    // Sealed settings (ProtectedSettings): read and written through Settings, never @AppStorage.
+    @State private var agentID = Settings.agentID
+    @State private var model = Settings.model
+    @State private var codexModel = Settings.codexModel
     @AppStorage("geminiVertexProject") private var geminiProject = ""
     @AppStorage("geminiVertexLocation") private var geminiLocation = "global"
     @State private var modelRefresh = 0
@@ -322,8 +326,8 @@ private struct AgentSettings: View {
             if ["gemini", "opencode", "hermes"].contains(agentID) {
                 Section(AgentKind.with(id: agentID)?.name ?? "Agent") {
                     Picker("Model", selection: Binding(
-                        get: { UserDefaults.standard.string(forKey: AgentModels.key(for: agentID)) ?? AgentModels.defaultModel(for: agentID) },
-                        set: { UserDefaults.standard.set($0, forKey: AgentModels.key(for: agentID)); modelRefresh += 1 })) {
+                        get: { AgentModels.selected(for: agentID) },
+                        set: { AgentModels.select($0, for: agentID); modelRefresh += 1 })) {
                         ForEach(AgentModels.available(for: agentID), id: \.self) { Text($0).tag($0) }
                     }
                     .id(modelRefresh)
@@ -351,6 +355,9 @@ private struct AgentSettings: View {
         }
         .formStyle(.grouped)
         .onAppear { if agents.paths.isEmpty { agents.scan() } }
+        .onChange(of: agentID) { _, id in if Settings.agentID != id { Settings.agentID = id } }
+        .onChange(of: model) { _, m in if Settings.model != m { Settings.model = m } }
+        .onChange(of: codexModel) { _, m in if Settings.codexModel != m { Settings.codexModel = m } }
     }
 }
 
@@ -489,7 +496,7 @@ private struct PrivateDataSection: View {
 /// Extra command-line tools for the agent, stored in tools.json (see ToolStore, docs/TOOLS.md).
 private struct ToolsSettings: View {
     @ObservedObject private var store = ToolStore.shared
-    @AppStorage("agentID") private var agentID = "claude"
+    @State private var agentID = Settings.agentID
     @State private var editing: ToolDraft?
     @State private var deleting: CustomTool?
     @State private var testResults: [String: [ToolCheck]] = [:]

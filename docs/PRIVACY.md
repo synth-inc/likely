@@ -11,7 +11,7 @@ searching to its model provider; that's how the search works.
 | Search history (what you typed, the app, suggestions, the pick; last 500) | `~/Library/Application Support/Likely/History/history.enc.jsonl` (encrypted), or `history.jsonl` in builds without encryption | Encrypted (official releases), owner-only, agents can't read it |
 | Your test cases and drafts | `…/Likely/evals/cases.jsonl`, `drafts.jsonl` | Plaintext (see below), owner-only, agents can't read them |
 | Screenshots saved with tests | `…/Likely/evals/screenshots/<id>.png.enc`, or `<id>.png` in builds without encryption | Encrypted (official releases), owner-only, agents can't read them |
-| Test runs (results, reports, transcripts) | `…/Likely/evals/runs/` | Owner-only, agents can't read them (a running case reads only its own folder) |
+| Test runs (results, reports, transcripts) | `…/Likely/evals/runs/` | Owner-only, agents can't read them (a running case reads only its own folder); the newest 20 kept, none older than 30 days |
 | Your extra agent tools | `…/Likely/tools.json` | Plaintext (see below), owner-only, agents can't read it |
 | The screenshot sent with a search | `…/Likely/run/context-<id>.png` | Owner-only; only on disk while the agent works on a turn (see below) |
 | Agent transcript of the last search | `…/Likely/transcripts/last-run.jsonl`, only while "Log details for troubleshooting" is on (dev builds: always) | Owner-only, agents can't read it; deleted when details turn off and at launch |
@@ -22,6 +22,7 @@ searching to its model provider; that's how the search works.
 | Detailed log, only while "Log details for troubleshooting" is on (dev builds: always) | `~/Library/Logs/Likely/likely-details.log` | Owner-only, agents can't read it; deleted when details turn off and at launch |
 | Settings, tool approvals | `~/Library/Preferences/inc.synth.likely.plist` | Agents can't write them |
 | Encryption key | Data-protection keychain, access group `<team id>.inc.synth.likely`, "Likely data key" (`inc.synth.likely.data-key`) | Only Likely can read it; this device only, never synced |
+| Settings seal marker | Same keychain and access group, "Likely settings seal" (account `settings-sealed`) | Records that older settings were sealed once (see Protected settings) |
 
 `…/Likely` is `~/Library/Application Support/Likely`. Since this version it is a link to
 `…/Likely.noindex`, and `~/Library/Logs/Likely` a link to `~/Library/Logs/Likely.noindex` (see Spotlight).
@@ -120,8 +121,12 @@ soon as the agent's turn finishes. Likely keeps it in memory while the picker is
 ("not these, the signed one") may need it: the agent may look again, and an agent restarted after a crash
 gets it attached again. So it's written back just before each follow-up turn and deleted again after it,
 and dropped from memory when the picker closes. Release builds keep debug-view screenshots in memory only,
-and delete any `debug/*.png` older versions left. An eval run that was killed before it could delete the
-decrypted screenshot of a case leaves `screenshot-<id>.png` behind; Likely deletes those at launch.
+and delete any `debug/*.png` older versions left. Test runs never use screenshots; decrypted copies an
+older version's run left behind (`screenshot-<id>.png`) are deleted at launch.
+
+**Test runs are pruned.** Each run's prompt, transcripts and results stay in `evals/runs/` only until the
+run after it: then the newest 20 runs are kept, and any older than 30 days deleted (the run just made and
+the one it was compared with are always kept).
 
 **Spotlight.** `~/Library/Application Support/Likely` and `~/Library/Logs/Likely` are kept out of the
 Spotlight index, so eval reports, test cases and the log never turn up in an agent's `mdfind` (an eval's
@@ -139,6 +144,23 @@ Settings → Permissions → Private data, or allow it for a tool that needs it.
 opens (call history, the TCC database, Biome, iPhone backups, cookies, the data-protection keychain, …)
 are always denied, even with every area on. See [TOOLS.md](TOOLS.md#private-data-needs), which also lists
 what's left for Codex.
+
+## Protected settings
+
+The settings that decide what Likely runs (the agent, the models, Claude Code's location, the prompt,
+which tools you approved, and "Allow command-line test runs") live in Likely's preferences, which any
+program running as you can change (`defaults write`, or `-key value` arguments when launching the app). In
+builds with a provisioning profile (official releases), each of them is stored with an HMAC-SHA256 keyed
+from the data key in the data-protection keychain (see Encryption), which only Likely's own builds can
+read. A value changed any other way has no valid HMAC: Likely ignores it, uses the default (the detected
+agent, the default prompt, no approvals, command-line runs off), logs the setting's name, and Settings
+shows which settings it ignored; choosing them again in Settings stores them properly. The first launch
+of a version with this protection seals the values already saved, once, and records that in the keychain,
+where nothing outside Likely can undo it. While the keychain doesn't answer, these settings fall back to
+their defaults too.
+
+Builds without a provisioning profile have no data key, so these settings are stored plainly, as other
+preferences are, and can be changed from outside Likely.
 
 ## The log
 

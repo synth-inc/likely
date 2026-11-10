@@ -43,6 +43,7 @@ cat > "$H/.local/bin/claude" <<'FAKE'
 #!/bin/bash
 IFS= read -r first
 env > "$HOME/agent-env.txt"
+perl -e 'print(($SIG{INT} // "DEFAULT"), " ", ($SIG{TERM} // "DEFAULT"), "\n")' > "$HOME/agent-signals.txt"
 printf '%s\n' "$*" > "$HOME/agent-args.txt"
 if printf '%s' "$first" | grep -qi 'shared folder'; then answer=/Users/Shared; else answer=/Applications; fi
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"STATUS: looking\\nFILE: %s\\n"}]}}\n' "$answer"
@@ -51,10 +52,25 @@ cat > /dev/null
 FAKE
 chmod 755 "$H/.local/bin/claude"
 
+# The fake Codex: starts a thread, saves its session like Codex (~/.codex/sessions/<y>/<m>/<d>/…-<thread>.jsonl),
+# answers, or with HANG-FOREVER-TEST in the prompt never finishes (for the Ctrl-C test).
+cat > "$H/.local/bin/codex" <<'FAKE'
+#!/bin/bash
+prompt="${@: -1}"
+tid="0199aaaa-bbbb-cccc-dddd-$(printf '%012d' $$)"
+dir="$HOME/.codex/sessions/$(date +%Y/%m/%d)"; mkdir -p "$dir"
+echo '{"secret":"the query"}' > "$dir/rollout-2026-$tid.jsonl"
+printf '{"type":"thread.started","thread_id":"%s"}\n' "$tid"
+if printf '%s' "$prompt" | grep -q 'HANG-FOREVER-TEST'; then touch "$HOME/codex-hanging"; exec sleep 600; fi
+printf '{"type":"item.completed","item":{"type":"agent_message","text":"FILE: /Users/Shared\\n"}}\n'
+printf '{"type":"turn.completed"}\n'
+FAKE
+chmod 755 "$H/.local/bin/codex"
+
 # Runs a binary the way a coding agent would, in a deliberately dirty environment.
 run() {   # run <binary> <args…>; sets OUT, ERR, CODE
     set +e
-    OUT="$(env -i CFFIXED_USER_HOME="$H" HOME="$H" PATH="/tmp/attacker:/usr/bin:/bin" NODE_OPTIONS="--require /tmp/x.js" \
+    OUT="$(env -i CFFIXED_USER_HOME="$H" HOME="$H" LIKELY_EVAL_TEST_ALLOW="${ALLOW-1}" PATH="/tmp/attacker:/usr/bin:/bin" NODE_OPTIONS="--require /tmp/x.js" \
            DYLD_FALLBACK_LIBRARY_PATH=/tmp/attacker ZDOTDIR=/tmp/attacker LIKELY_FIXTURES=/tmp/attacker \
            "$@" 2>"$WORK/stderr")"
     CODE=$?
@@ -84,6 +100,13 @@ for suite in fixtures all "$ROOT/evals/fixtures/cases.jsonl" /tmp/cases.jsonl; d
     run "$FREE" --eval "$suite"
     expect_code 2 "--eval $suite"
 done
+
+echo "==> Off unless allowed in Settings → Tests (exit 4)"
+ALLOW=0 run "$FREE" --eval personal --json
+expect_code 4 "command-line runs switched off"
+echo "$ERR" | grep -q "Allow command-line test runs" && pass "says how to turn them on" || fail "switch message"
+ALLOW= run "$FREE" --eval personal
+expect_code 4 "switch never set (default off)"
 
 echo "==> Licensing"
 run "$PAID" --eval personal --json
@@ -115,9 +138,14 @@ case "$REPORT" in "$DATA/evals/runs/"*) pass "inside the data folder's runs/" ;;
 echo "$ERR" | grep -q '^\[1/2\] PASS shared' && pass "progress on stderr" || fail "progress missing from stderr"
 echo "$OUT" | grep -q 'PASS' && fail "progress leaked into stdout (--json)" || pass "stdout is JSON only"
 
+echo "==> Hermes runs one test at a time"
+run "$FREE" --eval personal --agent hermes --jobs 2
+expect_code 2 "--agent hermes --jobs 2"
+
 echo "==> Clean environment"
 grep -q 'NODE_OPTIONS\|DYLD_\|ZDOTDIR\|LIKELY_FIXTURES\|/tmp/attacker' "$H/agent-env.txt" && fail "caller's environment reached the agent" || pass "caller's environment dropped"
 grep -q '^PATH=.*/usr/bin:/bin:/usr/sbin:/sbin' "$H/agent-env.txt" && pass "agent PATH built from the clean PATH" || fail "agent PATH: $(grep ^PATH= "$H/agent-env.txt")"
+[ "$(cat "$H/agent-signals.txt")" = "DEFAULT DEFAULT" ] && pass "agent doesn't inherit ignored SIGINT/SIGTERM" || fail "agent signals: $(cat "$H/agent-signals.txt")"
 
 echo "==> A tool waiting for approval isn't used"
 cat > "$DATA/tools.json" <<'TOOLS'
@@ -131,12 +159,36 @@ grep -q 'rclip' "$H/agent-args.txt" && fail "unapproved tool reached the agent's
 [ "$(json 'd["comparison"]["previousPassed"], d["comparison"]["passedDelta"], d["comparison"]["toolsChanged"]')" = "(1, 0, False)" ] \
     && pass "compared with the previous run" || fail "comparison: $(json 'd.get("comparison")')"
 
-echo "==> Screenshots only from Likely's own folder"
+echo "==> Screenshots are never used"
 run "$FREE" --eval personal --case shot
-expect_code 0 "case with a foreign screenshot"
-echo "$ERR" | grep -q "isn't one Likely saved" && pass "foreign screenshot not attached" || fail "screenshot warning missing"
-grep -q '/etc/hosts' "$H/agent-args.txt" && fail "foreign screenshot reached the agent" || pass "agent never saw it"
+expect_code 0 "case with a screenshot"
+echo "$ERR" | grep -q "don't use screenshots" && pass "says screenshots aren't used" || fail "screenshot note missing"
+grep -q '/etc/hosts' "$H/agent-args.txt" && fail "screenshot reached the agent" || pass "agent never saw it"
+find "$DATA/evals/runs" -name 'screenshot-*' | grep -q . && fail "decrypted/copied screenshot left in runs" || pass "no screenshot copies in runs/"
 echo "$OUT" | grep -q '^Report: ' && pass "human summary on stdout" || fail "no summary on stdout"
+
+echo "==> Codex sessions are deleted before the run exits"
+run "$FREE" --eval personal --agent codex --case shared --timeout 30 --json
+expect_code 0 "codex run"
+[ "$(json 'd["summary"]["passed"]')" = 1 ] && pass "codex answer scored" || fail "codex: $(json 'd.get("summary")')"
+find "$H/.codex/sessions" -name '*.jsonl' | grep -q . && fail "Codex session left behind" || pass "Codex session deleted"
+
+cat >> "$DATA/evals/cases.jsonl" <<'CASES'
+{"id":"hang","query":"HANG-FOREVER-TEST","expect":{"anyOf":["/Users/Shared"]},"source":"manual"}
+CASES
+set +e
+env -i CFFIXED_USER_HOME="$H" HOME="$H" LIKELY_EVAL_TEST_ALLOW=1 PATH=/usr/bin:/bin "$FREE" --eval personal --agent codex --case hang --json \
+    >"$WORK/hang.out" 2>"$WORK/hang.err" &
+CLI=$!
+for _ in $(seq 150); do [ -f "$H/codex-hanging" ] && break; sleep 0.1; done
+sleep 0.3
+kill -INT "$CLI"
+wait "$CLI"; CODE=$?
+set -e
+ERR="$(cat "$WORK/hang.err")"; OUT="$(cat "$WORK/hang.out")"
+expect_code 130 "Ctrl-C during a Codex case"
+[ "$(json 'd["status"]')" = interrupted ] && pass "partial results written" || fail "interrupted JSON: $(json 'd')"
+find "$H/.codex/sessions" -name '*.jsonl' | grep -q . && fail "Codex session left behind after Ctrl-C" || pass "Codex session deleted after Ctrl-C"
 
 echo "==> One run at a time"
 perl -e 'use Fcntl ":flock"; open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; open(my $r, ">", $ARGV[1]); close $r; sleep 20' \
@@ -148,6 +200,14 @@ expect_code 1 "while another run holds the lock"
 echo "$ERR" | grep -q "Another test run is in progress" && pass "says another run is in progress" || fail "lock message"
 kill "$LOCKER" 2>/dev/null || true
 wait "$LOCKER" 2>/dev/null || true
+
+echo "==> Never through a symlinked runs/ folder"
+mv "$DATA/evals/runs" "$WORK/runs-real"
+ln -s "$WORK/runs-real" "$DATA/evals/runs"
+run "$FREE" --eval personal --case shared
+expect_code 1 "runs/ is a symlink"
+echo "$ERR" | grep -q "symbolic link" && pass "says why" || fail "symlink message"
+rm "$DATA/evals/runs"; mv "$WORK/runs-real" "$DATA/evals/runs"
 
 echo
 if [ "$FAILURES" = 0 ]; then echo "All eval CLI checks passed."; else echo "$FAILURES check(s) failed."; exit 1; fi
