@@ -44,16 +44,16 @@ enum License {
 
     static let plans: [Plan] = [
         Plan(kind: .subscription,
-             headline: "I want Likely to keep getting better",
+             headline: "I'd like Likely to keep improving",
              price: "$3", priceUnit: "/ month",                                                          // TODO: confirm price
-             detail: "New features and improvements as they ship.",
+             detail: "A subscription lets us keep working on this silly little app.",
              autoRenews: true,
              serverPlan: .monthly,
              buttonTitle: "Subscribe"),
         Plan(kind: .oneTime,
              headline: "Just the app, please",
              price: "$29", priceUnit: "once",
-             detail: "One payment, and you can use the app for as long as you like.",
+             detail: "A one-time payment tells us to take the money and run.",
              autoRenews: false,
              serverPlan: .lifetime,
              buttonTitle: "Buy Once"),
