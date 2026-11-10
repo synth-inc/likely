@@ -94,7 +94,7 @@
       found: [ f('IMG_4821.png', 'Oct 26, 2026 at 8:03 AM', '412 KB', 'PNG image', 'meme') ],
       quickLook: true },
     { cap: 3, query: 'the invoice from the hosting company',
-      status: ['Searching Documents and Mail Downloads…', 'Reading PDFs…'],
+      status: ['Searching Documents and Downloads…', 'Reading PDFs…'],
       found: [INV_OCT, INV_SEP, INV_AUG],
       refine: { query: 'no, the one from March', status: ['Checking dates…'], keep: [INV_MAR] } }
   ];
