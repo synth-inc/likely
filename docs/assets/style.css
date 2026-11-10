@@ -100,6 +100,11 @@ h1 em { font-style: normal; color: var(--text-2); }
 
 /* 2. Demo video */
 .demo { padding-bottom: 100px; }
+/* "How it works" sits right under the demo, then "This is the whole app": 100px between each. */
+.demo + #how { padding-top: 0; }
+#how + .whole { padding-top: 100px; }
+/* The whole-app picture runs wider than the text column. */
+.whole.wrap { width: min(1120px, 100% - 48px); }
 .video-panel { border-radius: var(--r-panel); overflow: hidden; background: var(--fill); aspect-ratio: 16 / 10; }
 .video-panel video { display: block; width: 100%; height: 100%; object-fit: cover; background: #1C1D21; }
 

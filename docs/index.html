@@ -27,6 +27,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
   <link rel="stylesheet" href="assets/style.css">
   <link rel="stylesheet" href="assets/wa.css">
+  <link rel="stylesheet" href="assets/demo.css">
   <script>document.documentElement.classList.remove('no-js')</script>
 </head>
 <body>
@@ -65,41 +66,20 @@
 
     <!-- 2. DEMO (DockLock: "See the difference" eyebrow + demo panel). Here: the autoplay video. -->
     <section class="demo wrap">
-      <!-- DEMO VIDEO: record and add docs/assets/demo.mp4 (poster: docs/assets/demo-poster.png, placeholder) -->
-      <div class="video-panel">
-        <video id="demo" src="assets/demo.mp4" poster="assets/demo-poster.png"
-               autoplay muted loop playsinline preload="metadata"
-               aria-label="Demo: a file picker opens with recent files in the Likely folder, and a search finds the file"></video>
+      <!-- DEMO: an animated, self-playing picker + search bar drawn in HTML/CSS (assets/demo.css, assets/demo.js).
+           Searches and timing live at the top of assets/demo.js. Captions below are editable in ?edit mode. -->
+      <div class="video-panel demo-panel" data-likely-demo role="img"
+           aria-label="Demo: a file picker opens with recent files in the Likely folder. Typing “last year’s tax forms” into Likely’s search bar finds the W-2 and 1099 PDFs, and they’re opened. More searches find a logo with a transparent background, a meme about losing files, and, after a correction, the March hosting invoice."></div>
+      <div class="demo-caps" aria-hidden="true">
+        <p class="demo-cap on" data-copy-id="demo.cap.recent">Your newest files are already there.</p>
+        <p class="demo-cap" data-copy-id="demo.cap.plain">Plain English</p>
+        <p class="demo-cap" data-copy-id="demo.cap.images">Finds images by what’s in them</p>
+        <p class="demo-cap" data-copy-id="demo.cap.refine">Refine it</p>
       </div>
-      <script>
-        (function () {
-          var v = document.getElementById('demo');
-          if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            v.removeAttribute('autoplay'); v.autoplay = false; v.pause(); v.controls = true;
-          }
-        })();
-      </script>
+      <script src="assets/demo.js" defer></script>
     </section>
 
-    <!-- 3. THIS IS THE WHOLE APP (DockLock: centered h2 + one line + screenshot) -->
-    <section class="whole wrap" aria-labelledby="whole-h">
-      <h2 id="whole-h" data-copy-id="whole.title">This is the whole app.</h2>
-      <p class="section-sub" data-copy-id="whole.subtitle">A search bar above the picker, a folder in your sidebar, and an icon in your menu bar. That’s it.</p>
-
-      <!-- Interactive whole-app screenshot (assets/wa.css, regions.js, wa.js; wa-edit.js loads only with ?edit-regions).
-           To move regions: open ?edit-regions, adjust, "Copy config", paste into assets/regions.js. -->
-      <figure class="wa" data-img="assets/whole-app-base.png">
-        <img class="wa-base" src="assets/whole-app-base.png" width="2880" height="1800"
-             alt="A file picker in dark mode with Likely selected in its sidebar, Likely's search bar above it, and Likely's icon in the menu bar.">
-        <noscript><img class="wa-fallback" src="assets/whole-app-combo.png" width="2880" height="1800"
-             alt="A file picker with Likely's three parts called out: the search bar above the picker, the Likely folder in the sidebar, and the menu bar icon."></noscript>
-        <div class="wa-dim"></div>
-      </figure>
-      <script src="assets/regions.js"></script>
-      <script src="assets/wa.js"></script>
-    </section>
-
-    <!-- 4. HOW IT WORKS -->
+    <!-- 3. HOW IT WORKS -->
     <section id="how" class="wrap section" aria-labelledby="how-h">
       <h2 id="how-h" data-copy-id="how.headline">Anytime you open a file picker...</h2>
       <ul class="panel bullets">
@@ -122,6 +102,22 @@
 
 
 
+
+    <!-- 4. THIS IS THE WHOLE APP (DockLock: centered h2 + one line + screenshot) -->
+    <section class="whole wrap" aria-labelledby="whole-h">
+      <h2 id="whole-h" data-copy-id="whole.title">This is the whole app.</h2>
+      <p class="section-sub" data-copy-id="whole.subtitle">A search bar above the picker, a folder in your sidebar, and an icon in your menu bar. That’s it.</p>
+
+      <!-- Interactive whole-app screenshot (assets/wa.css, regions.js, wa.js; wa-edit.js loads only with ?edit-regions).
+           To move regions: open ?edit-regions, adjust, "Copy config", paste into assets/regions.js. -->
+      <figure class="wa" data-img="assets/whole-app.jpg">
+        <img class="wa-base" src="assets/whole-app.jpg" width="2880" height="1800"
+             alt="A file picker with Likely's search bar above it, the Likely folder selected in its sidebar, and Likely's icon in the menu bar.">
+        <div class="wa-dim"></div>
+      </figure>
+      <script src="assets/regions.js"></script>
+      <script src="assets/wa.js"></script>
+    </section>
 
     <!-- 5. IF IT MISSES, YOU CAN FIX IT (the improvement loop) -->
     <section id="fix" class="wrap section" aria-labelledby="fix-h">

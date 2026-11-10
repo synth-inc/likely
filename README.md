@@ -1,7 +1,12 @@
 # Likely
 
-Every macOS file picker opens with the files you just added. For anything else, describe it, and Likely finds it.
+Likely adds a search bar to every file picker. Describe what you need in plain English, and your agent finds it.
 Website: [synth-inc.github.io/likely](https://synth-inc.github.io/likely/).
+
+<p align="center">
+  <a href="https://synth-inc.github.io/likely/"><img src="docs/assets/demo.gif" width="680"
+     alt="Likely in a macOS file picker: typing &quot;last year's tax forms&quot; finds the W-2 and 1099 PDFs; more searches find a logo, a meme and an invoice."></a>
+</p>
 
 Likely is a menu bar app. When a file picker opens, it puts your most recently added files in `~/Likely`,
 pinned to the sidebar (see Recent files below); most of the time, that's the one. Looking for something else?
