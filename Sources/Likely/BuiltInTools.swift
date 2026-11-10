@@ -46,7 +46,7 @@ enum BuiltInTools {
         case "list", "list_directory": return "List a folder"
         case "terminal": return agentID == "hermes" ? "Shell commands, inside Likely's write-blocking sandbox" : "Shell commands"
         case "file": return "Read and search files"
-        case "vision": return "Look at the screenshot"
+        case "vision": return "Look at images"
         default: return ""
         }
     }

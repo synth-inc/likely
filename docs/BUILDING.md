@@ -12,8 +12,8 @@ open build/Likely.app
 swift test                  # unit tests
 ```
 
-`build.sh` signs with an Apple Development identity so Accessibility and Screen Recording grants
-survive rebuilds (an ad-hoc signature changes every build, and macOS then asks again). If you have
+`build.sh` signs with an Apple Development identity so the Accessibility grant
+survives rebuilds (an ad-hoc signature changes every build, and macOS then asks again). If you have
 more than one, pin one with `LIKELY_SIGN_ID` (its SHA-1 from `security find-identity -v -p codesigning`,
 or its full name). Otherwise the first one is used, and which one that is can change.
 
@@ -21,14 +21,14 @@ Builds from `./build.sh` are dev builds: they also have Settings → Evals, `--e
 
 ## Encryption needs a provisioning profile
 
-Likely encrypts your search history and the screenshots saved with tests with a key it keeps in the
+Likely encrypts your search history with a key it keeps in the
 **data-protection keychain**, in an access group of its own (`<team id>.inc.synth.likely`). Only apps
 signed by the same team with that group in their `keychain-access-groups` entitlement can read the
 key, and macOS never offers it to other apps. macOS only lets an app have that entitlement when a
 **provisioning profile** embedded in the app allows it (otherwise it refuses to launch the app).
 
 So a build without a profile has no encryption. That is the default for `./build.sh`. It keeps
-history and test screenshots in plaintext, with Likely's other protections: owner-only files, the
+history in plaintext, with Likely's other protections: owner-only files, the
 agents' sandboxes can't read them, and they're kept out of Spotlight (see [PRIVACY.md](PRIVACY.md)).
 Settings → History shows "Encryption: off in this build (no provisioning profile)".
 
@@ -109,7 +109,7 @@ History lives in two files, so builds with and without encryption never mix them
 
 A build without encryption leaves `history.enc.jsonl` alone. Settings → History then says "History
 is encrypted by another build of Likely", and the build keeps its own plaintext history. A build with
-encryption encrypts plaintext history and test screenshots on launch and deletes the plaintext.
+encryption encrypts plaintext history on launch and deletes the plaintext.
 Builds of the same team share the key. A build of another team has its own key, and can't read the
 other team's history lines, which are kept as they are. Likely never wipes data it can't read, and
 never makes a new key over one it can't read.

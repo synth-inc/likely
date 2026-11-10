@@ -164,24 +164,13 @@ final class DataCipherTests: XCTestCase {
         XCTAssertEqual(try DataCipher(store: store).openLine(line), text)
     }
 
-    func testFileRoundTrip() throws {
-        let cipher = DataCipher(store: InMemoryKeyStore())
-        let png = Data([0x89, 0x50, 0x4E, 0x47] + (0..<5000).map { UInt8($0 % 251) })
-        let sealed = try cipher.sealFile(png)
-        XCTAssertTrue(DataCipher.isSealedFile(sealed))
-        XCTAssertNil(sealed.range(of: png.prefix(64)))
-        XCTAssertEqual(try cipher.openFile(sealed), png)
-    }
-
     func testOtherKeyIsReportedAsSuch() throws {
         let line = try DataCipher(store: InMemoryKeyStore()).sealLine("secret")
-        let file = try DataCipher(store: InMemoryKeyStore()).sealFile(Data("png".utf8))
         let other = DataCipher(store: InMemoryKeyStore(key: Data(repeating: 7, count: 32)))
         XCTAssertThrowsError(try other.openLine(line)) { XCTAssertEqual($0 as? DataCipher.CipherError, .otherKey) }
-        XCTAssertThrowsError(try other.openFile(file)) { XCTAssertEqual($0 as? DataCipher.CipherError, .otherKey) }
     }
 
-    func testTamperingAndWrongPurposeAreDamaged() throws {
+    func testTamperingIsDamaged() throws {
         let cipher = DataCipher(store: InMemoryKeyStore())
         let line = try cipher.sealLine("secret")
         var bytes = Array(line)
@@ -190,11 +179,6 @@ final class DataCipherTests: XCTestCase {
         XCTAssertThrowsError(try cipher.openLine(String(bytes))) { XCTAssertEqual($0 as? DataCipher.CipherError, .damaged) }
         XCTAssertThrowsError(try cipher.openLine("lk1:zz:notbase64")) { XCTAssertEqual($0 as? DataCipher.CipherError, .damaged) }
         XCTAssertThrowsError(try cipher.openLine("plain text"))
-        // A history line can't be opened as a screenshot or the other way round.
-        XCTAssertThrowsError(try cipher.openLine(line, purpose: .screenshot)) { XCTAssertEqual($0 as? DataCipher.CipherError, .damaged) }
-        let file = try cipher.sealFile(Data("x".utf8), purpose: .screenshot)
-        XCTAssertThrowsError(try cipher.openFile(file, purpose: .historyLine))
-        XCTAssertThrowsError(try cipher.openFile(Data("LKE1".utf8)))
     }
 
     func testReadingNeverMakesAKey() throws {

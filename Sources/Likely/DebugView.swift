@@ -9,12 +9,6 @@ final class DebugRun: ObservableObject, Identifiable {
     let date = Date()
     let appName: String
     let detectedVia: String
-    @Published var captureMode: String?
-    /// The screenshot sent with the search, in memory.
-    @Published var screenshotPNG: Data?
-    /// Its copy on disk (debug/<id>.png): dev builds only, 0600.
-    @Published var screenshotURL: URL?
-    @Published var image: NSImage?
     @Published var prompt: String?
     @Published var model: String?
     @Published var events: [(Date, String)] = []
@@ -39,43 +33,18 @@ final class DebugRun: ObservableObject, Identifiable {
     func log(_ message: String) { events.append((Date(), message)) }
 }
 
-/// Keeps the most recent runs, with each run's screenshot: in memory only in release builds; dev
-/// builds (LIKELY_DEV) also write it to debug/<run id>.png (0600) for "Open in Preview".
+/// Keeps the most recent runs, in memory only.
 final class DebugStore: ObservableObject {
     static let shared = DebugStore()
     static let maxRuns = 15
 
     @Published private(set) var runs: [DebugRun] = []
-    static let defaultDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/Likely/debug", isDirectory: true)
-    private let directory = DebugStore.defaultDirectory
 
     func begin(appName: String, detectedVia: String) -> DebugRun {
         let run = DebugRun(appName: appName, detectedVia: detectedVia)
         runs.insert(run, at: 0)
-        while runs.count > Self.maxRuns {
-            let old = runs.removeLast()
-            if let url = old.screenshotURL { try? FileManager.default.removeItem(at: url) }
-        }
+        if runs.count > Self.maxRuns { runs.removeLast(runs.count - Self.maxRuns) }
         return run
-    }
-
-    func attachScreenshot(_ png: Data, mode: String, to run: DebugRun) {
-        run.screenshotPNG = png
-        run.image = NSImage(data: png)
-        run.captureMode = mode
-        #if LIKELY_DEV
-        let copy = directory.appendingPathComponent("\(run.id.uuidString).png")
-        if (try? OwnerOnly.write(png, to: copy)) != nil { run.screenshotURL = copy }
-        #endif
-    }
-
-    /// Release builds keep debug screenshots in memory only: remove any an earlier version wrote.
-    static func removeSavedScreenshots(in directory: URL = DebugStore.defaultDirectory) {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        for name in names where name.lowercased().hasSuffix(".png") {
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
-        }
     }
 }
 
@@ -125,21 +94,6 @@ private struct RunDetail: View {
                     Spacer()
                     Button("Make This a Test…") { testEditor = makeTest() }
                         .help("Save this run's query and context as an eval case, with the file(s) you wanted")
-                }
-
-                section("Screenshot sent to Claude", detail: run.captureMode) {
-                    if let image = run.image {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 420)
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
-                        if let url = run.screenshotURL {
-                            Button("Open in Preview") { NSWorkspace.shared.open(url) }
-                        }
-                    } else {
-                        Text(run.captureMode == nil ? "Capturing…" : "No screenshot (capture failed)").foregroundStyle(.secondary)
-                    }
                 }
 
                 section("Prompt") {

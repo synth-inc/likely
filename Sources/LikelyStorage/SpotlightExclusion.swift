@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Keeps a folder out of Spotlight, so eval runs, reports, history and screenshots never show up in
+/// Keeps a folder out of Spotlight, so eval runs, reports and history never show up in
 /// an agent's `mdfind` (an eval's expected answer leaking into the search it's testing, or names of
 /// past searches turning up as "results").
 ///

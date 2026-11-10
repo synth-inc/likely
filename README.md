@@ -2,10 +2,9 @@
 
 Menu bar app that notices when a macOS file picker opens and fills `~/Likely` with the files you probably need.
 When the picker opens, the folder instantly gets your most recently added files (see below). When you
-describe what you want in the bar above the picker, Likely asks your coding agent (Claude Code by default; with
-the optional Screenshots permission and Settings → Send a screenshot with searches, it also sees the window
-behind the picker) and clones its candidates into
-`~/Likely` in place of the recent files. A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
+describe what you want in the bar above the picker, Likely asks your coding agent (Claude Code by default),
+giving it what you typed, the app's name and the window title, and clones its candidates into `~/Likely` in
+place of the recent files. A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
 The copies stay until the next picker opens (or 10 minutes after you close one), so apps that read the file later still find it.
 
 **Recent files.** Often the file you want is the one you just downloaded, saved or screenshotted, so the
@@ -27,14 +26,14 @@ Picker Opens (on by default) selects the folder in the picker's sidebar; when of
 open build/Likely.app
 ```
 
-The setup window walks through Accessibility, Screen Recording, creating `~/Likely` (drag it into
+The setup window walks through Accessibility, creating `~/Likely` (drag it into
 the Finder sidebar), and finding the `claude` CLI.
 
 Encryption of your search history is off in builds without a provisioning profile. To turn it on
 with your own Apple team, and for all build options, see [docs/BUILDING.md](docs/BUILDING.md).
 
 For debugging, run the bare binary from a terminal (`.build/release/Likely`): it inherits the
-terminal's Accessibility / Screen Recording grants and logs to stderr.
+terminal's Accessibility grant and logs to stderr.
 
 ## Releases & updates
 
@@ -56,10 +55,8 @@ scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Like
   `AXIdentifier` `open-panel` (Chrome: `AXSheetCreated`; TextEdit: `AXFocusedWindowChanged` /
   `AXWindowCreated`) and the sandboxed system dialog is `OpenPanel`. Button/browser heuristics are the fallback.
 - **Close**: `AXUIElementDestroyed` on the panel, plus a poll for the panel's frame disappearing.
-- **Screenshot** (`WindowCapture`): once open, the picker is drawn into the app's window, so the app
-  snapshots the front window on every click / ⌘-shortcut (in memory) and keeps the one from just before the picker.
-  It's written to disk (`run/context-<run>.png`, removed when the picker closes) and sent only when you search.
-  Settings → Send a screenshot with searches turns all of it off.
+- **Context**: the app's name, the title of the window behind the picker and the picker's button title,
+  all read through Accessibility. Likely takes no screenshots and doesn't need Screen Recording.
 - **Recent files** (`RecentFiles`, `LikelyFolder.showRecent`): a synchronous `MDQuery` sorted by
   `kMDItemDateAdded` (last hour, then day, then 30 days), falling back to the top level of Desktop /
   Downloads / Documents; runs on its own queue, then clones on the Likely folder's copy queue. Copies are
@@ -87,7 +84,7 @@ event). Dev builds always log details. See docs/PRIVACY.md.
 ## Your data
 
 Everything Likely keeps stays on this Mac, owner-only, unreadable to the search agents and out of Spotlight;
-in official releases, search history and saved test screenshots are also encrypted (builds from source
+in official releases, search history is also encrypted (builds from source
 need a provisioning profile for that: [docs/BUILDING.md](docs/BUILDING.md)). What's stored, where, and
 how to delete it: [docs/PRIVACY.md](docs/PRIVACY.md).
 

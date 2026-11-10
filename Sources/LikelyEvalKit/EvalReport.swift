@@ -30,9 +30,13 @@ public enum EvalReport {
             if !changes.fixed.isEmpty { lines.append("  now passing: " + changes.fixed.joined(separator: ", ")) }
             if !changes.broke.isEmpty { lines.append("  now failing: " + changes.broke.joined(separator: ", ")) }
         }
-        let failed = run.cases.filter { $0.score.scorable && !$0.pass }
+        let failed = run.cases.filter { $0.score.scorable && !$0.pass && $0.status != "skipped" }
         if !failed.isEmpty {
             lines.append("Failed: " + failed.map { $0.id + ($0.status == "ok" ? "" : " (\($0.status))") }.joined(separator: ", "))
+        }
+        let skipped = run.cases.filter { $0.status == "skipped" }
+        if !skipped.isEmpty {
+            lines.append("Skipped (screenshot-only, add a query): " + skipped.map(\.id).joined(separator: ", "))
         }
         return lines.joined(separator: "\n")
     }

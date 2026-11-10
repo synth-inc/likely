@@ -32,22 +32,20 @@ public final class InMemoryKeyStore: DataKeyStore {
     }
 }
 
-/// AES-256-GCM encryption of Likely's private data (search history lines, saved test screenshots)
+/// AES-256-GCM encryption of Likely's private data (search history lines)
 /// with one random key kept in the data-protection keychain (see KeychainKeyStore). Only builds with
 /// a provisioning profile have one (EncryptionAvailability); the others keep that data in plaintext.
 ///
 /// - A line (history.enc.jsonl): `lk1:<key id>:<base64 of nonce + ciphertext + tag>`. One sealed box per
 ///   line, so a damaged line, or one sealed by another build's key, is skipped on its own and the
 ///   rest of the file still reads.
-/// - A file (`.png.enc`): "LKE1", the 4-byte key id, then nonce + ciphertext + tag.
 ///
 /// The key id is the first 4 bytes of the key's SHA-256: it tells "made with another key" (another
 /// build of Likely, see docs/PRIVACY.md) apart from "damaged". Each kind of data is sealed with its own
-/// associated data, so a history line can't be passed off as a screenshot or the other way round.
+/// associated data (`Purpose`), so one kind can't be passed off as another.
 public final class DataCipher {
     public enum Purpose: String {
         case historyLine = "inc.synth.likely.history-line.v1"
-        case screenshot = "inc.synth.likely.screenshot.v1"
         var aad: Data { Data(rawValue.utf8) }
     }
 
@@ -73,7 +71,6 @@ public final class DataCipher {
     }
 
     public static let linePrefix = "lk1:"
-    static let fileMagic = Data("LKE1".utf8)
 
     private let store: DataKeyStore
     private let lock = NSLock()
@@ -147,24 +144,6 @@ public final class DataCipher {
               let combined = Data(base64Encoded: String(parts[1])) else { throw CipherError.damaged }
         return String(decoding: try open(combined, keyID: id, purpose: purpose), as: UTF8.self)
     }
-
-    // MARK: Files
-
-    public func sealFile(_ data: Data, purpose: Purpose = .screenshot) throws -> Data {
-        let key = try key(create: true)
-        let box = try AES.GCM.seal(data, using: key, authenticating: purpose.aad)
-        guard let combined = box.combined else { throw CipherError.damaged }
-        return Self.fileMagic + Self.keyID(key) + combined
-    }
-
-    public func openFile(_ data: Data, purpose: Purpose = .screenshot) throws -> Data {
-        let magic = Self.fileMagic.count
-        guard data.count > magic + 4, data.prefix(magic) == Self.fileMagic else { throw CipherError.damaged }
-        let id = Data(data.dropFirst(magic).prefix(4))
-        return try open(Data(data.dropFirst(magic + 4)), keyID: id, purpose: purpose)
-    }
-
-    public static func isSealedFile(_ data: Data) -> Bool { data.prefix(fileMagic.count) == fileMagic }
 
     private func open(_ combined: Data, keyID id: Data, purpose: Purpose) throws -> Data {
         let key = try key(create: false)

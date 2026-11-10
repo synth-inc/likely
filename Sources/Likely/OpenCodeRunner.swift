@@ -2,7 +2,7 @@ import Foundation
 import LikelyStorage
 import LikelyTools
 
-/// Runs OpenCode: `opencode run --format json`, with the screenshot attached via `-f`. OpenCode has
+/// Runs OpenCode: `opencode run --format json`. OpenCode has
 /// no sandbox of its own and its bash allowlist only sees command names (`ls > file` passes as `ls`),
 /// so it runs under `sandbox-exec` (see AgentSandbox: no writes outside its own data directories, no
 /// exec from writable places, HTTPS only, no local sockets, LaunchServices, pasteboard, Accessibility, Screen Recording or Automation), plus a permission config that hides edit tools and allowlists search commands.
@@ -58,7 +58,7 @@ final class OpenCodeRunner: AgentRunner {
         ToolPermissions.openCodePermission(fileTools: fileTools, bashAllowed: bashAllowed, bashDenied: bashDenied, extra: commands)
     }
 
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
         sessionID = nil
         self.executable = executable
@@ -67,9 +67,7 @@ final class OpenCodeRunner: AgentRunner {
         let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var arguments = ["run", "--format", "json", "-m", model]
-        if let image { arguments += ["-f", image.path] }
-        launch(arguments + ["--", prompt])   // `--`: -f takes several values, and text may start with "-"
+        launch(["run", "--format", "json", "-m", model, "--", prompt])   // `--`: text may start with "-"
     }
 
     @discardableResult
