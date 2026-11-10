@@ -44,7 +44,14 @@ final class HermesRunner: AgentRunner {
     /// Bumped by `cancel()`, so a launch prepared in the background is dropped if it's stale.
     private var generation = 0
 
-    static let profileName = "likely"
+    /// The app's profile. `Likely --eval` uses `evalProfileName` instead (`usesEvalProfile`), so a test
+    /// run, which may happen while the app is searching, never stops the app's gateway or leaves one with
+    /// a test's sandbox rules for the app to reuse.
+    static let appProfileName = "likely"
+    static let evalProfileName = "likely-eval"
+    /// Set once by EvalCLI before any runner starts.
+    static var usesEvalProfile = false
+    static var profileName: String { usesEvalProfile ? evalProfileName : appProfileName }
     static var profileDir: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".hermes/profiles/\(profileName)")
     }
@@ -341,6 +348,7 @@ extension HermesRunner {
         if !fm.fileExists(atPath: config.path) {
             // Clone the user's config and API keys (.env); OAuth logins aren't copied.
             run(executable, ["profile", "create", profileName, "--clone", "--no-alias"])
+            if usesEvalProfile { copyAppProfileSettings() }
         }
         if !((try? String(contentsOf: config, encoding: .utf8))?.contains("standalone: true") ?? false) {
             run(executable, ["-p", profileName, "config", "set", "gateway.standalone", "true"])
@@ -398,6 +406,18 @@ extension HermesRunner {
     }
 
     // MARK: Evals
+
+    /// The eval profile starts as a copy of the app's (its model provider, set with
+    /// `hermes -p likely model`), when there is one, rather than of the user's root profile.
+    private static func copyAppProfileSettings() {
+        let fm = FileManager.default
+        let app = fm.homeDirectoryForCurrentUser.appendingPathComponent(".hermes/profiles/\(appProfileName)")
+        for name in ["config.yaml", ".env"] {
+            let source = app.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: source) else { continue }
+            try? OwnerOnly.write(data, to: profileDir.appendingPathComponent(name))
+        }
+    }
 
     /// What makes a gateway's sandbox: the eval's extra rules and the work folder it may read (each
     /// case has its own), so a gateway is only reused by the same case.
@@ -459,7 +479,7 @@ extension HermesRunner {
     /// best effort.
     static func deleteSession(_ id: String, executable: String) {
         guard id.range(of: #"^[A-Za-z0-9_.:-]+$"#, options: .regularExpression) != nil else { return }
-        DispatchQueue.global(qos: .utility).async {
+        AgentSessionCleanup.run {
             run(executable, ["-p", profileName, "sessions", "delete", id, "--yes"])
         }
     }

@@ -3,7 +3,7 @@ import LikelyEvalKit
 import LikelyStorage
 import SwiftUI
 
-/// Personal eval cases and drafts (~/Library/Application Support/Likely/evals), for Settings → Evals
+/// Personal eval cases and drafts (~/Library/Application Support/Likely/evals), for Settings → Tests
 /// and the Debug View's "Make This a Test".
 ///
 /// Edits change only the target case's line: every other line (comments, lines this version can't
@@ -101,10 +101,8 @@ final class EvalCaseStore: ObservableObject {
 
 // MARK: - Settings tab
 
-// The Evals tab and Run Suite are dev-build only (LIKELY_DEV), like `--eval` itself. The store and
-// the editor above/below stay in every build (the Debug View and search history use them).
-#if LIKELY_DEV
-
+/// Settings → Tests (every build): your tests, Run Tests, the last report, and the command your coding
+/// agent can run. Dev builds also run the public fixtures from Run Tests.
 struct EvalsSettings: View {
     @ObservedObject private var store = EvalCaseStore.shared
     @AppStorage(EvalCapture.defaultsKey) private var capture = EvalCapture.defaultValue
@@ -113,6 +111,10 @@ struct EvalsSettings: View {
     @State private var tag = ""
     @State private var editing: EditorRequest?
     @State private var showingRun = false
+    @State private var copiedCommand = false
+    @State private var copiedPrompt = false
+    @State private var shimMessage: String?
+    @State private var allowCLI = ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true
 
     enum Section: Hashable { case tests, drafts }
 
@@ -145,7 +147,7 @@ struct EvalsSettings: View {
             list
                 .overlay {
                     if visible.isEmpty {
-                        Text(section == .tests ? "No tests yet. Use “Save as test” in the bar above a picker, New Test…, or turn on automatic saving."
+                        Text(section == .tests ? "No tests yet. Use “Save as test” in the bar above a picker, Make Eval in History, New Test…, or turn on automatic saving."
                                                : "Nothing here. Picks Likely couldn't read show up here for you to fill in.")
                             .multilineTextAlignment(.center).foregroundStyle(.secondary).padding(30)
                     }
@@ -153,21 +155,66 @@ struct EvalsSettings: View {
             if let error = store.lastError { Text(error).font(.caption).foregroundStyle(.orange) }
             HStack {
                 Button("New Test…") { editing = EditorRequest(evalCase: EvalCaseEditor.blank(), mode: .newCase) }
-                Button("Run Suite…") { showingRun = true }
-                Button("Open Last Report") { if let url = EvalStorage.lastReport { NSWorkspace.shared.open(url) } }
+                Button("Run Tests…") { showingRun = true }
+                    .disabled(store.cases.isEmpty && EvalCLI.policy == .release)
+                Button("Open Report") { if let url = EvalStorage.lastReport { NSWorkspace.shared.open(url) } }
                     .disabled(EvalStorage.lastReport == nil)
+                    .help("The last run's report")
                 Spacer()
                 Button("Show Folder") {
-                    try? FileManager.default.createDirectory(at: EvalStorage.root, withIntermediateDirectories: true)
+                    try? OwnerOnly.createDirectory(EvalStorage.root)
                     NSWorkspace.shared.open(EvalStorage.root)
                 }
             }
+            commandLine
         }
         .onAppear { store.reload() }
         .sheet(item: $editing) { request in
             EvalCaseEditor(request: request) { editing = nil }
         }
-        .sheet(isPresented: $showingRun) { RunSuiteSheet(tags: store.allTags) { showingRun = false } }
+        .sheet(isPresented: $showingRun) { RunTestsSheet(tags: store.allTags) { showingRun = false } }
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in
+            allowCLI = ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true
+        }
+    }
+
+    /// The command for the user's coding agent, to re-run the tests after adding a tool.
+    private var commandLine: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if EvalCLI.policy == .release {
+                VStack(alignment: .leading, spacing: 1) {
+                    Toggle("Allow command-line test runs", isOn: Binding(
+                        get: { allowCLI },
+                        set: { on in
+                            ProtectedSettings.set(on, forKey: ProtectedSettings.allowCommandLineTests)
+                            allowCLI = ProtectedSettings.bool(ProtectedSettings.allowCommandLineTests) == true
+                        }))
+                    Text("Lets Terminal and your coding agent run your tests with the command below. Off: only Run Tests here can."
+                         + (ProtectedSettings.isProtected ? "" : " (This build has no provisioning profile, so the switch is stored like any other preference.)"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 6) {
+                Text(EvalCommand.command + " --json")
+                    .font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    .help("Runs your tests from Terminal or a coding agent, and prints the results as JSON")
+                Spacer()
+                Button(copiedCommand ? "Copied" : "Copy Command") {
+                    EvalCommand.copy(EvalCommand.command + " --json")
+                    copiedCommand = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedCommand = false }
+                }
+                Button(copiedPrompt ? "Copied" : "Copy for Coding Agent") {
+                    EvalCommand.copy(EvalCommand.agentPrompt)
+                    copiedPrompt = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedPrompt = false }
+                }
+                .help("Instructions for Claude Code, Codex or another coding agent: how to run your tests before and after a change and report the difference")
+                Button("Install Command…") { shimMessage = EvalCommand.installShim() }
+                    .help("Adds a `likely` command to ~/.local/bin that runs your tests (no administrator password)")
+            }
+            if let shimMessage { Text(shimMessage).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+        }
     }
 
     private var visible: [EvalCase] {
@@ -224,7 +271,88 @@ struct EvalsSettings: View {
     }
 }
 
-#endif
+/// The command line for running the tests outside Likely: the command, a prompt for a coding agent,
+/// and the optional `likely` shim in ~/.local/bin.
+enum EvalCommand {
+    /// `<this executable> --eval personal`, e.g. /Applications/Likely.app/Contents/MacOS/Likely --eval personal.
+    static var command: String { EvalCLI.commandPath + " --eval personal" }
+
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// For the user's coding agent: how to measure a change (a tool, an edited prompt) with the tests.
+    static var agentPrompt: String {
+        """
+        Likely (a macOS menu bar app that suggests files in Open dialogs) can re-run my saved tests from the \
+        command line, without opening any window, even while it's running:
+
+        \(command) --json
+
+        Run it before you change anything (a tool in Likely's tools.json, Likely's prompt) and again afterwards, \
+        then report the difference: summary.passed / summary.scored before and after, the tests in \
+        comparison.nowPassing and comparison.nowFailing, and whether comparison.toolsChanged is true \
+        (comparison.toolChanges lists +added, -removed and ~edited tools). The second run compares itself with the first.
+
+        If it exits with status 4, ask me to turn on “Allow command-line test runs” in Likely → Settings → Tests.
+
+        Notes: a new or changed tool isn't used until I approve it in Likely → Settings → Tools \
+        (tools.pendingApproval lists tools waiting for that), so ask me to approve it before the second run. \
+        `--without-tools` runs without any of my tools, to see what they add. Exit status 0 means the run \
+        completed (whatever the pass rate), 1 an error (the message is in "error"), 2 a usage error, 3 Likely isn't \
+        licensed, 4 command-line runs are off. Each test sends its query to my search agent's provider, as using Likely does, and can take up \
+        to two minutes. Don't run two at once.
+        """
+    }
+
+    static let shimMarker = "# Installed by Likely (Settings → Tests)."
+
+    static var shimURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/likely")
+    }
+
+    /// The shim's script: always `--eval`, so `likely` alone never starts a second copy of the app.
+    static func shimScript(executable: String) -> String {
+        let executable = executable.filter { !$0.isNewline && $0 != "\u{0}" }
+        let quoted = "'" + executable.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return """
+        #!/bin/sh
+        \(shimMarker)
+        # Runs your Likely tests: `likely --json` is `\(executable) --eval personal --json`.
+        case "$1" in --eval) ;; *) set -- --eval personal "$@" ;; esac
+        exec \(quoted) "$@"
+
+        """
+    }
+
+    /// Writes ~/.local/bin/likely (never with sudo; never over a file Likely didn't write). Returns a
+    /// line for the user.
+    static func installShim() -> String {
+        guard let executable = Bundle.main.executablePath else { return "Can't find Likely's executable." }
+        // Opened straight from the download (macOS runs it from a random, temporary copy): that path
+        // stops working once Likely quits.
+        if executable.contains("/AppTranslocation/") {
+            return "Move Likely to your Applications folder and open it from there first: it's running from a temporary copy macOS made."
+        }
+        let url = shimURL
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) || (try? fm.destinationOfSymbolicLink(atPath: url.path)) != nil {
+            let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            guard existing.contains(shimMarker) else {
+                return "\(EvalPath.display(url.path)) already exists and isn't Likely's; left it alone."
+            }
+        }
+        do {
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try OwnerOnly.write(Data(shimScript(executable: executable).utf8), to: url, mode: 0o755)
+        } catch {
+            return "Couldn't write \(EvalPath.display(url.path)): \(error)"
+        }
+        return "Installed \(EvalPath.display(url.path)): run `likely --json`. If `command -v likely` prints nothing in Terminal, "
+            + "add ~/.local/bin to your PATH (e.g. in ~/.zshrc: export PATH=\"$HOME/.local/bin:$PATH\")."
+    }
+}
 
 // MARK: - Editor
 
@@ -439,12 +567,12 @@ struct EvalCaseEditor: View {
     }
 }
 
-// MARK: - Run suite
+// MARK: - Run tests
 
-#if LIKELY_DEV
-
-/// Runs `Likely --eval …` (this same binary) as a subprocess and shows its progress.
-struct RunSuiteSheet: View {
+/// Runs `Likely --eval … --json` (this same binary) as a subprocess: progress from its stderr, the
+/// results from its stdout. Release builds run your tests only, with an agent Likely detected (the
+/// subprocess finds it again itself; no path is passed).
+struct RunTestsSheet: View {
     let tags: [String]
     let dismiss: () -> Void
     @ObservedObject private var agents = AgentDetector.shared
@@ -452,29 +580,37 @@ struct RunSuiteSheet: View {
     @State private var suite = "personal"
     @State private var agentID = Settings.agentID
     @State private var model = AgentModels.selected(for: Settings.agentID)
+    @State private var withTools = true
     @State private var tagFilter = ""
     @State private var k = 8
     @State private var timeout = 120
-    /// The public suite ships in dev builds (build.sh copies evals/fixtures); hidden if it's missing.
+    /// Dev builds ship the public suite (build.sh copies evals/fixtures); hidden if it's missing.
     private let hasFixtures = (try? Suite.fixturesFile()) != nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Run Suite").font(.title3.bold())
+            Text("Run Tests").font(.title3.bold())
             Form {
-                Picker("Suite", selection: $suite) {
-                    Text("My tests").tag("personal")
-                    if hasFixtures {
+                if hasFixtures {
+                    Picker("Suite", selection: $suite) {
+                        Text("My tests").tag("personal")
                         Text("Public fixtures (synthetic files)").tag("fixtures")
                         Text("Both").tag("all")
                     }
                 }
                 Picker("Agent", selection: $agentID) {
                     ForEach(AgentKind.all.filter { $0.isSupported && agents.path(for: $0) != nil }) { Text($0.name).tag($0.id) }
+                    if agents.path(for: AgentKind.with(id: agentID) ?? AgentKind.all[0]) == nil {
+                        Text(AgentKind.with(id: agentID)?.name ?? agentID).tag(agentID)
+                    }
                 }
                 .onChange(of: agentID) { _, id in model = AgentModels.selected(for: id) }
                 Picker("Model", selection: $model) {
                     ForEach(Array(Set(AgentModels.available(for: agentID) + [model])).sorted(), id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Your tools", selection: $withTools) {
+                    Text("With your tools").tag(true)
+                    Text("Without (built-in commands only)").tag(false)
                 }
                 TextField("Tags", text: $tagFilter, prompt: Text(tags.isEmpty ? "all" : "all, or e.g. \(tags.prefix(2).joined(separator: ", "))"))
                 Stepper("Pass if found in the top \(k)", value: $k, in: 1...8)
@@ -500,14 +636,18 @@ struct RunSuiteSheet: View {
                     } else if job.isRunning {
                         ProgressView().controlSize(.small)
                     }
-                    ScrollView {
-                        Text(job.output.suffix(14).joined(separator: "\n"))
-                            .font(.caption.monospaced()).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    if let result = job.result, !job.isRunning {
+                        RunResultSummary(result: result)
+                    } else {
+                        ScrollView {
+                            Text(job.output.suffix(14).joined(separator: "\n"))
+                                .font(.caption.monospaced()).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(height: 110)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                     }
-                    .frame(height: 110)
-                    .padding(6)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                 }
             }
             HStack {
@@ -529,15 +669,63 @@ struct RunSuiteSheet: View {
     }
 
     private func run() {
-        var args = ["--eval", suite, "--agent", agentID, "--model", model, "--k", "\(k)", "--timeout", "\(timeout)"]
-        let filter = tagFilter.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var args = ["--eval", suite, "--agent", agentID, "--model", model, "--k", "\(k)", "--timeout", "\(timeout)", "--json"]
+        let filter = tagFilter.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("-") }
         if !filter.isEmpty { args += ["--tags", filter.joined(separator: ",")] }
-        if let path = agents.paths[agentID] { args += ["--agent-path", path] }
+        if !withTools { args.append("--without-tools") }
+        // Dev builds pass the path the app found; release builds can't (the run looks it up itself).
+        if EvalCLI.policy == .dev, let path = agents.paths[agentID] { args += ["--agent-path", path] }
         job.start(arguments: args)
     }
 }
 
-/// The eval subprocess: parses `[i/n]` progress lines and the final `Report:` line.
+/// The finished run, from its JSON: passes, the comparison with the previous run and tool changes.
+private struct RunResultSummary: View {
+    let result: EvalCLIResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let error = result.error {
+                Text(error).foregroundStyle(.orange)
+            }
+            if let s = result.summary {
+                Text("Passed \(s.passed) of \(s.scored) (\(percent(s.passRate)))" + (result.status == "interrupted" ? " · stopped early" : ""))
+                    .font(.headline)
+                let cost = s.totalCostUSD.map { String(format: " · $%.3f", $0) } ?? ""
+                Text("Median time \(s.medianTotalSeconds.map { String(format: "%.1fs", $0) } ?? "–")\(cost)"
+                     + (s.timeouts + s.errors > 0 ? " · \(s.timeouts) timed out, \(s.errors) failed to run" : ""))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let tools = result.tools {
+                Text("Tools: " + (tools.active.isEmpty ? "none" : tools.active.map(\.id).joined(separator: ", "))
+                     + (tools.pendingApproval.isEmpty ? "" : " · waiting for approval (not used): \(tools.pendingApproval.joined(separator: ", "))"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let c = result.comparison {
+                let delta = c.passedDelta == 0 ? "no change" : (c.passedDelta > 0 ? "+\(c.passedDelta)" : "\(c.passedDelta)")
+                Text("Previous run: \(c.previousPassed) of \(c.previousScored) (\(delta))")
+                    .font(.caption)
+                if c.toolsChanged {
+                    Text("Tools changed since then: \(c.toolChanges.joined(separator: ", "))").font(.caption).foregroundStyle(.blue)
+                }
+                if !c.settingsDiffer.isEmpty {
+                    Text("Different settings than the previous run (\(c.settingsDiffer.joined(separator: ", "))): not like for like.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if !c.nowPassing.isEmpty { Text("Now passing: \(c.nowPassing.joined(separator: ", "))").font(.caption).foregroundStyle(.green) }
+                if !c.nowFailing.isEmpty { Text("Now failing: \(c.nowFailing.joined(separator: ", "))").font(.caption).foregroundStyle(.red) }
+            } else if result.summary != nil {
+                Text("First run: the next one will compare with this.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func percent(_ x: Double) -> String { "\(Int((x * 100).rounded()))%" }
+}
+
+/// The eval subprocess: `[i/n]` progress lines from stderr, the JSON result from stdout.
 final class EvalJob: ObservableObject {
     @Published var output: [String] = []
     @Published var done = 0
@@ -545,8 +733,8 @@ final class EvalJob: ObservableObject {
     @Published var isRunning = false
     @Published var finished = false
     @Published var report: URL?
+    @Published var result: EvalCLIResult?
     private var process: Process?
-    private var buffer = Data()
     private var quitObserver: NSObjectProtocol?
 
     init() {
@@ -561,40 +749,54 @@ final class EvalJob: ObservableObject {
         if let process, process.isRunning { process.terminate() }
     }
 
+    private var collector: ProcessOutputCollector?
+
     func start(arguments: [String]) {
         guard let executable = Bundle.main.executableURL else { return }
         output = ["$ Likely " + arguments.joined(separator: " ")]
         done = 0
         total = 0
         report = nil
+        result = nil
         finished = false
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            DispatchQueue.main.async { self?.consume(data) }
-        }
-        process.terminationHandler = { [weak self] p in
-            DispatchQueue.main.async {
-                pipe.fileHandleForReading.readabilityHandler = nil
-                if let rest = try? pipe.fileHandleForReading.readToEnd() { self?.consume(rest) }
-                self?.isRunning = false
-                self?.finished = true
-                if p.terminationStatus != 0 { self?.output.append("Exited with status \(p.terminationStatus)") }
+        // Release builds: a one-time token lets this run start with "Allow command-line test runs" off
+        // (RunToken). Only this child gets it; the record it's checked against is sealed.
+        if EvalCLI.policy == .release {
+            do {
+                var environment = ProcessInfo.processInfo.environment
+                environment[RunToken.environmentKey] = try RunToken.issue(seal: ProtectedSettings.seal)
+                process.environment = environment
+            } catch {
+                Log.write("evals", "couldn't authorize the test run: \(error: error)")
+                output.append("Couldn't start: Likely couldn't reach the Keychain to authorize the run. Try again.")
+                return
             }
         }
+        // The results are read once the run has exited and both pipes reached end of file.
+        collector = ProcessOutputCollector(process: process, onStderrLine: { [weak self] line in self?.consume(line) },
+                                           completion: { [weak self] out, status in self?.finish(stdout: out, status: status) })
         do {
             try process.run()
             self.process = process
             isRunning = true
         } catch {
+            collector = nil
             output.append("Couldn't start: \(error.localizedDescription)")
         }
+    }
+
+    private func finish(stdout: Data, status: Int32) {
+        isRunning = false
+        finished = true
+        collector = nil
+        if let parsed = try? JSONDecoder().decode(EvalCLIResult.self, from: stdout) {
+            result = parsed
+            if let path = parsed.reportPath, FileManager.default.fileExists(atPath: path) { report = URL(fileURLWithPath: path) }
+        }
+        if status != 0 && result == nil { output.append("Exited with status \(status)") }
     }
 
     /// SIGTERM: the eval cancels its agents and writes partial results (see EvalCLI).
@@ -611,20 +813,14 @@ final class EvalJob: ObservableObject {
         while process.isRunning, Date() < deadline { usleep(50_000) }
     }
 
-    private func consume(_ data: Data) {
-        buffer.append(data)
-        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
-            buffer.removeSubrange(buffer.startIndex...newline)
-            output.append(line)
-            if line.hasPrefix("Running "), let n = line.split(separator: " ").dropFirst().first.flatMap({ Int($0) }) { total = n }
-            if line.hasPrefix("["), let slash = line.firstIndex(of: "/"), let close = line.firstIndex(of: "]"),
-               let i = Int(line[line.index(after: line.startIndex)..<slash]), let n = Int(line[line.index(after: slash)..<close]) {
-                done = i
-                total = n
-            }
-            if line.hasPrefix("Report: ") { report = URL(fileURLWithPath: String(line.dropFirst("Report: ".count))) }
+    private func consume(_ line: String) {
+        output.append(line)
+        if line.hasPrefix("Running "), let n = line.split(separator: " ").dropFirst().first.flatMap({ Int($0) }) { total = n }
+        if line.hasPrefix("["), let slash = line.firstIndex(of: "/"), let close = line.firstIndex(of: "]"),
+           let i = Int(line[line.index(after: line.startIndex)..<slash]), let n = Int(line[line.index(after: slash)..<close]) {
+            done = i
+            total = n
         }
+        if line.hasPrefix("Report: ") { report = URL(fileURLWithPath: String(line.dropFirst("Report: ".count))) }
     }
 }
-#endif

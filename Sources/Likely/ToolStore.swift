@@ -17,12 +17,17 @@ final class ToolStore: ObservableObject {
     @Published private(set) var loadError: String?
     /// Entries skipped or fixed up while reading.
     @Published private(set) var issues: [String] = []
-    /// What the user approved, by tool id (UserDefaults; agents can't write Likely's preferences).
-    @Published private(set) var approvals: ToolApproval.Approvals = ToolStore.loadApprovals()
+    /// What the user approved, by tool id (UserDefaults, sealed: see ProtectedSettings).
+    @Published private(set) var approvals: ToolApproval.Approvals = [:]
+    /// Set when approvals couldn't be saved because the saved ones can't be verified (see ApprovalsBook).
+    @Published private(set) var approvalsProblem: String?
+    private var book = ApprovalsBook(read: { ProtectedSettings.dataRead(ToolStore.approvalsKey) },
+                                     write: { ProtectedSettings.set($0, forKey: ToolStore.approvalsKey) })
 
     /// Posted (main thread) when tools start waiting for approval; AppDelegate badges the menu bar.
     static let approvalNeeded = Notification.Name("ToolStore.approvalNeeded")
-    private static let approvalsKey = "approvedTools"
+    /// Sealed (ProtectedSettings): approvals written outside Likely are ignored, so those tools wait for Approve.
+    static let approvalsKey = ProtectedSettings.approvedTools
     private var announcedPending: [String] = []
 
     private struct Signature: Equatable {
@@ -37,8 +42,13 @@ final class ToolStore: ObservableObject {
     private var pendingReload: DispatchWorkItem?
 
     private init() {
+        approvals = book.approvals
         reloadIfChanged()
         startWatching()
+        // Kept or reset in Settings, or verified after the Keychain answered again.
+        NotificationCenter.default.addObserver(forName: ProtectedSettings.didChange, object: nil, queue: .main) { [weak self] _ in
+            self?.reloadApprovals()
+        }
     }
 
     /// Enabled, valid, approved, and every private data area it needs turned on (Settings →
@@ -70,25 +80,39 @@ final class ToolStore: ObservableObject {
 
     // MARK: Approval
 
-    private static func loadApprovals() -> ToolApproval.Approvals {
-        guard let data = UserDefaults.standard.data(forKey: approvalsKey),
-              let approvals = try? JSONDecoder().decode(ToolApproval.Approvals.self, from: data) else { return [:] }
-        return approvals
+    private func reloadApprovals() {
+        book.reload()
+        if approvals != book.approvals { approvals = book.approvals }
+        if !book.unreadable { approvalsProblem = nil }
+        checkPending()
     }
 
-    /// `check: false` when the tools are about to be rewritten (the reload checks then).
-    private func storeApprovals(_ approvals: ToolApproval.Approvals, check: Bool = true) {
-        self.approvals = approvals
-        UserDefaults.standard.set(try? JSONEncoder().encode(approvals), forKey: Self.approvalsKey)
+    /// Changes the saved approvals (read again first). Refused while they can't be verified, so a
+    /// Keychain hiccup or an unconfirmed outside change never shrinks them. `check: false` when the
+    /// tools are about to be rewritten (the reload checks then).
+    @discardableResult
+    private func updateApprovals(check: Bool = true, _ change: (inout ToolApproval.Approvals) -> Void) -> Bool {
+        let saved = book.update(change)
+        approvals = book.approvals
+        if saved {
+            approvalsProblem = nil
+        } else {
+            approvalsProblem = book.unreadable
+                ? "Likely couldn't verify your saved tool approvals, so it can't change them now. Check the notice at the top of Settings, then try again."
+                : "Likely couldn't save your tool approvals. Try again."
+            Log.write("tools", "approvals not saved (\(public: book.unreadable ? "saved ones unverified" : "save failed"))")
+        }
         if check { checkPending() }
+        return saved
     }
 
     /// The user clicked Approve: everything pending now runs.
     func approvePending() {
-        var approvals = self.approvals
-        for item in pending { approvals[item.tool.id] = ToolApproval.record(for: item.tool) }
-        Log.write("tools", "approved \(pending.count): \(sensitive: pending.map(\.tool.name))")
-        storeApprovals(approvals)
+        let approving = pending
+        guard updateApprovals({ approvals in
+            for item in ToolApproval.pending(tools, approvals: approvals) { approvals[item.tool.id] = ToolApproval.record(for: item.tool) }
+        }) else { return }
+        Log.write("tools", "approved \(approving.count): \(sensitive: approving.map(\.tool.name))")
     }
 
     /// Logs and announces a new set of pending tools once.
@@ -151,9 +175,8 @@ final class ToolStore: ObservableObject {
         tool.commands = tool.commands.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if !tool.problems.isEmpty { tool.enabled = false }
         // Edits made here are the user's own: approved as saved.
-        var approvals = self.approvals
-        approvals[tool.id] = ToolApproval.record(for: tool)
-        storeApprovals(approvals, check: false)
+        let approved = tool
+        updateApprovals(check: false) { $0[approved.id] = ToolApproval.record(for: approved) }
         var list = tools
         if let index = list.firstIndex(where: { $0.id == tool.id }) { list[index] = tool } else { list.append(tool) }
         write(list)
@@ -166,9 +189,7 @@ final class ToolStore: ObservableObject {
     }
 
     func delete(id: String) {
-        var approvals = self.approvals
-        approvals[id] = nil
-        storeApprovals(approvals, check: false)
+        updateApprovals(check: false) { $0[id] = nil }
         write(tools.filter { $0.id != id })
     }
 
@@ -178,7 +199,8 @@ final class ToolStore: ObservableObject {
     func setEnabled(_ enabled: Bool, id: String) {
         guard var tool = tools.first(where: { $0.id == id }), !(enabled && !tool.problems.isEmpty) else { return }
         tool.enabled = enabled
-        storeApprovals(ToolApproval.afterToggle(tool, approvals: approvals), check: false)
+        let toggled = tool
+        updateApprovals(check: false) { $0 = ToolApproval.afterToggle(toggled, approvals: $0) }
         write(tools.map { $0.id == id ? tool : $0 })
     }
 

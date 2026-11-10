@@ -131,8 +131,13 @@ BUILD_DIR="$OUT" LIKELY_SIGN_ID="$SIGN_ID" LIKELY_PROFILE="$LIKELY_PROFILE" LIKE
 codesign --verify --deep --strict --verbose=2 "$APP"
 scripts/check-signature.sh "$APP" "$TEAM_ID" "$BUNDLE_ID" "$LIKELY_PROFILE"
 # build.sh only compiles dev features (LIKELY_DEV) when LIKELY_DISTRIBUTION isn't set; make sure.
-if grep -q "devLicenseOverride" "$APP/Contents/MacOS/$APP_NAME" || [ -d "$APP/Contents/Resources/MenuBarGlyphs" ]; then
+if grep -aq "devLicenseOverride" "$APP/Contents/MacOS/$APP_NAME" || [ -d "$APP/Contents/Resources/MenuBarGlyphs" ]; then
     echo "The release build contains dev-only features"; exit 1
+fi
+# The eval command line's test build (LIKELY_EVAL_TEST_SEAM, scripts/test-eval-cli.sh) lets the caller
+# choose Likely's home folder; it must never ship.
+if grep -aq "CFFIXED_USER_HOME" "$APP/Contents/MacOS/$APP_NAME"; then
+    echo "The release build was compiled with LIKELY_EVAL_TEST_SEAM"; exit 1
 fi
 
 # ---------------------------------------------------------------- DMG

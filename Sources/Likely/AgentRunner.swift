@@ -199,7 +199,10 @@ final class CodexRunner: AgentRunner {
     }
 
     func cancel() {
+        let stopped = process
         stopProcess()
+        // Eval runs exit right after: let Codex finish writing its session file, then delete it now.
+        if AgentSessionCleanup.synchronous, let stopped { AgentSessionCleanup.waitForExit(stopped) }
         if let threadID { Self.deleteSession(threadID) }
         threadID = nil
         try? transcript?.close()
@@ -212,7 +215,7 @@ final class CodexRunner: AgentRunner {
     /// closes. Looked for in the folders of the last few days (local and UTC dates can differ).
     static func deleteSession(_ threadID: String, codexHome: URL = CodexRunner.codexHome, now: Date = Date()) {
         guard threadID.range(of: #"^[A-Za-z0-9-]+$"#, options: .regularExpression) != nil else { return }
-        DispatchQueue.global(qos: .utility).async {
+        AgentSessionCleanup.run {
             let fm = FileManager.default
             let sessions = codexHome.appendingPathComponent("sessions")
             let formatter = DateFormatter()
@@ -369,6 +372,14 @@ enum PhotoLibraries {
         return known
     }
 
+    /// Blocking: for `Likely --eval`, whose first case can't wait for a background scan.
+    static func refreshNow() {
+        let found = PhotoLibraryScan.find()
+        lock.lock()
+        known = found
+        lock.unlock()
+    }
+
     static func refresh() {
         lock.lock()
         guard !scanning else { return lock.unlock() }
@@ -395,5 +406,23 @@ extension CodexRunner {
               let models = json["models"] as? [[String: Any]] else { return ["gpt-5.6-luna", "gpt-5.6-terra"] }
         let slugs = models.compactMap { $0["slug"] as? String }.filter { $0.hasPrefix("gpt-") && $0 != "gpt-reserve" }
         return slugs.isEmpty ? ["gpt-5.6-luna", "gpt-5.6-terra"] : slugs
+    }
+}
+
+/// How agents' saved sessions (Codex's rollout files, Hermes' session store) are deleted: in the
+/// background for the app, synchronously in `Likely --eval`, which exits as soon as a run ends and
+/// would otherwise leave them behind.
+enum AgentSessionCleanup {
+    /// Set by EvalCLI before any runner starts.
+    static var synchronous = false
+
+    static func run(_ work: @escaping () -> Void) {
+        if synchronous { work() } else { DispatchQueue.global(qos: .utility).async(execute: work) }
+    }
+
+    /// Waits (at most `timeout`) for a stopped agent process to exit.
+    static func waitForExit(_ process: Process, timeout: TimeInterval = 3) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline { usleep(20_000) }
     }
 }

@@ -88,7 +88,7 @@ use it. For example, [rclip](https://github.com/yurijmikhalevich/rclip) finds ph
 "my headshot" works. Settings → Tools has a prompt to paste into your coding agent that installs a tool and
 adds it to `~/Library/Application Support/Likely/tools.json`. Commands run unattended inside the agent's
 read-only sandbox, and changes made outside Settings need your approval. See [docs/TOOLS.md](docs/TOOLS.md);
-to check a tool helps, run evals on your own files (below).
+to check a tool helps, run your tests (below).
 
 ## Privacy
 
@@ -102,13 +102,22 @@ expiry). Checkout goes through Stripe. Your files, search history, eval cases an
 Mac. Details:
 [Privacy Policy](https://synth-inc.github.io/likely/privacy.html) ([source](docs/privacy.html)).
 
-## Evals
+## Tests (evals)
 
-`Likely --eval fixtures --agent opencode` runs the public eval suite (synthetic files in `evals/fixtures`)
-headlessly through the app's real prompt and agent runner, and writes `results.json` + `report.html`.
-Eval mode, Settings → Evals and "Save as test" exist only in dev builds (`./build.sh`), not in release builds.
-Your own cases live in `~/Library/Application Support/Likely/evals/cases.jsonl` ("Save as test" in the bar above a
-picker, Settings → History → Make Eval, Settings → Evals, or automatic saving of picks). See [docs/EVALS.md](docs/EVALS.md).
+Save searches as tests ("Save as test" in the bar above a picker, Settings → History → Make Eval, Settings →
+Tests, or automatic saving of picks), then re-run them after adding a tool or editing the prompt to see
+whether results improved: **Settings → Tests → Run Tests…**, or from the command line (your coding agent
+can run it too):
+
+```sh
+/Applications/Likely.app/Contents/MacOS/Likely --eval personal --json
+```
+
+Turn on **Allow command-line test runs** in Settings → Tests first. It runs headlessly through the app's real prompt, agent runner and sandbox, writes `results.json` +
+`report.html`, and compares with your previous run. Release builds run only your own tests, with agents
+Likely detected; dev builds (`./build.sh`) also run the public suite (`--eval fixtures`, synthetic files in
+`evals/fixtures`) and take developer options. Your tests live in
+`~/Library/Application Support/Likely/evals/cases.jsonl`. See [docs/EVALS.md](docs/EVALS.md).
 
 Logs: `~/Library/Logs/Likely/likely.log`. Release builds leave out queries, window titles, paths and agent text
 unless Settings → General → "Log details for troubleshooting" is on (24 hours at most; it also logs every AX

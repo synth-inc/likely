@@ -31,11 +31,20 @@ public final class KeychainKeyStore: DataKeyStore {
     public let accessGroup: String
     let service: String
     let account: String
+    let label: String
+    let itemDescription: String
 
-    public init(accessGroup: String, service: String = KeychainKeyStore.service, account: String = KeychainKeyStore.defaultAccount) {
+    /// The account of the marker SettingsSeal stores once it has adopted the settings older versions saved.
+    public static let settingsAdoptedAccount = "settings-sealed"
+
+    public init(accessGroup: String, service: String = KeychainKeyStore.service, account: String = KeychainKeyStore.defaultAccount,
+                label: String = "Likely data key",
+                description: String = "Encrypts Likely's search history") {
         self.accessGroup = accessGroup
         self.service = service
         self.account = account
+        self.label = label
+        self.itemDescription = description
     }
 
     /// A context that never shows authentication UI.
@@ -67,8 +76,8 @@ public final class KeychainKeyStore: DataKeyStore {
         var query = baseQuery
         query[kSecValueData as String] = key
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        query[kSecAttrLabel as String] = "Likely data key"
-        query[kSecAttrDescription as String] = "Encrypts Likely's search history"
+        query[kSecAttrLabel as String] = label
+        query[kSecAttrDescription as String] = itemDescription
         return query
     }
 

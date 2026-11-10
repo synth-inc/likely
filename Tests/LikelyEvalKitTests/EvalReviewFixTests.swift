@@ -122,6 +122,18 @@ final class EvalResultTests: XCTestCase {
         XCTAssertEqual(summary.passRate, 0.5)
     }
 
+    func testSkippedTestsAreNeitherNowFailingNorNowPassing() {
+        let before = run(at: "2026-01-01", results: [result("shot", status: "ok", hit: true), result("old", status: "skipped", hit: false),
+                                                     result("a", status: "ok", hit: true)])
+        let after = run(at: "2026-01-02", results: [result("shot", status: "skipped", hit: false), result("old", status: "ok", hit: true),
+                                                    result("a", status: "ok", hit: false)])
+        let changes = EvalReport.caseChanges(after, before)
+        XCTAssertEqual(changes.broke, ["a"])
+        XCTAssertEqual(changes.fixed, [])
+        let lines = EvalReport.textSummary(after, previous: before).split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.filter { $0.contains("now failing") || $0.contains("now passing") }, ["  now failing: a"])
+    }
+
     func testMismatches() {
         let now = run(at: "2026-01-02")
         XCTAssertEqual(now.mismatches(with: run(at: "2026-01-01")), [])

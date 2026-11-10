@@ -191,6 +191,18 @@ final class ToolPromptsTests: XCTestCase {
         XCTAssertEqual(ToolPrompts.example.problems, [])
     }
 
+    func testSetupPromptTellsTheCodingAgentHowToMeasureTheTool() {
+        let command = "/Applications/Likely.app/Contents/MacOS/Likely --eval personal"
+        let prompt = ToolPrompts.setupPrompt(request: "image search", testCommand: command)
+        XCTAssertTrue(prompt.contains(command + " --json"))
+        for text in ["Before adding the tool", "again", "comparison.toolChanges", "pendingApproval", "Exit status 0"] {
+            XCTAssertTrue(prompt.contains(text), text)
+        }
+        XCTAssertTrue(prompt.hasSuffix("What I want: image search"))
+        // Without a command (tests, docs) there's no such section.
+        XCTAssertFalse(ToolPrompts.setupPrompt.contains("--eval"))
+    }
+
     func testSetupPromptHasSchemaAndRules() throws {
         let prompt = ToolPrompts.setupPrompt
         XCTAssertTrue(prompt.contains("~/Library/Application Support/Likely/tools.json"))

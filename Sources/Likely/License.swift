@@ -90,6 +90,11 @@ enum License {
         #endif
     }
 
+    /// Whether Likely may search (and run tests): the one place that decides it, for the app's pickers
+    /// and `Likely --eval`. Today the cached entitlement (no network, no UI); a server-signed license
+    /// can replace it here.
+    static func permitsSearches() -> Bool { isActive }
+
     /// Readable from any thread (AppDelegate at launch, onboarding). `LicenseStore` keeps the cache fresh.
     static var isActive: Bool { isFreeBuild || devOverride != nil || Cached.load()?.trusted() == true }
 

@@ -222,8 +222,20 @@ public enum EvalCaseFile {
 
     public static func load(_ url: URL) throws -> (cases: [EvalCase], errors: [LoadError]) {
         guard FileManager.default.fileExists(atPath: url.path) else { return ([], []) }
-        let text = try String(contentsOf: url, encoding: .utf8)
+        // Under the folder's lock: an append in another process (the app saving a test while an eval
+        // run reads the file) is never seen half written.
+        // Readers never create the lock file: a fixtures file or one in an app bundle gets none.
+        let text = try FileLock.withLockIfPresent(lockURL(for: url)) { try String(contentsOf: url, encoding: .utf8) }
         return parse(text)
+    }
+
+    /// The cross-process lock for a cases file's folder (cases.jsonl and drafts.jsonl share it).
+    public static func lockURL(for url: URL) -> URL { FileLock.url(for: url.deletingLastPathComponent()) }
+
+    /// Runs `body` holding the lock for `url`'s folder (see FileLock): reads, then writes, that must not
+    /// interleave with another Likely process's.
+    public static func withLock<T>(_ url: URL, _ body: () throws -> T) rethrows -> T {
+        try FileLock.withLock(lockURL(for: url), body)
     }
 
     public static func parse(_ text: String) -> (cases: [EvalCase], errors: [LoadError]) {
@@ -263,10 +275,12 @@ public enum EvalCaseFile {
     /// lines, and lines this version can't parse. If no line has that id, `replacement` is appended.
     /// Writes atomically.
     public static func replace(id: String, with replacement: EvalCase?, in url: URL) throws {
-        let fm = FileManager.default
-        let text = fm.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : ""
-        let updated = replacing(id: id, with: replacement, in: text)
-        try OwnerOnly.write(Data(updated.utf8), to: url)
+        try withLock(url) {
+            let fm = FileManager.default
+            let text = fm.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : ""
+            let updated = replacing(id: id, with: replacement, in: text)
+            try OwnerOnly.write(Data(updated.utf8), to: url)
+        }
     }
 
     /// The text of a cases file with one case replaced or removed (see `replace(id:with:in:)`).
@@ -293,6 +307,11 @@ public enum EvalCaseFile {
     /// Adds one case at the end of the file. The file is created only if it doesn't exist; an
     /// existing file is never truncated.
     public static func append(_ c: EvalCase, to url: URL) throws {
+        try OwnerOnly.createDirectory(url.deletingLastPathComponent())
+        try withLock(url) { try appendLocked(c, to: url) }
+    }
+
+    private static func appendLocked(_ c: EvalCase, to url: URL) throws {
         // Owner-only (0600) from creation; never truncates a file another writer created meanwhile.
         do {
             try OwnerOnly.createExclusive(url)
@@ -326,9 +345,13 @@ public enum EvalCaseFile {
 /// Where personal cases, drafts and results live: ~/Library/Application Support/Likely/evals.
 public enum EvalStorage {
     public static var root: URL {
+        // Dev builds (and the CLI test build) may point it elsewhere. Release builds never do: their
+        // `--eval personal` reads only the user's own cases, in the protected data folder.
+        #if LIKELY_DEV || LIKELY_EVAL_TEST_SEAM
         if let override = ProcessInfo.processInfo.environment["LIKELY_EVALS_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
         }
+        #endif
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely/evals", isDirectory: true)
     }
@@ -339,6 +362,78 @@ public enum EvalStorage {
     /// id don't overwrite each other's files), plus `-<attempt>` when cases are repeated.
     public static func caseFolderName(index: Int, id: String, attempt: Int, repeated: Bool) -> String {
         String(format: "%03d-", index + 1) + EvalCase.slug(id, fallback: "case") + (repeated ? "-\(attempt)" : "")
+    }
+
+    /// Held (FileLock.tryHold) for the whole of an eval run, so only one runs at a time: the app's
+    /// Settings and the user's coding agent can both start one, and they'd share the runs folder,
+    /// last-run.txt and Hermes' eval gateway.
+    public static var runLockURL: URL { root.appendingPathComponent(".run.lock") }
+
+    /// Folders a run writes in that must not be symlinks (a link could send results, transcripts and
+    /// decrypted data somewhere else): `evals/` and `evals/runs/`. Only the data folder itself may be
+    /// one (Application Support/Likely → Likely.noindex, see SpotlightExclusion). Returns the first
+    /// offending path.
+    public static func symlinkedFolder(root: URL = EvalStorage.root) -> String? {
+        for url in [root, root.appendingPathComponent("runs")] {
+            var st = stat()
+            if lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFLNK { return url.path }
+        }
+        return nil
+    }
+
+    /// A new run folder `<time>-<agent>-<model>` in `runs`, created (0700) with mkdir so it's never one
+    /// that exists: `-2`, `-3`, … when two runs start in the same second. Times use en_US_POSIX.
+    public static func makeRunFolder(in runs: URL = EvalStorage.runsURL, date: Date, agent: String, model: String) throws -> URL {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let safeModel = String(model.map { $0.isLetter || $0.isNumber || "._-".contains($0) ? $0 : "_" }.prefix(60))
+        let base = "\(f.string(from: date))-\(EvalCase.slug(agent, fallback: "agent"))-\(safeModel)"
+        try OwnerOnly.createDirectory(runs)
+        for n in 1...1000 {
+            let url = runs.appendingPathComponent(n == 1 ? base : "\(base)-\(n)", isDirectory: true)
+            if mkdir(url.path, OwnerOnly.directoryMode) == 0 {
+                chmod(url.path, OwnerOnly.directoryMode)
+                return url
+            }
+            guard errno == EEXIST else { throw OwnerOnly.Failure("Can't create", url.path) }
+        }
+        throw OwnerOnly.Failure("Can't create", runs.appendingPathComponent(base).path, errno: EEXIST)
+    }
+
+    /// Runs kept: the newest `keep`, and none older than `maxAge` (see docs/PRIVACY.md). `protected`
+    /// (the run just written, the one it compared with) are always kept.
+    public static let keptRuns = 20
+    public static let maxRunAge: TimeInterval = 30 * 24 * 3600
+
+    /// Which of `runs` (folder, start time) to delete.
+    public static func runsToPrune(_ runs: [(url: URL, date: Date)], now: Date = Date(), keep: Int = keptRuns,
+                                   maxAge: TimeInterval = maxRunAge, protected: [URL] = []) -> [URL] {
+        let protectedPaths = Set(protected.map(\.standardizedFileURL.path))
+        let newestFirst = runs.sorted { $0.date > $1.date }
+        return newestFirst.enumerated().compactMap { index, run in
+            if protectedPaths.contains(run.url.standardizedFileURL.path) { return nil }
+            return index >= keep || now.timeIntervalSince(run.date) > maxAge ? run.url : nil
+        }
+    }
+
+    /// Deletes old runs from `runs`: only real folders (no symlinks) that hold a results.json or are
+    /// named like a run. Returns how many were deleted.
+    @discardableResult
+    public static func pruneRuns(in runs: URL = EvalStorage.runsURL, now: Date = Date(), protected: [URL] = []) -> Int {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: runs.path)) ?? []
+        var found: [(url: URL, date: Date)] = []
+        for name in names where name.range(of: #"^\d{8}-\d{6}-"#, options: .regularExpression) != nil {
+            let url = runs.appendingPathComponent(name, isDirectory: true)
+            var st = stat()
+            guard lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { continue }
+            let date = Date(timeIntervalSince1970: TimeInterval(st.st_mtimespec.tv_sec))
+            found.append((url, date))
+        }
+        var removed = 0
+        for url in runsToPrune(found, now: now, protected: protected) where (try? fm.removeItem(at: url)) != nil { removed += 1 }
+        return removed
     }
 
     /// Path of the newest run's report, written after every run.

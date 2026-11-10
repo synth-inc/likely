@@ -287,8 +287,8 @@ public enum AgentSessions: String, CaseIterable {
         // Sessions, messages and their attachments live in opencode.db and storage/ (older versions);
         // the folder also holds OpenCode's credentials.
         case .opencode: return [home + "/.local/share/opencode"]
-        // Likely's own Hermes profile: its session database and logs.
-        case .hermes: return [home + "/.hermes/profiles/likely"]
+        // Likely's own Hermes profiles (the app's, and the one test runs use): session databases and logs.
+        case .hermes: return [home + "/.hermes/profiles/likely", home + "/.hermes/profiles/likely-eval"]
         }
     }
 

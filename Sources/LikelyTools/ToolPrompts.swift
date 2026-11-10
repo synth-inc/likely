@@ -69,8 +69,29 @@ public enum ToolPrompts {
     `cd ~ && rclip -n -t 5 "a photo of a dog"` prints results, then add the example rclip entry above to tools.json, enabled.
     """
 
+    /// How the coding agent measures the tool with the user's saved tests (`Likely --eval personal`),
+    /// given the command that runs them (this app's executable plus `--eval personal`).
+    public static func measureSection(testCommand: String) -> String {
+        """
+        Measure the effect. Likely can re-run my saved tests (searches I saved from real use, with the files I \
+        actually wanted) from the command line, without opening a window, even while it's running:
+        \(testCommand) --json
+        1. Before adding the tool, run it once and keep the output.
+        2. After I've approved the tool in Likely → Settings → Tools, run it again (it compares itself with the \
+        previous run).
+        3. Report the difference: summary.passed / summary.scored before and after, comparison.nowPassing and \
+        comparison.nowFailing, and comparison.toolChanges (it should list +<your tool id>). If \
+        tools.pendingApproval lists the tool, I haven't approved it yet and the run didn't use it.
+        Exit status 0 means the run completed, whatever the pass rate; 1 is an error (see "error": for example, no \
+        saved tests yet, in which case skip this), 2 a usage error, 3 Likely isn't licensed, 4 command-line runs are \
+        off (ask me to turn on “Allow command-line test runs” in Likely → Settings → Tests). Each test sends its \
+        query to my search agent's provider, as using Likely does, and can take up to two minutes. Run one at a time.
+        """
+    }
+
     /// The setup prompt with "What I want:" filled in (empty `request` leaves it for the user).
-    public static func setupPrompt(request: String) -> String {
+    /// `testCommand`: the command that runs the user's tests (see `measureSection`); nil leaves that out.
+    public static func setupPrompt(request: String, testCommand: String? = nil) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let path = AgentPath.directories(agentExecutable: nil, inherited: nil, home: home)
             .map { $0.hasPrefix(home) ? "~" + $0.dropFirst(home.count) : $0 }
@@ -124,7 +145,7 @@ public enum ToolPrompts {
         search agent's PATH is \(path), so the tool must be found in one of those.
         3. Add the entry, check that the file is valid JSON (e.g. `python3 -m json.tool ~/"Library/Application Support/Likely/tools.json"`), tell me \
         what you added, and remind me to approve it in Likely → Settings → Tools.
-
+        \(testCommand.map { "\n" + measureSection(testCommand: $0) } ?? "")
         What I want: \(request)
         """
     }

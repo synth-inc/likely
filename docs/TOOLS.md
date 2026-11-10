@@ -12,7 +12,7 @@ Tools live in one file, the source of truth:
 ```
 
 Edit it in Settings → Tools, by hand, or let a coding agent do it (Settings → Tools → "Set up with your
-coding agent" has a prompt to paste). Likely watches the file and checks it again before each search. If
+coding agent" has a prompt to paste; it also tells the agent how to measure the tool with your tests). Likely watches the file and checks it again before each search. If
 the file is missing, there are no extra tools; if it isn't valid JSON, Likely logs why
 (`~/Library/Logs/Likely/likely.log`), shows it in the Tools tab and uses only the built-in commands.
 
@@ -25,6 +25,33 @@ instructions and `needs` in its preferences, which no agent can write. So a tool
 Likely can't quietly ask for your Mail: a changed `needs` waits for approval like a new command. While a
 tool waits, its switch and its **Allow…** button are off: only Approve, which shows the whole change,
 makes it usable. Switching a tool on or off never approves anything.
+
+## Measure what a tool adds
+
+Your saved tests (see [EVALS.md](EVALS.md)) tell you whether a tool actually helps:
+
+1. **Save misses as tests.** When Likely doesn't find the file, click "Save as test" in the bar above the
+   picker, or use **Make Eval** in Settings → History, so the search and the file you wanted become a test.
+2. **Run the tests once** (Settings → Tests → Run Tests…, or the command below) to have a baseline.
+3. **Add the tool** (or edit a tool's instructions, or the prompt), and **approve** it in Settings → Tools.
+4. **Run them again.** The result compares itself with the previous run: how many pass now, which tests
+   started or stopped passing, and "tools changed: +rclip". **Without your tools** (`--without-tools`) shows
+   what all your tools add together.
+
+A coding agent can do steps 2-4 for you: the "Set up with your coding agent" prompt in Settings → Tools
+tells it to run
+
+```sh
+/Applications/Likely.app/Contents/MacOS/Likely --eval personal --json
+```
+
+before and after adding the tool and report the difference (`summary.passed`, `comparison.nowPassing`,
+`comparison.toolsChanged`; field list and exit codes in [EVALS.md](EVALS.md#from-the-command-line-or-your-coding-agent)).
+Settings → Tests shows the exact command for your copy of Likely, with **Copy Command** and **Copy for Coding
+Agent**; turn on **Allow command-line test runs** there first (off by default; the command exits with status
+4 until then). A tool the agent added waits for your Approve, and the run lists it under
+`tools.pendingApproval` and doesn't use it until then: the agent can't approve it, and can't make the run
+use anything but your approved tools, the agents Likely found and your saved prompt.
 
 ## Schema
 
@@ -182,8 +209,9 @@ So with tools on, a tool that needs to write (a cache, an index) or, under Codex
 at run time, whichever agent runs it. Do that work in the tool's setup, outside Likely. (`rclip -n` was
 checked to work this way under Claude Code, Gemini CLI and OpenCode.)
 
-Evals (`--eval`, dev builds) run your personal cases with your tools, as the app does, and the public
-fixture suite without them unless you pass `--with-tools`; each run records which tools it used. See
+Tests (`--eval`, Settings → Tests) run your personal cases with your tools, as the app does (or without them,
+`--without-tools`), and the public fixture suite (dev builds) without them unless you pass `--with-tools`;
+each run records which tools it used. See
 [EVALS.md](EVALS.md#your-tools).
 
 ## Worked example: image search with rclip

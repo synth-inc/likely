@@ -14,7 +14,7 @@ public enum OwnerOnly {
 
     public struct Failure: Error, CustomStringConvertible {
         public let description: String
-        init(_ what: String, _ path: String, errno code: Int32 = errno) {
+        public init(_ what: String, _ path: String, errno code: Int32 = errno) {
             description = "\(what) \(path): \(String(cString: strerror(code)))"
         }
     }

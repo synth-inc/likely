@@ -24,6 +24,8 @@ struct SettingsView: View {
     @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
+        VStack(spacing: 8) {
+        ProtectedSettingsWarning()
         TabView(selection: $navigation.tab) {
             GeneralSettings(actions: actions).tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsNavigation.Tab.general)
             AgentSettings().tabItem { Label("Agent", systemImage: "sparkle.magnifyingglass") }.tag(SettingsNavigation.Tab.agent)
@@ -31,12 +33,11 @@ struct SettingsView: View {
             ToolsSettings().tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }.tag(SettingsNavigation.Tab.tools)
             PermissionSettings().tabItem { Label("Permissions", systemImage: "lock.shield") }.tag(SettingsNavigation.Tab.permissions)
             HistorySettings().tabItem { Label("History", systemImage: "clock.arrow.circlepath") }.tag(SettingsNavigation.Tab.history)
-            #if LIKELY_DEV
-            EvalsSettings().tabItem { Label("Evals", systemImage: "checklist") }.tag(SettingsNavigation.Tab.evals)
-            #endif
+            EvalsSettings().tabItem { Label("Tests", systemImage: "checklist") }.tag(SettingsNavigation.Tab.evals)
             if MenuBarGlyph.isDebugEnabled {
                 DebugSettings().tabItem { Label("Debug", systemImage: "ladybug") }.tag(SettingsNavigation.Tab.debug)
             }
+        }
         }
         .padding(20)
         .frame(width: 680, height: 520)
@@ -269,9 +270,10 @@ private struct LicenseSection: View {
 
 private struct AgentSettings: View {
     @ObservedObject private var agents = AgentDetector.shared
-    @AppStorage("agentID") private var agentID = "claude"
-    @AppStorage("model") private var model = "sonnet"
-    @AppStorage("codexModel") private var codexModel = "gpt-5.6-luna"
+    // Sealed settings (ProtectedSettings): read and written through Settings, never @AppStorage.
+    @State private var agentID = Settings.agentID
+    @State private var model = Settings.model
+    @State private var codexModel = Settings.codexModel
     @AppStorage("geminiVertexProject") private var geminiProject = ""
     @AppStorage("geminiVertexLocation") private var geminiLocation = "global"
     @State private var modelRefresh = 0
@@ -318,8 +320,8 @@ private struct AgentSettings: View {
             if ["gemini", "opencode", "hermes"].contains(agentID) {
                 Section(AgentKind.with(id: agentID)?.name ?? "Agent") {
                     Picker("Model", selection: Binding(
-                        get: { UserDefaults.standard.string(forKey: AgentModels.key(for: agentID)) ?? AgentModels.defaultModel(for: agentID) },
-                        set: { UserDefaults.standard.set($0, forKey: AgentModels.key(for: agentID)); modelRefresh += 1 })) {
+                        get: { AgentModels.selected(for: agentID) },
+                        set: { AgentModels.select($0, for: agentID); modelRefresh += 1 })) {
                         ForEach(AgentModels.available(for: agentID), id: \.self) { Text($0).tag($0) }
                     }
                     .id(modelRefresh)
@@ -347,6 +349,16 @@ private struct AgentSettings: View {
         }
         .formStyle(.grouped)
         .onAppear { if agents.paths.isEmpty { agents.scan() } }
+        .onChange(of: agentID) { _, id in if Settings.agentID != id { Settings.agentID = id } }
+        .onChange(of: model) { _, m in if Settings.model != m { Settings.model = m } }
+        .onChange(of: codexModel) { _, m in if Settings.codexModel != m { Settings.codexModel = m } }
+        // Kept or reset in the notice above the tabs: show what's now in effect.
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in
+            agentID = Settings.agentID
+            model = Settings.model
+            codexModel = Settings.codexModel
+            modelRefresh += 1
+        }
     }
 }
 
@@ -354,6 +366,10 @@ private struct AgentSettings: View {
 
 private struct PromptSettings: View {
     @State private var text = Settings.promptTemplate
+    /// The saved prompt couldn't be verified (ProtectedSettings): searches use the default, and this
+    /// editor neither shows nor saves anything until the user keeps it or chooses the default.
+    @State private var unverified = ProtectedSettings.isIgnored(ProtectedSettings.promptTemplate)
+    @State private var reviewing: ProtectedValueReview.Item?
     @AppStorage("includeUserName") private var includeUserName = true
 
     var body: some View {
@@ -362,15 +378,39 @@ private struct PromptSettings: View {
                 Text("Instructions sent to your agent each time a picker opens.").foregroundStyle(.secondary)
                 Spacer()
                 Button("Reset to Default") { text = PromptTemplate.default }
-                    .disabled(text == PromptTemplate.default)
+                    .disabled(unverified || text == PromptTemplate.default)
             }
-            TextEditor(text: $text)
-                .font(.system(size: 12, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-                .onChange(of: text) { _, value in Settings.promptTemplate = value }
+            if unverified {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Your saved prompt couldn't be verified", systemImage: "exclamationmark.shield")
+                        .font(.headline).foregroundStyle(.orange)
+                    Text("It was changed outside this copy of Likely, saved by a build that can't protect settings, or the Keychain didn't answer. Searches use the default prompt for now. Editing is off so your saved prompt isn't overwritten: look at it and keep it, or use the default.")
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Keep This Value…") {
+                            if let value = ProtectedSettings.storedValue(ProtectedSettings.promptTemplate) {
+                                reviewing = .init(key: ProtectedSettings.promptTemplate, value: value)
+                            } else {
+                                reload()
+                            }
+                        }
+                        Button("Use Default") { ProtectedSettings.useDefault(ProtectedSettings.promptTemplate) }
+                        Button("Try Again") { ProtectedSettings.retry() }
+                    }
+                    .controlSize(.small)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            } else {
+                TextEditor(text: $text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                    .onChange(of: text) { _, value in save(value) }
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text("Placeholders").font(.caption.bold())
                 ForEach(PromptTemplate.placeholders, id: \.name) { item in
@@ -383,6 +423,24 @@ private struct PromptSettings: View {
             Text("Sends your full name (\(NSFullUserName())) as {{userName}} so the agent can recognize your own documents. Prompts without {{userName}} never include it.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .sheet(item: $reviewing) { item in ProtectedValueReview(item: item) }
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in reload() }
+    }
+
+    /// Autosave, unless the saved prompt became unverifiable meanwhile (changed outside Likely while
+    /// this was open): then nothing is written over it.
+    private func save(_ value: String) {
+        guard !unverified else { return }
+        if ProtectedSettings.isIgnored(ProtectedSettings.promptTemplate) {
+            unverified = true
+            return
+        }
+        if value != Settings.promptTemplate { Settings.promptTemplate = value }
+    }
+
+    private func reload() {
+        unverified = ProtectedSettings.isIgnored(ProtectedSettings.promptTemplate)
+        if !unverified { text = Settings.promptTemplate }
     }
 }
 
@@ -479,7 +537,7 @@ private struct PrivateDataSection: View {
 /// Extra command-line tools for the agent, stored in tools.json (see ToolStore, docs/TOOLS.md).
 private struct ToolsSettings: View {
     @ObservedObject private var store = ToolStore.shared
-    @AppStorage("agentID") private var agentID = "claude"
+    @State private var agentID = Settings.agentID
     @State private var editing: ToolDraft?
     @State private var deleting: CustomTool?
     @State private var testResults: [String: [ToolCheck]] = [:]
@@ -505,6 +563,11 @@ private struct ToolsSettings: View {
             if !store.pending.isEmpty {
                 Section {
                     ApprovalBanner(pending: store.pending, approve: store.approvePending)
+                }
+            }
+            if let problem = store.approvalsProblem {
+                Section {
+                    Text(problem).font(.caption).foregroundStyle(.orange)
                 }
             }
             if let needsProblem {
@@ -624,10 +687,10 @@ private struct ToolsSettings: View {
             }
 
             Section("Set up with your coding agent") {
-                Text("Paste this into Claude Code, Codex or another coding agent and say what you want. It installs the tool, checks it works, and adds it to tools.json; Likely picks it up automatically.")
+                Text("Paste this into Claude Code, Codex or another coding agent and say what you want. It installs the tool, checks it works, and adds it to tools.json; Likely picks it up automatically. It also runs your saved tests before and after (Settings → Tests), so you see whether results improved.")
                     .font(.caption).foregroundStyle(.secondary)
                 ScrollView {
-                    Text(ToolPrompts.setupPrompt)
+                    Text(ToolPrompts.setupPrompt(request: "", testCommand: EvalCommand.command))
                         .font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -641,7 +704,7 @@ private struct ToolsSettings: View {
                     if copied { Text("Copied").font(.caption).foregroundStyle(.secondary) }
                     Button("Copy") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(ToolPrompts.setupPrompt, forType: .string)
+                        NSPasteboard.general.setString(ToolPrompts.setupPrompt(request: "", testCommand: EvalCommand.command), forType: .string)
                         copied = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
                     }
@@ -658,6 +721,7 @@ private struct ToolsSettings: View {
             detectRclip()
             disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
         }
+        .onReceive(NotificationCenter.default.publisher(for: ProtectedSettings.didChange)) { _ in agentID = Settings.agentID }
         .sheet(isPresented: $settingUpPhotos) {
             PhotoSearchSetupSheet(installed: rclipInstalled, checkAgain: detectRclip) { settingUpPhotos = false }
         }
@@ -966,7 +1030,7 @@ private struct PhotoSearchSetupSheet: View {
     let checkAgain: () -> Void
     let done: () -> Void
     @State private var copied = false
-    private let prompt = ToolPrompts.setupPrompt(request: ToolPrompts.photoSearchRequest)
+    private let prompt = ToolPrompts.setupPrompt(request: ToolPrompts.photoSearchRequest, testCommand: EvalCommand.command)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
