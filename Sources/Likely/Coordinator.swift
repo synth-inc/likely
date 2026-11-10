@@ -731,6 +731,13 @@ enum Settings {
         get { UserDefaults.standard.bool(forKey: "onboardingCompleted") }
         set { UserDefaults.standard.set(newValue, forKey: "onboardingCompleted") }
     }
+    /// The user continued past the welcome screen, which says Likely registers an anonymous install ID
+    /// with the license server. Nothing reaches that server before this. Anyone who finished onboarding
+    /// before the notice existed counts as having seen it.
+    static var sawServerNotice: Bool {
+        get { UserDefaults.standard.bool(forKey: "sawServerNotice") || onboarded }
+        set { UserDefaults.standard.set(newValue, forKey: "sawServerNotice") }
+    }
     /// Folders the user added with "Add Folder…" (paths).
     static var extraSearchFolders: [String] {
         get { UserDefaults.standard.stringArray(forKey: "extraSearchFolders") ?? [] }

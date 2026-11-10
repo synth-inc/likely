@@ -58,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         MainActor.assumeIsolated {
             LicenseStore.shared.onActiveChange = { [weak self] active in self?.licenseChanged(active: active) }
+            // Waits for the welcome screen's notice on a fresh install (see `License.mayContactServer`);
+            // onboarding starts it once the user continues past that screen.
             LicenseStore.shared.startPeriodicChecks()
         }
     }
@@ -68,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let url = urls.first(where: { $0.scheme == "likely" }) else { return }
         Log.write("app", "opened by \(meta: url.scheme)://\(meta: url.host)")
         Task { @MainActor in
+            // Not past the welcome notice yet: show it rather than skipping ahead to the license page.
+            guard License.mayContactServer || License.isFreeBuild else { return self.showOnboarding() }
             await LicenseStore.shared.refresh()
             if !Settings.onboarded || !License.isActive || OnboardingWindowManager.shared.isVisible {
                 self.showLicense()
@@ -297,11 +301,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Onboarding opened straight on the license page (lapsed subscription, "Buy…" in Settings).
     func showLicense() {
+        // Before the welcome screen's notice, `showOnboarding` starts there instead.
         if !License.isFreeBuild { LikelyOnboardingStep.saved = .license }
         showOnboarding()
     }
 
     @objc func showOnboarding() {
+        // Nothing past the welcome screen (license page included) until its install-ID notice was seen.
+        if !License.isFreeBuild && !Settings.sawServerNotice { LikelyOnboardingStep.saved = .welcome }
         Log.write("app", "showing onboarding at step \(meta: LikelyOnboardingStep.saved.rawValue)")
         CopyEditor.shared.saveURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely/debug/onboarding-copy.json")

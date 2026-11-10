@@ -103,7 +103,12 @@ struct LikelyOnboardingView: View {
         OnboardingPage(
             nextButtonText: "Get Started",
             nextButtonIcon: "arrow.right",
-            onNext: { step = .permissions },
+            onNext: {
+                // The footer's install-ID notice has been shown: the license server may now hear from us.
+                Settings.sawServerNotice = true
+                LicenseStore.shared.startPeriodicChecks()
+                step = .permissions
+            },
             headerContent: {
                 OnboardingTitlePill(systemIcon: "doc.viewfinder", text: "Likely")
                 OnboardingTitle("Why doesn't macOS do this?")
@@ -112,7 +117,8 @@ struct LikelyOnboardingView: View {
                 OnboardingDemoVideo(url: demoVideoURL)
                     .padding(.top, 22)
                     .padding(.bottom, 24)
-            }
+            },
+            footerContent: { WelcomeLegalNotice() }
         )
     }
 
@@ -368,6 +374,7 @@ struct LikelyOnboardingView: View {
                         .disabled(restoring)
                         if restoring { ProgressView().controlSize(.small) }
                     }
+                    LegalLinks()
                     if copyEditor.isEnabled {
                         Button("Aa Fonts") { showFontTweaker.toggle() }
                             .popover(isPresented: $showFontTweaker, arrowEdge: .top) {
@@ -424,6 +431,14 @@ struct LikelyOnboardingView: View {
                 .multilineTextAlignment(.center)
                 .frame(width: 420)
                 .fixedSize(horizontal: false, vertical: true)
+            if let disclosure = plan.disclosure {
+                Text(disclosure)   // legal copy: not copy-editable
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .multilineTextAlignment(.center)
+                    .frame(width: 420)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Group {
                 if licensed && licenseStore.activeKind == plan.kind {
                     Label("Active", systemImage: "checkmark.seal.fill")

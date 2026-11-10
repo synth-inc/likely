@@ -56,6 +56,8 @@ actor LicenseClient {
         case unavailable
         case server(status: Int, message: String?)
         case badResponse
+        /// The user hasn't seen the welcome screen's install-ID notice yet (`License.mayContactServer`).
+        case notYet
 
         var errorDescription: String? {
             switch self {
@@ -64,6 +66,7 @@ actor LicenseClient {
             // Server messages are developer-facing (zod validation etc.), so they only go to the log.
             case .server(let status, _): return "The Likely server returned an error (\(status)). Try again later."
             case .badResponse: return "The Likely server sent a response Likely didn't understand."
+            case .notYet: return "Finish setting up Likely first."
             }
         }
     }
@@ -115,6 +118,9 @@ actor LicenseClient {
     }
 
     private func login() async throws -> String {
+        // Every server call starts here (or with a token from an earlier login), so this one check
+        // covers entitlements, checkout, billing portal and restore.
+        guard License.mayContactServer else { throw ClientError.notYet }
         if let loginTask { return try await loginTask.value }
         let task = Task { () throws -> String in
             struct Body: Encodable { let app: String; let installId: String }
