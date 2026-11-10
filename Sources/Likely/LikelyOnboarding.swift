@@ -111,7 +111,7 @@ struct LikelyOnboardingView: View {
             },
             headerContent: {
                 OnboardingTitlePill(systemIcon: "doc.viewfinder", text: "Likely")
-                OnboardingTitle("Why doesn't macOS do this?")
+                OnboardingTitle("Why doesn't macOS already do this?")
             },
             bodyContent: {
                 OnboardingDemoVideo(url: demoVideoURL)
@@ -132,13 +132,13 @@ struct LikelyOnboardingView: View {
             nextDisabled: !state.accessibility,
             onNext: { step = .folders },
             headerContent: {
-                OnboardingTitle("Permissions", subtitle: "Likely needs one permission to work with file pickers.")
+                OnboardingTitle("Can I have your permission?", subtitle: "Likely needs one permission to work with file pickers.")
             },
             bodyContent: {
                 VStack(alignment: .leading, spacing: 0) {
                     OnboardingPermissionRow(
                         icon: "accessibility", title: "Accessibility",
-                        description: "Lets Likely notice when a file picker opens, and jump it to your Likely folder.",
+                        description: "So Likely knows when a file picker is open.",
                         isGranted: state.accessibility, shouldPulse: hasCheckedInitially,
                         action: Permissions.requestAccessibility)
                 }
@@ -157,8 +157,8 @@ struct LikelyOnboardingView: View {
             nextButtonText: "Continue",
             onNext: { step = .likelyFolder },
             headerContent: {
-                OnboardingTitle("Let Likely search your files",
-                                subtitle: "macOS asks once for each folder. Likely only reads;\nit never changes or deletes anything.")
+                OnboardingTitle("Where should Likely search?",
+                                subtitle: "Likely only reads. It never changes or deletes anything.")
             },
             bodyContent: {
                 ScrollView {
@@ -182,8 +182,8 @@ struct LikelyOnboardingView: View {
             nextDisabled: !state.likelyFolderPinned,
             onNext: { step = .agent },
             headerContent: {
-                OnboardingTitle("One folder, every file picker",
-                                subtitle: "Likely puts its suggestions in a Likely folder.\nAdd it to your Finder sidebar so it's one click away in every picker.")
+                OnboardingTitle("Set your Likely folder",
+                                subtitle: "Suggested files will show up here. Add it to the Finder sidebar.")
             },
             bodyContent: {
                 // Fixed at ~/Likely: outside the macOS-protected folders, so it keeps working even if
@@ -245,7 +245,7 @@ struct LikelyOnboardingView: View {
             },
             headerContent: {
                 OnboardingTitle("Choose your agent",
-                                subtitle: "Likely uses a coding agent already on your Mac to find files.\nIt runs with read-only tools and uses your own account.")
+                                subtitle: "Likely uses an agent already on your Mac to find files.\nIt uses read-only tools and runs on your personal account.")
             },
             bodyContent: {
                 VStack(alignment: .leading, spacing: 10) {
