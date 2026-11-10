@@ -1,9 +1,9 @@
 #!/bin/bash
-# Builds Likely.app into ./build. Signs with an "Apple Development" identity so Accessibility /
-# Screen Recording grants survive rebuilds (ad-hoc signatures change every build).
+# Builds Likely.app into ./build. Signs with an "Apple Development" identity so the
+# Accessibility grant survives rebuilds (ad-hoc signatures change every build).
 #
 # Without a provisioning profile, the app has no keychain access group, so encryption of search
-# history and test screenshots is off (docs/BUILDING.md, docs/PRIVACY.md). With one (LIKELY_PROFILE),
+# history is off (docs/BUILDING.md, docs/PRIVACY.md). With one (LIKELY_PROFILE),
 # the profile is embedded as Contents/embedded.provisionprofile and the app is signed with the
 # entitlements scripts/provisioning.py makes from Likely.entitlements and the profile: encryption on.
 #

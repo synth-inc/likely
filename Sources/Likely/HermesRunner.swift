@@ -17,9 +17,9 @@ import LikelyTools
 ///   denied so nothing can hand work to launchd;
 /// - a daemon for the profile that isn't sandboxed (the user ran `hermes -p likely` by hand) is stopped.
 ///
-/// The screenshot is viewed with the `vision_analyze` tool (`--image` isn't supported by the gateway
-/// client). Feedback continues the same named session with `-c`; a turn in flight can't be stopped
-/// from the CLI, so the gateway finishes it (read-only) and then answers the feedback.
+/// Images are viewed with the `vision_analyze` tool. Feedback continues the same named session with
+/// `-c`; a turn in flight can't be stopped from the CLI, so the gateway finishes it (read-only) and
+/// then answers the feedback.
 final class HermesRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -57,13 +57,16 @@ final class HermesRunner: AgentRunner {
     }
 
     /// `--source tool` keeps these sessions out of the user's session lists; `--ignore-rules` skips
-    /// SOUL.md/AGENTS.md/memory. terminal = shell (mdfind etc.), file = read_file/search_files,
-    /// vision = vision_analyze for the screenshot. Writes from any of them are stopped by the sandbox.
-    static let toolsets = ["terminal", "file", "vision"]
-    private static let baseArguments = ["chat", "--format", "stream-json", "--source", "tool", "--ignore-rules",
-                                        "-t", toolsets.joined(separator: ",")]
+    /// SOUL.md/AGENTS.md/memory. Toolsets (AgentBuiltins.hermesToolsets, minus the ones turned off in
+    /// Settings): terminal = shell (mdfind etc.), file = read_file/search_files, vision = vision_analyze
+    /// for images. Writes from any of them are stopped by the sandbox. A session keeps the toolsets it
+    /// was created with; each search creates a new one.
+    private var baseArguments: [String] {
+        ["chat", "--format", "stream-json", "--source", "tool", "--ignore-rules",
+         "-t", AgentBuiltins.hermesToolsets(disabled: launchOptions.disabledBuiltins(for: "hermes")).joined(separator: ",")]
+    }
 
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
         self.executable = executable
         self.model = model
@@ -72,10 +75,8 @@ final class HermesRunner: AgentRunner {
         let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var prompt = prompt
-        if let image { prompt += "\n\nThe screenshot is at \(image.path)." }
-        prompt += "\nTo look at an image, use vision_analyze (read_file only reads text)."
-        prepareThenLaunch(prompt)
+        let vision = !launchOptions.disabledBuiltins(for: "hermes").contains("vision")
+        prepareThenLaunch(prompt + (vision ? "\nTo look at an image, use vision_analyze (read_file only reads text)." : ""))
     }
 
     @discardableResult
@@ -139,7 +140,7 @@ final class HermesRunner: AgentRunner {
         turnEnded = false
 
         let process = Process()
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: Self.baseArguments + arguments,
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: baseArguments + arguments,
                                                              profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules,
                                                              readable: [workDir.path], agent: .hermes)
         process.executableURL = launcher
@@ -419,7 +420,7 @@ extension HermesRunner {
     }
 
     /// What makes a gateway's sandbox: the eval's extra rules and the work folder it may read (each
-    /// case has its own, holding its screenshot), so a gateway is only reused by the same case.
+    /// case has its own), so a gateway is only reused by the same case.
     static func gatewayRules(_ options: AgentLaunchOptions, workDir: URL) -> String {
         options.extraSandboxRules + "\n; readable " + workDir.path
             + "\n; blocked " + PrivateDataAccess.blocked().map(\.rawValue).joined(separator: ",")

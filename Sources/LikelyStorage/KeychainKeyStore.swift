@@ -39,7 +39,7 @@ public final class KeychainKeyStore: DataKeyStore {
 
     public init(accessGroup: String, service: String = KeychainKeyStore.service, account: String = KeychainKeyStore.defaultAccount,
                 label: String = "Likely data key",
-                description: String = "Encrypts Likely's search history and saved test screenshots") {
+                description: String = "Encrypts Likely's search history") {
         self.accessGroup = accessGroup
         self.service = service
         self.account = account

@@ -8,7 +8,7 @@ import LikelyStorage
 /// Agents are children of Likely, so macOS attributes them to Likely and they inherit its privacy
 /// grants. That's intended for Files & Folders (searching Desktop/Documents/Downloads is the whole
 /// point, and those grants are what onboarding asks for), but not for Accessibility, Screen Recording
-/// or Automation. Disclaiming responsibility (`responsibility_spawnattrs_setdisclaim`) would drop all
+/// (no longer asked for, but older versions were granted it) or Automation. Disclaiming responsibility (`responsibility_spawnattrs_setdisclaim`) would drop all
 /// of Likely's grants at once, folders included, and make macOS prompt for "node"/"opencode" instead,
 /// so the agents stay attributed to Likely and these rules cut off the other three instead:
 /// - Automation: no Apple Events, and no osascript/open/shortcuts/automator/screencapture/launchctl.
@@ -19,7 +19,7 @@ import LikelyStorage
 /// - Screen Recording and synthetic input: no WindowServer, replayd or ScreenCaptureKit services.
 /// - No asking TCC directly either.
 /// - Likely's own data: no reading or writing ~/Library/Application Support/Likely (search history,
-///   test cases and screenshots, eval runs, debug captures, tools.json) or ~/Library/Logs/Likely,
+///   test cases, eval runs, tools.json) or ~/Library/Logs/Likely,
 ///   except the run's own work folder (`protectionRules`); no renaming the folders above them; no
 ///   reading other agents' session transcripts (`AgentSessions`). Codex isn't wrapped here;
 ///   CodexRunner applies the same paths through its permission profile (`codexFilesystem`).
@@ -190,20 +190,18 @@ public enum AgentSandbox {
     public static let bundleID = "inc.synth.likely"
 
     /// Likely's data, last in the profile so no earlier allow can override it:
-    /// - No reading or writing ~/Library/Application Support/Likely (search history, test cases and
-    ///   their screenshots, eval runs and reports, debug captures, tools.json, the manifest) or
+    /// - No reading or writing ~/Library/Application Support/Likely (search history, test cases,
+    ///   eval runs and reports, tools.json, the manifest) or
     ///   ~/Library/Logs/Likely.
     /// - Except reading `readable`: the run's work folder (…/Likely/run for searches, the case's own
-    ///   folder for evals), which holds what the agent is meant to see: the screenshot sent with this
-    ///   search (`context-<id>.png`), OpenCode's config dir, Gemini's settings file, Hermes's
-    ///   launchctl stub. Not its transcripts (`*.jsonl`).
+    ///   folder for evals), which holds what the agent is meant to see: OpenCode's config dir, Gemini's
+    ///   settings file, Hermes's launchctl stub. Not its transcripts (`*.jsonl`).
     /// - No writes there at all, nor to Likely's preferences, neither as a file nor through cfprefsd
     ///   (`defaults write`).
     /// - No renaming or deleting the folders above it (`dataAncestorPaths`: ~, ~/Library, …/Application
     ///   Support, ~/Library/Logs) or Likely's folders and links themselves. `literal` rules: they
     ///   match those entries only, so files can still be created inside ~ and the others.
-    /// - No reading other agents' session transcripts (`AgentSessions`: past queries, and the
-    ///   screenshots attached to them). `agent`'s own stay readable: it needs them to run.
+    /// - No reading other agents' session transcripts (`AgentSessions`: past queries). `agent`'s own stay readable: it needs them to run.
     ///
     /// tools.json needs no exception: the agents get the user's tools in their prompt, and only the
     /// user's own coding agent (not run by Likely) edits the file.
@@ -261,8 +259,7 @@ public enum AgentSandbox {
     }
 }
 
-/// Where each agent CLI keeps its session transcripts: every query Likely sent it and, for most, the
-/// screenshot attached to it (base64), in plaintext. Likely turns persistence off where the CLI can
+/// Where each agent CLI keeps its session transcripts: every query Likely sent it, in plaintext. Likely turns persistence off where the CLI can
 /// (Claude Code's `--no-session-persistence`) and otherwise deletes the run's session when the picker
 /// closes (the runners). These rules keep agents out of each other's stores meanwhile (and out of
 /// the user's own sessions with those CLIs). An agent's own store stays readable to it under

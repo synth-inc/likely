@@ -324,7 +324,7 @@ struct HistorySettings: View {
                 pickIndicator(e)
                 VStack(alignment: .leading, spacing: 3) {
                     if e.queries.isEmpty {
-                        Text("No query (from the screenshot)").italic().foregroundStyle(.secondary).lineLimit(1)
+                        Text("No query").italic().foregroundStyle(.secondary).lineLimit(1)
                     } else {
                         Text(e.queries.map { "“\($0)”" }.joined(separator: " → ")).fontWeight(.medium).lineLimit(1)
                     }
@@ -494,7 +494,7 @@ struct MakeEvalSheet: View {
     }
 }
 
-/// Whether this build encrypts history and saved test screenshots (DataProtection.status), with
+/// Whether this build encrypts history (DataProtection.status), with
 /// how to turn it on when it's off, and the Keychain error state when it can't encrypt right now.
 struct EncryptionStatusView: View {
     @ObservedObject private var status = DataProtection.status
@@ -518,9 +518,9 @@ struct EncryptionStatusView: View {
             }
         }
         .help(state.isOn
-              ? "Search history and saved test screenshots are encrypted with a key in your Keychain."
+              ? "Search history is encrypted with a key in your Keychain."
               : state.encrypts
-              ? "This build encrypts, but the Keychain isn't handing over the key right now. New searches wait in memory and test screenshots aren't saved until it does; nothing is written unencrypted. Likely tries again every minute."
-              : "Search history and saved test screenshots are kept unencrypted, readable only by your user account, and hidden from Likely's agents and Spotlight.")
+              ? "This build encrypts, but the Keychain isn't handing over the key right now. New searches wait in memory until it does; nothing is written unencrypted. Likely tries again every minute."
+              : "Search history is kept unencrypted, readable only by your user account, and hidden from Likely's agents and Spotlight.")
     }
 }

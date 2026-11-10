@@ -5,10 +5,9 @@ import OnboardingKit
 import SwiftUI
 import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let stateItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
-    private let jumpItem = NSMenuItem(title: "Jump to Likely Folder When a Picker Opens", action: #selector(toggleJump), keyEquivalent: "")
     private let improveItem = NSMenuItem(title: "Improve Results…", action: #selector(showToolSettings), keyEquivalent: "")
 
     private let coordinator = Coordinator()
@@ -58,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         MainActor.assumeIsolated {
             LicenseStore.shared.onActiveChange = { [weak self] active in self?.licenseChanged(active: active) }
+            // Waits for the welcome screen's notice on a fresh install (see `License.mayContactServer`);
+            // onboarding starts it once the user continues past that screen.
             LicenseStore.shared.startPeriodicChecks()
         }
     }
@@ -68,6 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let url = urls.first(where: { $0.scheme == "likely" }) else { return }
         Log.write("app", "opened by \(meta: url.scheme)://\(meta: url.host)")
         Task { @MainActor in
+            // Not past the welcome notice yet: show it rather than skipping ahead to the license page.
+            guard License.mayContactServer || License.isFreeBuild else { return self.showOnboarding() }
             await LicenseStore.shared.refresh()
             if !Settings.onboarded || !License.isActive || OnboardingWindowManager.shared.isVisible {
                 self.showLicense()
@@ -164,10 +167,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         stateItem.isEnabled = false
         menu.addItem(stateItem)
         menu.addItem(.separator())
-        jumpItem.target = self
-        menu.addItem(jumpItem)
-        menu.delegate = self
-        menu.addItem(.separator())
         improveItem.target = self
         menu.addItem(improveItem)
         menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
@@ -229,17 +228,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MainActor.assumeIsolated { Updater.shared.checkForUpdates() }
     }
 
-    /// Settings has the same switch, so the check mark is refreshed each time the menu opens.
-    func menuWillOpen(_ menu: NSMenu) {
-        jumpItem.state = Settings.openToLikely ? .on : .off
-    }
-
-    @objc private func toggleJump() {
-        Settings.openToLikely.toggle()
-        jumpItem.state = Settings.openToLikely ? .on : .off
-        Log.write("app", "jump to Likely folder when a picker opens: \(Settings.openToLikely)")
-    }
-
     @objc private func showDebugView() {
         if debugWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(rootView: DebugView(store: .shared)))
@@ -295,17 +283,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
+    /// "Likely is running": the corner toast that ends onboarding, so it doesn't just vanish.
+    @MainActor private static func showReadyToast(on screen: NSScreen?) {
+        Log.write("app", "showing the ready toast")
+        CornerToast.shared.show(
+            title: "Likely is running",
+            message: "Open any file picker, and Likely's search bar appears above it.",
+            icon: Bundle.main.image(forResource: "AppIcon") ?? NSApp.applicationIconImage,
+            screen: screen)
+    }
+
     /// Onboarding opened straight on the license page (lapsed subscription, "Buy…" in Settings).
     func showLicense() {
+        // Before the welcome screen's notice, `showOnboarding` starts there instead.
         if !License.isFreeBuild { LikelyOnboardingStep.saved = .license }
         showOnboarding()
     }
 
     @objc func showOnboarding() {
+        // Nothing past the welcome screen (license page included) until its install-ID notice was seen.
+        if !License.isFreeBuild && !Settings.sawServerNotice { LikelyOnboardingStep.saved = .welcome }
         Log.write("app", "showing onboarding at step \(meta: LikelyOnboardingStep.saved.rawValue)")
         CopyEditor.shared.saveURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely/debug/onboarding-copy.json")
         let view = LikelyOnboardingView {
+            let firstFinish = !Settings.onboarded
             Settings.onboarded = true
             LikelyOnboardingStep.clearSaved()
             if Settings.agentID == "claude", let path = AgentDetector.shared.path(for: AgentKind.all[0]) {
@@ -314,7 +316,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             Log.write("app", "onboarding finished, agent=\(meta: Settings.agentID)")
             self.startWhenTrusted()
-            MainActor.assumeIsolated { OnboardingWindowManager.shared.closeWindow() }
+            MainActor.assumeIsolated {
+                // Measured before the window goes, so the toast lands on the screen onboarding was on.
+                let screen = NSApp.keyWindow?.screen
+                OnboardingWindowManager.shared.closeWindow()
+                // First run only (not the license page reopened later): say Likely's now in the background.
+                if firstFinish { Self.showReadyToast(on: screen) }
+            }
         }
         // AppKit always calls this on the main thread.
         MainActor.assumeIsolated { OnboardingWindowManager.shared.showWindow(view) }

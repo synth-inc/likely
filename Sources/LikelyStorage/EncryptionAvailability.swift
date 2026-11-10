@@ -64,7 +64,7 @@ public struct SigningEntitlements: Equatable {
 ///
 /// A build that has the entitlement but whose Keychain doesn't answer (`keychainError`) is not "off":
 /// it still encrypts, so nothing meant to be encrypted is ever written in plaintext. History waits in
-/// memory, test screenshots aren't saved, and the Keychain is tried again (DataProtection).
+/// memory, and the Keychain is tried again (DataProtection).
 public enum EncryptionAvailability: Equatable {
     case on(accessGroup: String)
     /// The entitlement is there but the data-protection keychain didn't answer (with why).

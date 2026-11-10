@@ -1,12 +1,12 @@
 #!/bin/bash
 # Cuts a Likely release: Developer ID build -> Likely.dmg -> notarize + staple -> Sparkle EdDSA
-# signature -> GitHub Release vX.Y.Z with Likely.dmg -> new item in the appcast served by onit-server.
+# signature -> GitHub Release vX.Y.Z with Likely.dmg -> new item in docs/appcast.xml (GitHub Pages).
 #
 #   scripts/bump-version.sh patch && git commit -am "Bump version"   # first, on a clean tree
 #   scripts/release.sh [--dry-run] [--skip-notarize] [--notes "text"]
 #
 #   --dry-run        build, sign, make the DMG, notarize and write the appcast to build/release only:
-#                    no tag, no GitHub Release, onit-server untouched.
+#                    no tag, no GitHub Release, no appcast commit.
 #   --skip-notarize  skip notarization/stapling (only allowed with --dry-run).
 #   --notes "..."    release notes for the GitHub Release and the Sparkle update window.
 #
@@ -26,8 +26,11 @@
 #   - The Sparkle EdDSA private key in the login Keychain, account "likely"
 #     (created with `generate_keys --account likely`).
 #   - gh authenticated with push access to synth-inc/likely.
-#   - An onit-server checkout (ONIT_SERVER_DIR, default ../../onit-server) to write the appcast into.
-#     It serves public/likely/appcast.xml at $FEED_URL; the release goes live once that commit is deployed.
+#   - The update feed is docs/appcast.xml in this repo, served by GitHub Pages at $FEED_URL
+#     (https://synth-inc.github.io/likely/appcast.xml). The script commits it to main and pushes;
+#     Sparkle clients see the release once Pages has redeployed (a few minutes, plus up to 10 min of CDN cache).
+#   - If a release stops after the tag or GitHub Release is published (e.g. the appcast commit fails), finish by hand:
+#     add the item to docs/appcast.xml (it's in build/release/appcast.xml), commit, and push to main.
 set -euo pipefail
 
 # Releases are the paid edition, built without dev-only switches, whatever the calling shell has set.
@@ -48,8 +51,7 @@ cd "$ROOT"
 OUT="$ROOT/build/release"
 APP="$OUT/$APP_NAME.app"
 DMG="$OUT/$APP_NAME.dmg"
-ONIT_SERVER_DIR="${ONIT_SERVER_DIR:-$ROOT/../../onit-server}"
-APPCAST_REL="public/likely/appcast.xml"
+APPCAST_SRC="$ROOT/docs/appcast.xml"
 FEED_URL=$(/usr/libexec/PlistBuddy -c "Print :SUFeedURL" Info.plist)
 
 DRY_RUN=false
@@ -115,8 +117,6 @@ if [ "$DRY_RUN" = false ]; then
     git fetch -q --tags origin
     git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "Tag $TAG already exists; run scripts/bump-version.sh patch"; exit 1; }
     gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1 && { echo "Release $TAG already exists"; exit 1; }
-    [ -d "$ONIT_SERVER_DIR/public" ] || { echo "onit-server not found at $ONIT_SERVER_DIR (set ONIT_SERVER_DIR)"; exit 1; }
-    APPCAST_SRC="$ONIT_SERVER_DIR/$APPCAST_REL"
     if [ -f "$APPCAST_SRC" ] && grep -q "<sparkle:version>$BUILD</sparkle:version>" "$APPCAST_SRC"; then
         echo "Build $BUILD is already in the appcast; run scripts/bump-version.sh"; exit 1
     fi
@@ -180,8 +180,8 @@ ED_SIGNATURE=$(echo "$ENCLOSURE_ATTRS" | sed -E 's/.*edSignature="([^"]+)".*/\1/
 "$SPARKLE_BIN/sign_update" --account "$SPARKLE_ACCOUNT" --verify "$DMG" "$ED_SIGNATURE" ||
     { echo "Sparkle signature doesn't verify"; exit 1; }
 APPCAST_OUT="$OUT/appcast.xml"
-if [ -f "${APPCAST_SRC:-$ONIT_SERVER_DIR/$APPCAST_REL}" ]; then
-    cp "${APPCAST_SRC:-$ONIT_SERVER_DIR/$APPCAST_REL}" "$APPCAST_OUT"
+if [ -f "$APPCAST_SRC" ]; then
+    cp "$APPCAST_SRC" "$APPCAST_OUT"
 fi
 python3 "$ROOT/scripts/appcast_add_item.py" "$APPCAST_OUT" \
     --version "$VERSION" --build "$BUILD" --url "$DOWNLOAD_URL" --enclosure "$ENCLOSURE_ATTRS" \
@@ -207,11 +207,18 @@ NOTES_ARGS=(--generate-notes)
 gh release create "$TAG" "$DMG#$APP_NAME.dmg" --repo "$GH_REPO" --verify-tag \
     --title "$APP_NAME $VERSION" "${NOTES_ARGS[@]}"
 
-echo "==> Updating $ONIT_SERVER_DIR/$APPCAST_REL"
-mkdir -p "$(dirname "$APPCAST_SRC")"
+echo "==> Publishing the appcast (docs/appcast.xml on GitHub Pages)"
 cp "$APPCAST_OUT" "$APPCAST_SRC"
+git add docs/appcast.xml
+git commit -q -m "Likely $VERSION appcast"
+if ! git push -q origin HEAD:main; then
+    # Someone may have pushed to main during notarization: rebase onto it and try once more.
+    git pull --rebase -q origin main && git push -q origin HEAD:main || {
+        echo "ERROR: $TAG is released on GitHub, but the appcast commit isn't on main, so no one is offered the update."
+        echo "Fix: git pull --rebase origin main && git push origin HEAD:main   (commit $(git rev-parse --short HEAD))"
+        exit 1
+    }
+fi
 echo
 echo "Released $TAG: https://github.com/$GH_REPO/releases/tag/$TAG"
-echo "Sparkle clients see it once the appcast is deployed. In $ONIT_SERVER_DIR:"
-echo "  git add $APPCAST_REL && git commit -m \"Likely $VERSION appcast\" && git push   # then deploy to Heroku"
-echo "  check: curl -s $FEED_URL | head"
+echo "Sparkle clients see it once GitHub Pages has redeployed (a few minutes; the CDN may cache the old feed up to 10 min). Check: curl -s $FEED_URL | head"

@@ -5,3 +5,5 @@ build/
 *.xcodeproj/xcuserdata/
 Resources/*.mp4
 .build-evalcli-*/
+scratch/
+!Resources/likely-demo.mp4

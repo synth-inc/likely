@@ -14,7 +14,7 @@ public struct SearchHistoryEntry: Codable, Identifiable, Hashable {
     public var windowTitle: String?
     /// The picker's confirm button ("Open", "Upload", …), if known.
     public var button: String?
-    /// What the user typed in the bar, in order. Empty for a search that ran on the screenshot alone.
+    /// What the user typed in the bar, in order. Empty only in entries from older versions, which could search on a screenshot alone.
     public var queries: [String]
     /// Absolute paths of the originals the agent suggested (not the copies in ~/Likely), best first.
     public var suggested: [String]

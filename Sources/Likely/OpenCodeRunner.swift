@@ -2,7 +2,7 @@ import Foundation
 import LikelyStorage
 import LikelyTools
 
-/// Runs OpenCode: `opencode run --format json`, with the screenshot attached via `-f`. OpenCode has
+/// Runs OpenCode: `opencode run --format json`. OpenCode has
 /// no sandbox of its own and its bash allowlist only sees command names (`ls > file` passes as `ls`),
 /// so it runs under `sandbox-exec` (see AgentSandbox: no writes outside its own data directories, no
 /// exec from writable places, HTTPS only, no local sockets, LaunchServices, pasteboard, Accessibility, Screen Recording or Automation), plus a permission config that hides edit tools and allowlists search commands.
@@ -35,10 +35,8 @@ final class OpenCodeRunner: AgentRunner {
     /// on search commands, and find's -exec/-ok could otherwise run anything.
     /// The user's tools (see ToolStore) are allowed after the built-in commands and before the `find`
     /// denials, so those still win.
-    static let fileTools = ["read", "glob", "grep", "list", "external_directory"]
-    static let bashAllowed = ["ls", "ls *", "mdfind *", "mdls *", "find *", "grep *", "head *", "tail *", "stat *", "wc *", "echo *"]
-
-    static let bashDenied = ["find *-exec*", "find *-ok*", "find *-delete*", "find *-fprint*", "find *-fls*"]
+    /// Tools and commands: AgentBuiltins.openCodeFileTools / openCodeBashAllowed / openCodeBashDenied,
+    /// minus what's turned off in Settings (left to the `*` denial).
 
     /// OpenCode reads (and on first run creates) <config>/opencode/opencode.jsonc. Likely writes it before
     /// every launch and the sandbox keeps it read-only (it's under Likely's protected folder), so nothing
@@ -54,11 +52,11 @@ final class OpenCodeRunner: AgentRunner {
         for (name, text) in files { try? OwnerOnly.write(Data(text.utf8), to: dir.appendingPathComponent(name)) }
     }
 
-    static func permission(extra commands: [String]) -> String {
-        ToolPermissions.openCodePermission(fileTools: fileTools, bashAllowed: bashAllowed, bashDenied: bashDenied, extra: commands)
+    static func permission(disabled: Set<String>, extra commands: [String]) -> String {
+        AgentBuiltins.openCodePermission(disabled: disabled, extra: commands)
     }
 
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
         sessionID = nil
         self.executable = executable
@@ -67,9 +65,7 @@ final class OpenCodeRunner: AgentRunner {
         let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var arguments = ["run", "--format", "json", "-m", model]
-        if let image { arguments += ["-f", image.path] }
-        launch(arguments + ["--", prompt])   // `--`: -f takes several values, and text may start with "-"
+        launch(["run", "--format", "json", "-m", model, "--", prompt])   // `--`: text may start with "-"
     }
 
     @discardableResult
@@ -143,7 +139,7 @@ final class OpenCodeRunner: AgentRunner {
         let configHome = workDir.appendingPathComponent("opencode-config").path
         env["XDG_CONFIG_HOME"] = configHome
         Self.resetConfig(configHome)
-        env["OPENCODE_PERMISSION"] = Self.permission(extra: launchOptions.toolCommands)
+        env["OPENCODE_PERMISSION"] = Self.permission(disabled: launchOptions.disabledBuiltins(for: "opencode"), extra: launchOptions.toolCommands)
         for flag in ["OPENCODE_PURE", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE",
                      "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_LSP_DOWNLOAD"] {
             env[flag] = "1"

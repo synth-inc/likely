@@ -6,7 +6,7 @@ import Foundation
 /// Deny by default: the whole home folder and /Volumes are unreadable, then only what the run
 /// needs is allowed back: the case's search folders, its work folder, the agent CLIs' own config
 /// and state (logins, settings, installed runtimes) and the agent's install folder. So a fixture
-/// run can't read ~/Likely, ~/Library/Application Support/Likely (personal cases and screenshots),
+/// run can't read ~/Likely, ~/Library/Application Support/Likely (personal cases),
 /// ~/Library/Logs/Likely, documents, or external drives. Spotlight is blocked too: its index would
 /// list personal files by name.
 public enum EvalIsolation {

@@ -598,7 +598,7 @@ final class EvalSession {
         if result.transcriptPath != nil { result.transcriptPath = rel + "/transcript.jsonl" }
         if result.promptPath != nil { result.promptPath = rel + "/prompt.txt" }
         results.append((index, result))
-        let mark = !result.score.scorable ? "?" : result.pass ? "PASS" : "FAIL"
+        let mark = result.status == "skipped" ? "SKIP" : !result.score.scorable ? "?" : result.pass ? "PASS" : "FAIL"
         var line = "[\(results.count)/\(total)] \(mark) \(result.id)"
         if options.repeatCount > 1 { line += " #\(result.attempt)" }
         line += "  rank \(result.score.firstHitRank.map(String.init) ?? "–")  \(String(format: "%.1fs", result.totalSeconds))"
@@ -675,8 +675,6 @@ final class EvalCaseRun {
         let kind: AgentKind
         let path: String
         let model: String
-        /// Everything except Claude Code gets the screenshot attached (as in Coordinator).
-        var takesImages: Bool { kind.id != "claude" }
         /// Codex runs under its own sandbox, which can't be nested: no isolation rules for it.
         var canIsolate: Bool { kind.id != "codex" }
     }
@@ -688,9 +686,9 @@ final class EvalCaseRun {
     let attempt: Int
     /// The case's folder: its prompt, transcript and results. Agents can't read it.
     let workDir: URL
-    /// What the agent may read (and runs in): `<case>/agent`, holding only the decrypted screenshot
-    /// and the agent's config files. Transcripts stay one level up, out of its reach (Codex's
-    /// sandbox can't deny a file pattern inside a folder it may read).
+    /// What the agent may read (and runs in): `<case>/agent`, holding only the agent's config files.
+    /// Transcripts stay one level up, out of its reach (Codex's sandbox can't deny a file pattern
+    /// inside a folder it may read).
     var agentDir: URL { workDir.appendingPathComponent("agent", isDirectory: true) }
 
     private var runner: AgentRunner?
@@ -706,9 +704,6 @@ final class EvalCaseRun {
     private var timeoutWork: DispatchWorkItem?
 
     private var evalCase: EvalCase { item.evalCase }
-    /// Test runs never attach a screenshot (a case's `screenshot` is ignored): nothing is decrypted or
-    /// copied for the agent.
-    private let screenshot: URL? = nil
     private var searchFolders: [String]? { evalCase.searchFolders?.map { EvalPath.resolve($0, relativeTo: item.base) } }
     /// The case asks for isolation: the prompt points at its folders only.
     private var wantsIsolation: Bool { options.isolate && searchFolders != nil }
@@ -739,9 +734,9 @@ final class EvalCaseRun {
         // Never the real user's name: the case's own, the fixture persona, or none.
         let userName = context?.userName ?? (evalCase.source == "fixture" ? EvalCLI.fixturePersona : nil)
         let base = PromptBuilder.initial(PromptBuilder.Context(appName: context?.app ?? "an app", windowTitle: context?.windowTitle,
-                                                               buttonTitle: context?.button, screenshot: screenshot,
-                                                               userName: userName, tools: tools),
-                                         imageAttached: agent.takesImages, template: template)
+                                                               buttonTitle: context?.button,
+                                                               userName: userName, tools: tools, agentID: agent.kind.id),
+                                         template: template)
         var prompt = base
         if wantsIsolation, let folders = searchFolders {
             // The default template invites searching the rest of ~; a test run must not.
@@ -786,6 +781,8 @@ final class EvalCaseRun {
 
     func start(completion: @escaping (EvalCaseResult) -> Void) {
         self.completion = completion
+        // Saved by an older version that searched on a screenshot alone: nothing to replay.
+        guard evalCase.hasQuery else { return finish(status: "skipped", error: "screenshot-only case") }
         let prompt = firstPrompt()
         try? OwnerOnly.write(prompt, to: workDir.appendingPathComponent("prompt.txt"))
         try? OwnerOnly.createDirectory(agentDir)
@@ -805,8 +802,7 @@ final class EvalCaseRun {
         let work = DispatchWorkItem { [weak self] in self?.finish(status: "timeout", error: "no answer within \(Int(self?.options.timeout ?? 0))s") }
         timeoutWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + options.timeout, execute: work)
-        runner.start(executable: agent.path, model: agent.model, prompt: prompt,
-                     image: agent.takesImages ? screenshot : nil, workDir: agentDir)
+        runner.start(executable: agent.path, model: agent.model, prompt: prompt, workDir: agentDir)
     }
 
     /// The dry-run sink: what LikelyFolder.add would accept, without copying.
@@ -839,8 +835,7 @@ final class EvalCaseRun {
         turnSuggestions.append([])
         applyEnvironment()
         if !runner.send(message) {
-            runner.start(executable: agent.path, model: agent.model, prompt: lastPrompt + "\n\n" + message,
-                         image: agent.takesImages ? screenshot : nil, workDir: agentDir)
+            runner.start(executable: agent.path, model: agent.model, prompt: lastPrompt + "\n\n" + message, workDir: agentDir)
         }
     }
 

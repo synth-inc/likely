@@ -16,8 +16,7 @@ protocol AgentRunner: AnyObject {
     /// Per-runner launch settings (evals set these; the app uses the defaults).
     var launchOptions: AgentLaunchOptions { get set }
 
-    /// `image` is the screenshot, for agents that take images as input rather than reading files.
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL)
+    func start(executable: String, model: String, prompt: String, workDir: URL)
     /// Sends feedback to the current conversation. Returns false if there's no conversation to continue.
     @discardableResult func send(_ text: String) -> Bool
     func cancel()
@@ -40,11 +39,18 @@ struct AgentLaunchOptions {
     /// The user's tools this launch may use (allowlist and sandbox profile). nil: the ones the app
     /// uses (ToolStore's enabled, approved tools). Evals set it per case; [] means none.
     var tools: [CustomTool]?
+    /// Built-in tools turned off (Settings → Tools). nil: the app's setting for the runner's agent
+    /// (BuiltinToolSettings), which evals use too.
+    var disabledBuiltinTools: Set<String>?
+
+    func disabledBuiltins(for agentID: String) -> Set<String> {
+        disabledBuiltinTools ?? BuiltinToolSettings.disabled(for: agentID)
+    }
 }
 
 /// The raw JSON stream each runner saves (last-run.jsonl). It holds the queries, everything the agent
 /// read and the files it found, so it's kept outside the work folder: that folder is the one part of
-/// Likely's data an agent may read (its screenshot and config files), and Codex's sandbox can't deny
+/// Likely's data an agent may read (config files), and Codex's sandbox can't deny
 /// a file pattern inside it. Next to it instead (…/Likely/transcripts for searches; an eval case's
 /// own folder, whose `agent` subfolder is the work folder), which every agent is denied.
 enum AgentTranscript {
@@ -119,7 +125,7 @@ extension String {
 }
 
 /// Runs OpenAI's Codex CLI: `codex exec --json` in its read-only sandbox (commands run, writes are
-/// blocked), with the screenshot attached via `-i`. Codex can't take messages mid-turn, so feedback
+/// blocked). Codex can't take messages mid-turn, so feedback
 /// stops the current turn and continues the same conversation with `codex exec resume <thread>`.
 ///
 /// Unlike the other runners it isn't wrapped in AgentSandbox: Codex runs every command under its own
@@ -153,7 +159,6 @@ final class CodexRunner: AgentRunner {
     /// AgentSandbox.protectionRules). Equivalent to `sandbox_mode="read-only"` otherwise; the two
     /// can't be combined. Verified with `codex sandbox` (codex-cli 0.153): reads under the denied
     /// paths fail with EPERM, the more specific "read" entry for the work folder wins.
-    /// The screenshot is attached with `-i`, which Codex itself reads (outside the sandbox).
     ///
     /// Private data (PrivateDataArea): the table can't say "any `.photoslibrary`" or match container
     /// names, so the containers are listed at each launch and Photos libraries outside the default
@@ -171,7 +176,7 @@ final class CodexRunner: AgentRunner {
             + (photosBlocked ? ["-c", "features.view_image=false"] : [])
     }
 
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
         threadID = nil
         if PrivateDataAccess.blocked().contains(.photos) { PhotoLibraries.refresh() }   // for the next search
@@ -181,9 +186,7 @@ final class CodexRunner: AgentRunner {
         let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var arguments = ["exec"] + Self.baseArguments(workDir: workDir) + ["-m", model, prompt]
-        if let image { arguments += ["-i", image.path] }   // after the prompt: -i takes several values
-        launch(arguments)
+        launch(["exec"] + Self.baseArguments(workDir: workDir) + ["-m", model, prompt])
     }
 
     @discardableResult
@@ -207,7 +210,7 @@ final class CodexRunner: AgentRunner {
     }
 
     /// Codex keeps each conversation in ~/.codex/sessions/<yyyy>/<MM>/<dd>/rollout-<time>-<thread>.jsonl
-    /// (the queries and the attached screenshot, in plaintext). `codex exec --ephemeral` would keep
+    /// (the queries, in plaintext). `codex exec --ephemeral` would keep
     /// none, but then a follow-up couldn't `resume` it, so instead the file is deleted when the picker
     /// closes. Looked for in the folders of the last few days (local and UTC dates can differ).
     static func deleteSession(_ threadID: String, codexHome: URL = CodexRunner.codexHome, now: Date = Date()) {

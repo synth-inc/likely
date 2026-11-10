@@ -5,8 +5,8 @@ import SwiftUI
 enum LikelyOnboardingStep: String, Equatable {
     case welcome, permissions, folders, likelyFolder, agent, getAgent, license
 
-    /// Where the user is, saved on every step change so a relaunch (e.g. macOS's "Quit & Reopen"
-    /// after granting Screen Recording) picks up where they left off, as in the Onit apps.
+    /// Where the user is, saved on every step change so a relaunch picks up where they left off, as
+    /// in the Onit apps.
     static var saved: LikelyOnboardingStep {
         get { UserDefaults.standard.string(forKey: "onboardingStep").flatMap(Self.init) ?? .welcome }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "onboardingStep") }
@@ -18,7 +18,6 @@ enum LikelyOnboardingStep: String, Equatable {
 /// Live permission / setup status, polled while onboarding (or Settings) is open.
 final class SetupState: ObservableObject {
     @Published var accessibility = Permissions.accessibilityGranted
-    @Published var screenRecording = Permissions.screenRecordingGranted
     @Published var folders: [SearchFolder] = SearchFolder.all
     @Published var folderAccess: [URL: Permissions.FolderAccess] = [:]
     @Published var likelyFolderExists = LikelyFolder.exists
@@ -28,7 +27,6 @@ final class SetupState: ObservableObject {
 
     func refresh() {
         accessibility = Permissions.accessibilityGranted
-        screenRecording = Permissions.screenRecordingGranted
         let current = SearchFolder.all
         if current != folders { folders = current }
         for folder in folders { folderAccess[folder.url] = Permissions.folderAccess(folder.url) }
@@ -105,7 +103,12 @@ struct LikelyOnboardingView: View {
         OnboardingPage(
             nextButtonText: "Get Started",
             nextButtonIcon: "arrow.right",
-            onNext: { step = .permissions },
+            onNext: {
+                // The footer's install-ID notice has been shown: the license server may now hear from us.
+                Settings.sawServerNotice = true
+                LicenseStore.shared.startPeriodicChecks()
+                step = .permissions
+            },
             headerContent: {
                 OnboardingTitlePill(systemIcon: "doc.viewfinder", text: "Likely")
                 OnboardingTitle("Why doesn't macOS do this?")
@@ -114,13 +117,12 @@ struct LikelyOnboardingView: View {
                 OnboardingDemoVideo(url: demoVideoURL)
                     .padding(.top, 22)
                     .padding(.bottom, 24)
-            }
+            },
+            footerContent: { WelcomeLegalNotice() }
         )
     }
 
     // MARK: - Permissions
-
-    @State private var showScreenshotExplainer = false
 
     private var permissions: some View {
         OnboardingPage(
@@ -130,7 +132,7 @@ struct LikelyOnboardingView: View {
             nextDisabled: !state.accessibility,
             onNext: { step = .folders },
             headerContent: {
-                OnboardingTitle("Permissions", subtitle: "Likely needs one permission to work with file pickers,\nand has one optional one that can improve results.")
+                OnboardingTitle("Permissions", subtitle: "Likely needs one permission to work with file pickers.")
             },
             bodyContent: {
                 VStack(alignment: .leading, spacing: 0) {
@@ -139,26 +141,11 @@ struct LikelyOnboardingView: View {
                         description: "Lets Likely notice when a file picker opens, and jump it to your Likely folder.",
                         isGranted: state.accessibility, shouldPulse: hasCheckedInitially,
                         action: Permissions.requestAccessibility)
-                    Divider().padding(.vertical, 18)
-                    // Optional, as in Onit's QuickEdit: explained in a "(See how)" sheet.
-                    OnboardingPermissionRow(
-                        icon: "camera.viewfinder", title: "Screenshots", badge: "Optional",
-                        description: "Likely can send your agent a screenshot of the app you're uploading from along with what you type, so a few words are enough. It may improve results, but we know it's a scary permission, so it's up to you.",
-                        isGranted: state.screenRecording, shouldPulse: false,
-                        note: "Already allowed it?",
-                        secondaryTitle: "Quit & Reopen",
-                        secondaryAction: Permissions.relaunch,
-                        infoLinkTitle: "See how",
-                        infoAction: { showScreenshotExplainer = true },
-                        action: Permissions.requestScreenRecording)
                 }
                 .padding(.horizontal, 40)
                 .padding(.top, 28)
             }
         )
-        .sheet(isPresented: $showScreenshotExplainer) {
-            ScreenshotExplainerSheet(isPresented: $showScreenshotExplainer)
-        }
     }
 
     // MARK: - Folders
@@ -387,6 +374,7 @@ struct LikelyOnboardingView: View {
                         .disabled(restoring)
                         if restoring { ProgressView().controlSize(.small) }
                     }
+                    LegalLinks()
                     if copyEditor.isEnabled {
                         Button("Aa Fonts") { showFontTweaker.toggle() }
                             .popover(isPresented: $showFontTweaker, arrowEdge: .top) {
@@ -443,6 +431,14 @@ struct LikelyOnboardingView: View {
                 .multilineTextAlignment(.center)
                 .frame(width: 420)
                 .fixedSize(horizontal: false, vertical: true)
+            if let disclosure = plan.disclosure {
+                Text(disclosure)   // legal copy: not copy-editable
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .multilineTextAlignment(.center)
+                    .frame(width: 420)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Group {
                 if licensed && licenseStore.activeKind == plan.kind {
                     Label("Active", systemImage: "checkmark.seal.fill")
@@ -633,85 +629,5 @@ struct SearchFolderList: View {
             .buttonStyle(.link)
             .padding(.leading, 30)
         }
-    }
-}
-
-/// "See how" for the optional Screenshots permission (modeled on Onit's ScreenshotPermissionExampleSheet).
-struct ScreenshotExplainerSheet: View {
-    @Binding var isPresented: Bool
-
-    var body: some View {
-        VStack(alignment: .center, spacing: 28) {
-            EditableText("With screenshots, Likely can see what you're uploading to, so a few words are enough when you search.")
-                .font(.system(size: 18, weight: .regular))
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 480)
-                .padding(.top, 36)
-
-            HStack(alignment: .top, spacing: 20) {
-                example(withAccess: false)
-                example(withAccess: true)
-            }
-
-            EditableText("To see past the picker, Likely keeps the window you clicked in memory. A screenshot is only saved and sent, to the agent you chose, when you search from a file picker. You can turn it off in Settings.")
-                .font(.system(size: 12))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                .multilineTextAlignment(.center)
-        }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 30)
-        .frame(width: 697)
-        .overlay(alignment: .topTrailing) {
-            Button { isPresented = false } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.onboardingDivider)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .padding(14)
-        }
-    }
-
-    private func example(withAccess: Bool) -> some View {
-        VStack(alignment: .center, spacing: 12) {
-            EditableText(withAccess ? "With: ✅ A few words are enough" : "Without: ❌ You describe what you need")
-                .font(.system(size: 14))
-            VStack(alignment: .leading, spacing: 10) {
-                // A tiny "page behind the picker".
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        ForEach(0..<3) { _ in Circle().fill(Color.onboardingFill).frame(width: 6, height: 6) }
-                        Text("App Store Connect").font(.system(size: 10)).foregroundColor(.secondary).padding(.leading, 4)
-                    }
-                    if withAccess {
-                        Text("Upload App Icon").font(.system(size: 13, weight: .semibold))
-                        Text("1024×1024 PNG, no transparency").font(.system(size: 11)).foregroundColor(.secondary)
-                    } else {
-                        RoundedRectangle(cornerRadius: 3).fill(Color.onboardingFill).frame(width: 120, height: 10)
-                        RoundedRectangle(cornerRadius: 3).fill(Color.onboardingFillQuiet).frame(width: 170, height: 8)
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.onboardingFillQuiet, in: RoundedRectangle(cornerRadius: 8))
-
-                Image(systemName: "arrow.down").foregroundColor(.secondary).frame(maxWidth: .infinity)
-
-                // What Likely does with it.
-                HStack(spacing: 8) {
-                    Image(systemName: withAccess ? "sparkle.magnifyingglass" : "text.cursor")
-                        .foregroundColor(.onboardingBlue300)
-                    Text(withAccess ? "Type \"icon\": app-icon-1024.png ready in Likely" : "Type \"the 1024 app icon\" above the picker")
-                        .font(.system(size: 12))
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.onboardingBlue400.opacity(withAccess ? 0.15 : 0.06), in: RoundedRectangle(cornerRadius: 8))
-            }
-            .padding(14)
-            .background(Color.onboardingFillQuiet, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.onboardingS0.opacity(0.12)))
-        }
-        .frame(maxWidth: .infinity)
     }
 }

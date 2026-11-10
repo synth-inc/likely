@@ -1,14 +1,18 @@
-/* Copy-editing mode for the Likely landing page.
+/* Copy-editing mode for the Likely site pages.
  *   ?edit           edit text in place; changes autosave to localStorage (this browser only)
  *   ?preview-edits  view the page with saved edits applied, read-only
- * Normal visitors never see stored edits. */
+ * Normal visitors never see stored edits.
+ * Each page keeps its own edits: <html data-copy-page="privacy"> stores them under
+ * likely-landing-copy-v1:privacy. The landing page (no data-copy-page) keeps the original key. */
 (function () {
   var params = new URLSearchParams(location.search);
   var editing = params.has('edit');
   var previewing = params.has('preview-edits');
   if (!editing && !previewing) return;
 
-  var KEY = 'likely-landing-copy-v1';
+  var PAGE = document.documentElement.getAttribute('data-copy-page') || '';
+  // Separate keys, so editing one page never prunes another page's edits as "stale ids".
+  var KEY = 'likely-landing-copy-v1' + (PAGE ? ':' + PAGE : '');
   var els = Array.prototype.slice.call(document.querySelectorAll('[data-copy-id]'));
   var originals = {};
   els.forEach(function (el) { originals[el.dataset.copyId] = el.innerHTML.trim(); });
@@ -71,7 +75,7 @@
     return els.filter(function (el) { return Object.prototype.hasOwnProperty.call(edits, el.dataset.copyId); })
       .map(function (el) {
         var id = el.dataset.copyId;
-        return { selectorOrId: '[data-copy-id="' + id + '"]', id: id, original: originals[id], edited: edits[id] };
+        return { page: PAGE || 'index', selectorOrId: '[data-copy-id="' + id + '"]', id: id, original: originals[id], edited: edits[id] };
       });
   }
 
@@ -96,7 +100,7 @@
     if (act === 'export') {
       var url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
       var a = document.createElement('a');
-      a.href = url; a.download = 'likely-landing-copy.json';
+      a.href = url; a.download = PAGE ? 'likely-' + PAGE + '-copy.json' : 'likely-landing-copy.json';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     } else if (act === 'copy') {

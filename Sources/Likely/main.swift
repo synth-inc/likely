@@ -9,8 +9,8 @@ if EvalCLI.isRequested(CommandLine.arguments) { EvalCLI.main(CommandLine.argumen
 // session didn't quit cleanly. Before anything logs or opens a transcript.
 Log.details.turnOff()
 
-// Owner-only permissions, Spotlight exclusion, release builds' debug screenshots: before the
-// coordinator (created with the delegate) touches the folders. Then encrypt older plaintext data.
+// Owner-only permissions, Spotlight exclusion: before the coordinator (created with the delegate)
+// touches the folders. Then encrypt older plaintext data and delete older versions' screenshots.
 DataProtection.prepareAtLaunch()
 // Seal the settings older versions saved (once), before anything reads them (ProtectedSettings).
 ProtectedSettings.adoptAtLaunch()

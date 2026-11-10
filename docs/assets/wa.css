@@ -1,5 +1,5 @@
 /* Likely "This is the whole app." interactive screenshot */
-.wa{position:relative;margin:40px auto 0;max-width:860px;container-type:inline-size;border-radius:clamp(10px,1.6cqw,16px);
+.wa{position:relative;margin:40px auto 0;max-width:1120px;container-type:inline-size;border-radius:clamp(10px,1.6cqw,16px);
   --wa-blue:#387DF5;--wa-ink:#16171A;font-family:-apple-system,"SF Pro Text",BlinkMacSystemFont,"Helvetica Neue",sans-serif}
 .wa-base{display:block;width:100%;height:auto;aspect-ratio:16/10;border-radius:inherit;box-shadow:0 0 0 1px rgba(224,229,255,.10),0 24px 60px rgba(0,0,0,.35)}
 .wa-dim{position:absolute;inset:0;border-radius:inherit;background:rgba(6,8,14,.28);opacity:0;transition:opacity .2s ease;pointer-events:none}

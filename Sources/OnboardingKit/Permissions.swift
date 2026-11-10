@@ -3,13 +3,11 @@
 //  OnboardingKit
 //
 //  Check / request helpers for the macOS privacy permissions our apps ask for
-//  (patterned on Onit's AccessibilityPermissionManager / ScreenRecordingPermissionManager).
+//  (patterned on Onit's AccessibilityPermissionManager).
 //
 
 import AppKit
 import ApplicationServices
-import CoreGraphics
-import ScreenCaptureKit
 
 public enum Permissions {
     // MARK: Accessibility
@@ -21,44 +19,6 @@ public enum Permissions {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
         openPrivacyPane("Privacy_Accessibility")
-    }
-
-    // MARK: Screen Recording
-
-    /// Note: macOS often only reports a fresh grant after the app relaunches.
-    public static var screenRecordingGranted: Bool { CGPreflightScreenCaptureAccess() }
-
-    private static let screenRecordingAskedKey = "OnboardingKit.screenRecordingAsked"
-
-    /// First time: touch ScreenCaptureKit, which makes macOS show its own "would like to record this
-    /// screen" prompt (as Onit's ScreenRecordingPermissionManager does). After that macOS won't prompt
-    /// again, so open System Settings instead. A grant usually only takes effect after a relaunch:
-    /// pair this with `relaunch()`.
-    public static func requestScreenRecording() {
-        guard !screenRecordingGranted else { return }
-        if UserDefaults.standard.bool(forKey: screenRecordingAskedKey) {
-            openPrivacyPane("Privacy_ScreenCapture")
-            return
-        }
-        UserDefaults.standard.set(true, forKey: screenRecordingAskedKey)
-        Task {
-            // Throws (or, on macOS 14+, returns limited content) without permission; either way the
-            // system prompt has been triggered.
-            _ = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        }
-    }
-
-    // MARK: Relaunch
-
-    /// Quits and reopens the app, e.g. so a fresh Screen Recording grant takes effect.
-    /// Apps should persist where the user is (onboarding step) before calling this.
-    public static func relaunch() {
-        let bundlePath = Bundle.main.bundlePath
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 0.7; /usr/bin/open \"$0\"", bundlePath]
-        try? task.run()
-        NSApp.terminate(nil)
     }
 
     // MARK: Files & Folders

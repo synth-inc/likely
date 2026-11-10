@@ -323,7 +323,7 @@ final class LikelyFolder {
     static func screen(path: String) -> (source: URL, refusal: String?) {
         let source = URL(fileURLWithPath: existingPath(for: (path as NSString).expandingTildeInPath)).resolvingSymlinksInPath()
         if source.path.hasPrefix(url.path + "/") { return (source, "in the Likely folder") }
-        // Never suggest Likely's own files (e.g. the screenshot an agent was shown).
+        // Never suggest Likely's own files (e.g. an agent's config file).
         if source.path.hasPrefix(supportPath) { return (source, "Likely's own file") }
         // Credentials, keychains, dotfiles, system files: never staged where any picker can grab them.
         // Checked on the real path too (Foundation's resolution drops /private, realpath keeps it), and

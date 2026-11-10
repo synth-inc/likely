@@ -1,0 +1,175 @@
+/* Animated product demo (assets/demo.js). A macOS 26 desktop in dark mode, drawn at a fixed
+   1152 x 720 "point" size (the reference screenshots' scale) and scaled to the box with a transform.
+   Measurements come from assets/whole-app-base.png (2.5 px per point there). */
+
+.demo-panel { position: relative; background: #0d0f1a; }
+.ld-viewport { position: absolute; inset: 0; overflow: hidden; }
+.ld {
+  --sys: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --blue: #1A7CFF;
+  position: absolute; left: 0; top: 0; width: 1152px; height: 720px;
+  transform-origin: 0 0;
+  font-family: var(--sys); color: #F2F2F5;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  font-kerning: normal; text-rendering: optimizeLegibility;
+  user-select: none; -webkit-user-select: none; pointer-events: none;
+  contain: layout paint;
+}
+.ld * { box-sizing: border-box; }
+.ld svg { display: block; overflow: visible; }
+
+/* Desktop */
+.ld-wall { position: absolute; inset: 0;
+  background: radial-gradient(60% 60% at 20% 20%, #9B8CF2, transparent 70%), radial-gradient(60% 60% at 80% 80%, #F2A2C8, transparent 70%), linear-gradient(160deg, #3B2F6E, #6A4A9C); }
+.ld-menubar { position: absolute; left: 0; right: 0; top: 0; height: 25px;
+  font-size: 13.1px; font-weight: 500; letter-spacing: 0; color: #fff; }
+.ld-menubar .ld-mi { position: absolute; top: 4.1px; line-height: 16px; white-space: nowrap; }
+.ld-menubar .ld-clock { right: 15.2px; }
+.ld-menubar .ld-status { position: absolute; top: 4px; height: 16px; }
+
+/* The app behind (a Chrome window, dark) */
+.ld-app { position: absolute; left: -40px; top: 44.4px; width: 1130px; height: 720px;
+  background: #16171A; border-radius: 26px; overflow: hidden;
+  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.12), 0 20px 50px rgba(0,0,0,0.45); }
+.ld-tabs { position: absolute; left: 0; right: 0; top: 0; height: 43px; background: #1F2023; }
+.ld-tab { position: absolute; top: 8.4px; height: 34.8px; background: #35363A; border-radius: 10px 10px 0 0;
+  left: 0; width: 128.8px; }
+.ld-tab .ld-x { position: absolute; right: 14px; top: 9px; font-size: 13px; color: #A4A4A6; }
+.ld-tab-t { position: absolute; left: 34px; top: 9px; font-size: 13.6px; color: #F2F2F5; }
+.ld-newtab { position: absolute; left: 132px; top: 8.4px; height: 34.8px; width: 200px; }
+.ld-newtab i { position: absolute; left: 13.6px; top: 9.4px; width: 14px; height: 14px; border-radius: 4px; background: #D9D9DC; }
+.ld-newtab span { position: absolute; left: 38.4px; top: 8px; font-size: 13.6px; color: #A9AAAD; }
+.ld-toolbar { position: absolute; left: 0; right: 0; top: 42.8px; height: 37px; background: #35363A; }
+.ld-url { position: absolute; left: 0; right: 50px; top: 4.4px; height: 30.8px; border-radius: 16px; background: #202124; }
+.ld-url span { position: absolute; left: 52px; top: 6px; font-size: 14.4px; color: #E3E3E6; letter-spacing: 0.005em; }
+.ld-avatar { position: absolute; border-radius: 50%; background: linear-gradient(180deg, #C4CAD6, #A9B0BF); }
+.ld-page { position: absolute; left: 0; right: 0; top: 79.6px; bottom: 0; background: #16171A; }
+.ld-pnav { position: absolute; left: 0; right: 0; top: 0; height: 59.6px; border-bottom: 1px solid #26272B; }
+.ld-pnav span { position: absolute; top: 21.5px; font-size: 14.4px; color: #9EA0A6; }
+.ld-page .ld-crumb { position: absolute; left: 64.6px; top: 93.3px; font-size: 14.05px; color: #9EA0A6; white-space: nowrap; }
+.ld-page h4 { position: absolute; left: 64.8px; top: 117px; margin: 0; font-size: 26.5px; font-weight: 700; letter-spacing: -0.02em; color: #fff; white-space: nowrap; }
+.ld-page .ld-sub { position: absolute; left: 64.8px; top: 165px; font-size: 14.4px; color: #9EA0A6; white-space: nowrap; }
+.ld-drop { position: absolute; left: 64.6px; top: 206.4px; width: 560px; height: 248px; border: 1.2px dashed #3B3D44; border-radius: 12px; }
+.ld-drop b { position: absolute; left: 126px; top: 116px; font-size: 14.4px; font-weight: 600; color: #C7C8CC; }
+.ld-drop i { position: absolute; left: 144px; top: 162px; width: 110px; height: 40px; border-radius: 10px; background: #1E6B49; }
+.ld-page .ld-shots { position: absolute; left: 64.8px; top: 485.4px; font-size: 14.4px; font-weight: 600; color: #fff; white-space: nowrap; }
+.ld-page .ld-shots span { font-weight: 400; color: #9EA0A6; }
+.ld-thumb { position: absolute; top: 524px; width: 111px; height: 140px; border-radius: 9px; border: 1px solid #2A2B30; background: #1A1B1F; }
+
+/* The Open dialog (sheet) */
+.ld-sheet { position: absolute; left: 222.4px; top: 172px; width: 808.4px; height: 454.4px;
+  border-radius: 16px; background: #232326;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.10), 0 0 0 0.5px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.06),
+              0 22px 56px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.35);
+  transform-origin: 50% 0; }
+.ld-side { position: absolute; left: 8.4px; top: 8px; bottom: 8px; width: 179.2px; border-radius: 13px;
+  background: #313135; box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.10); overflow: hidden; }
+.ld-sh { position: absolute; left: 15.7px; height: 16px; line-height: 16px; font-size: 11.3px; font-weight: 600; color: #A1A1A4; }
+.ld-si { position: absolute; left: 8px; right: 8px; height: 28px; border-radius: 7px; }
+.ld-si.on { background: #4A4A4D; }
+.ld-si svg { position: absolute; left: 9.9px; top: 6px; width: 16px; height: 16px; color: var(--blue); }
+.ld-si span { position: absolute; left: 36.5px; top: 6.4px; line-height: 16px; font-size: 13.75px; color: #F2F2F5; letter-spacing: -0.005em; }
+
+.ld-tb { position: absolute; left: 204.4px; right: 14.8px; top: 10.4px; height: 31.2px; }
+.ld-cap { position: absolute; top: 0; height: 31.2px; border-radius: 15.6px; background: #3B3B3E; }
+.ld-nav { left: 0; width: 64px; }
+.ld-nav svg { position: absolute; top: 8.6px; width: 14px; height: 14px; }
+.ld-path { position: absolute; left: 89.6px; top: 0; height: 31.2px; }
+.ld-path svg.ld-pi { position: absolute; left: 0; top: 7.6px; width: 16px; height: 16px; color: var(--blue); }
+.ld-path b { position: absolute; left: 22.4px; top: 7.1px; font-size: 13.55px; font-weight: 600; color: #F2F2F5; white-space: nowrap; line-height: 18px; }
+.ld-path svg.ld-ud { position: absolute; top: 9px; width: 9px; height: 13px; color: #8E8E91; }
+.ld-view1 { left: 292px; width: 44.8px; }
+.ld-view2 { left: 343.6px; width: 44px; }
+.ld-cap svg { position: absolute; top: 8.6px; height: 14px; color: #9A9A9D; }
+.ld-search { left: 398px; right: 0; background: #38383B; }
+.ld-search svg { left: 11.6px; width: 14px; }
+.ld-search span { position: absolute; left: 32.2px; top: 7.0px; font-size: 13.35px; color: #8D8D90; line-height: 18px; }
+
+.ld-list { position: absolute; left: 196px; right: 0; top: 52px; bottom: 50px; overflow: hidden;
+  --c-date: 274px; --c-size: 116px; --c-kind: 506px; }
+.ld-list.ld-cols-ref { --c-date: 244.4px; --c-size: 130.2px; --c-kind: 499.6px; }
+.ld-hdr { position: absolute; left: 0; right: 0; top: 0; height: 26px; border-bottom: 0.8px solid #363639; font-size: 11.95px; color: #9C9C9F; }
+.ld-hdr span { position: absolute; top: 6.4px; line-height: 14px; white-space: nowrap; }
+.ld-hdr .ld-sort { color: #F2F2F5; font-weight: 600; }
+.ld-c-name { left: 16.4px; } .ld-c-date { left: var(--c-date); } .ld-c-size { right: var(--c-size); } .ld-c-kind { left: var(--c-kind); }
+.ld-rows { position: absolute; left: 0; right: 0; top: 30.8px; bottom: 0; }
+.ld-stripe { position: absolute; left: 8px; right: 8.4px; height: 24.2px; border-radius: 6px; background: #2A2A2D; }
+.ld-row { position: absolute; left: 0; right: 0; height: 24.2px; font-size: 13.2px; line-height: 16px; white-space: nowrap;
+ }
+.ld-row .ld-hl { position: absolute; left: 8px; right: 8px; top: 0; bottom: 0; border-radius: 6px; background: var(--blue); opacity: 0; }
+.ld-row.sel .ld-hl { opacity: 1; }
+.ld-row.sel-up .ld-hl { border-top-left-radius: 0; border-top-right-radius: 0; }
+.ld-row.sel-down .ld-hl { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.ld-row .ld-ic { position: absolute; left: 17.6px; top: 5px; width: 14px; height: 14px; }
+.ld-row .ld-n { position: absolute; left: 39.6px; top: 3.6px; color: #F2F2F5; }
+.ld-row .ld-d { position: absolute; left: calc(var(--c-date) + 0px); top: 3.6px; color: #9B9B9E; }
+.ld-row .ld-s { position: absolute; right: calc(var(--c-size) - 0.2px); top: 3.6px; color: #9B9B9E; }
+.ld-row .ld-k { position: absolute; left: calc(var(--c-kind) - 0.4px); top: 3.6px; color: #9B9B9E; }
+.ld-row.sel .ld-n, .ld-row.sel .ld-d, .ld-row.sel .ld-s, .ld-row.sel .ld-k { color: #fff; }
+.ld-ic.page { border-radius: 1.2px; }
+.ld-ic.app { border-radius: 3.4px; }
+
+.ld-btn { position: absolute; top: 411.2px; height: 30px; border-radius: 15px; font-size: 13.2px; font-weight: 500; line-height: 30px; text-align: center; color: #F2F2F5; }
+.ld-cancel { left: 608.4px; width: 86.8px; background: #3D3D40; }
+.ld-open { left: 705.2px; width: 86.8px; background: var(--blue); color: #fff; }
+
+/* Likely's search bar (PickerHUD): hudWindow material, radius 10, 1pt primary/0.12 stroke */
+.ld-hud { position: absolute; left: 418.4px; top: 115.2px; width: 612px; height: 48px; border-radius: 10px;
+  background: rgba(38, 38, 42, 0.94);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12), 0 0 0 0.5px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.45);
+ }
+.ld-mark { position: absolute; left: 11.2px; top: 12px; width: 24px; height: 24px; }
+.ld-mark img { display: block; width: 100%; height: 100%; }
+.ld-mark.working { animation: ld-pulse 1.6s ease-in-out infinite; }
+@keyframes ld-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.ld-field { position: absolute; left: 46.8px; right: 45.4px; top: 9.2px; height: 30px; border-radius: 8px;
+  background: #333437; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); }
+.ld-ph, .ld-typed { position: absolute; left: 10.2px; top: 6.6px; font-size: 13.2px; line-height: 17px; white-space: nowrap; }
+.ld-ph { color: #707173; }
+.ld-typed { color: #F2F2F5; }
+.ld-caret { display: inline-block; width: 1.6px; height: 16px; margin-left: 0.6px; vertical-align: -3px; background: #6FA6FF; border-radius: 1px; }
+.ld-caret.blink { animation: ld-blink 1.06s steps(1) infinite; }
+@keyframes ld-blink { 50% { opacity: 0; } }
+.ld-status { position: absolute; right: 10px; top: 17.4px; font-size: 11px; line-height: 13px; color: #6E6E72; white-space: nowrap; text-align: right; }
+.ld-status u { text-decoration: underline; text-underline-offset: 1.5px; }
+.ld-send { position: absolute; right: 8.8px; top: 11px; width: 26px; height: 26px; border-radius: 13px; background: #59595B; transition: background-color .15s ease-out; }
+.ld-send.on { background: var(--blue); }
+.ld-send svg { position: absolute; left: 6px; top: 6px; width: 14px; height: 14px; }
+
+/* Quick Look (Space on a selected file) */
+.ld-ql { position: absolute; left: 600px; top: 206px; width: 380px; height: 316px; border-radius: 16px; overflow: hidden;
+  background: #1E1E20; transform-origin: -30% 20%; visibility: hidden; opacity: 0;
+  box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.14), 0 0 0 0.5px rgba(0,0,0,0.8), 0 24px 60px rgba(0,0,0,0.6); }
+.ld-ql-bar { position: absolute; left: 0; right: 0; top: 0; height: 36px; background: #2A2A2D; box-shadow: 0 0.5px 0 rgba(0,0,0,0.6); }
+.ld-ql-x { position: absolute; left: 12px; top: 11px; width: 14px; height: 14px; border-radius: 7px; background: #FF5F57; }
+.ld-ql-t { position: absolute; left: 0; right: 0; top: 10px; text-align: center; font-size: 13px; font-weight: 600; color: #E6E6E9; line-height: 16px; }
+.ld-ql-open { position: absolute; right: 10px; top: 7px; height: 22px; padding: 0 10px; border-radius: 11px; background: #3D3D40; font-size: 12px; line-height: 22px; color: #E6E6E9; }
+.ld-ql-img { position: absolute; left: 0; right: 0; top: 36px; bottom: 0; background-size: cover; background-position: center; }
+
+/* Click highlight (Screen Studio-style): a soft ring centered on the pointer's tip */
+.ld-click { position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 50%;
+  border: 1.6px solid rgba(255,255,255,0.85); background: rgba(255,255,255,0.16);
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.25), 0 0 10px rgba(255,255,255,0.25);
+  opacity: 0; z-index: 4; }
+
+/* Pointer. (Nothing in the scene uses will-change: a promoted layer keeps its first raster scale,
+   so text would go soft when the camera zooms in.) */
+.ld-cursor { position: absolute; left: 0; top: 0; width: 17px; height: 25px; z-index: 5; }
+
+/* Quick Look style preview for images in the list */
+.ld-thumbimg { position: absolute; inset: 0; border-radius: 2px; background-size: cover; background-position: center; }
+
+/* Captions under the demo */
+.demo-caps { position: relative; height: 22px; margin-top: 14px; text-align: center; }
+.demo-cap { position: absolute; left: 0; right: 0; top: 0; margin: 0; font-size: 14px; color: var(--text-2);
+  opacity: 0; transform: translateY(4px); transition: opacity .35s ease, transform .35s ease; }
+.demo-cap.on { opacity: 1; transform: none; }
+.copy-editing .demo-caps { height: auto; }
+.copy-editing .demo-cap { position: static; opacity: 1; transform: none; margin: 4px 0; }
+
+/* ?edit only: background picker under the demo */
+.ld-wallpicker { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px auto 0; font: 500 13px -apple-system, sans-serif; color: rgba(235,240,255,.75); }
+.ld-wallpicker button { width: 30px; height: 30px; border-radius: 8px; border: 0; background: rgba(224,229,255,.12); color: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
+.ld-wallpicker button:hover { background: #387DF5; }
+.ld-wallpicker span { min-width: 260px; text-align: center; }

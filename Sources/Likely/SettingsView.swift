@@ -91,9 +91,6 @@ private struct GeneralSettings: View {
     @AppStorage(LogDetailsSwitch.defaultsKey) private var logDetailsUntil: Double = 0
     @AppStorage("showRecentFiles") private var showRecentFiles = true
     @AppStorage("recentFileCount") private var recentFileCount = 3
-    /// Settings.sendScreenshot (migrated from "autoSuggest" at launch).
-    @AppStorage("sendScreenshot") private var sendScreenshot = true
-    private var screenshotsAllowed: Bool { CGPreflightScreenCaptureAccess() }
     @State private var folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
     @State private var pinned = SidebarFavorites.contains(LikelyFolder.url)
 
@@ -161,16 +158,6 @@ private struct GeneralSettings: View {
                 Text("Your newest downloads, screenshots and saved files, ready in the Likely folder under …Recent…. Likely searches with your agent when you type in the bar above the picker.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("When you search") {
-                Toggle("Send a screenshot with searches", isOn: $sendScreenshot)
-                    .disabled(!screenshotsAllowed)
-                Text(!screenshotsAllowed
-                     ? "Needs the optional Screenshots permission (Permissions tab). Without it, your agent gets what you type, the app name and the window title."
-                     : sendScreenshot
-                     ? "Your agent also gets a screenshot of the window behind the picker. It's taken when you search, never just because a picker opened."
-                     : "Your agent gets only what you type, the app name and the window title. No screenshots are taken.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             if Updater.isEnabled { UpdatesSection() }
             Section("Troubleshooting") {
                 Toggle("Log details for troubleshooting", isOn: Binding(
@@ -184,6 +171,9 @@ private struct GeneralSettings: View {
                     Spacer()
                     Button("Run Onboarding Again") { actions.showOnboarding() }
                 }
+            }
+            Section("About") {
+                LegalLinks(size: NSFont.systemFontSize)
             }
         }
         .formStyle(.grouped)
@@ -244,7 +234,11 @@ private struct LicenseSection: View {
                     if !store.isActive {
                         Button("Buy…") { actions.showLicense() }
                     }
-                    Button("Check Again") { Task { await store.refresh() } }.disabled(store.isChecking)
+                    if License.mayContactServer {
+                        Button("Check Again") { Task { await store.refresh() } }.disabled(store.isChecking)
+                    } else {
+                        Text("Finish setting up Likely first").foregroundStyle(.secondary)
+                    }
                 }
             }
             if let message = portalError ?? store.lastError, !License.isFreeBuild {
@@ -409,12 +403,6 @@ private struct PermissionSettings: View {
                     icon: "accessibility", title: "Accessibility",
                     description: "Notices when a file picker opens and jumps it to your Likely folder.",
                     isGranted: state.accessibility, shouldPulse: false, action: Permissions.requestAccessibility)
-                OnboardingPermissionRow(
-                    icon: "camera.viewfinder", title: "Screenshots", badge: "Optional",
-                    description: "Lets Likely send your agent a screenshot of the app you're uploading from, so it knows what you're uploading to when you search.",
-                    isGranted: state.screenRecording, shouldPulse: false,
-                    note: "Already allowed it?", secondaryTitle: "Quit & Reopen", secondaryAction: Permissions.relaunch,
-                    action: Permissions.requestScreenRecording)
                 Divider()
                 Text("Folders Likely searches").font(.headline)
                 SearchFolderList(state: state)
@@ -508,6 +496,8 @@ private struct ToolsSettings: View {
     @State private var needsProblem: String?
     /// The tool whose areas are being turned on (macOS may be showing its alert): its row waits.
     @State private var working: String?
+    /// The selected agent's built-in tools that are off (BuiltinToolSettings), reloaded when it changes.
+    @State private var disabledBuiltins: Set<String> = []
 
     private var photoState: PhotoSearch.State { PhotoSearch.state(tools: store.tools, rclipInstalled: rclipInstalled) }
 
@@ -589,6 +579,11 @@ private struct ToolsSettings: View {
             }
 
             Section {
+                if let warning = AgentBuiltins.searchWarning(agentID: agentID, disabled: disabledBuiltins) {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                let toggleable = BuiltInTools.isToggleable(agentID: agentID)
                 ForEach(BuiltInTools.entries(for: agentID), id: \.self) { entry in
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -598,13 +593,38 @@ private struct ToolsSettings: View {
                             }
                         }
                         Spacer()
-                        Text("Always on").font(.caption).foregroundStyle(.secondary)
+                        if toggleable {
+                            Toggle("", isOn: Binding(
+                                get: { !disabledBuiltins.contains(entry.name) },
+                                set: { on in
+                                    BuiltinToolSettings.setEnabled(on, name: entry.name, agentID: agentID)
+                                    disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
+                                }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        } else {
+                            Text("Always on").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             } header: {
-                Text("Built in")
+                HStack {
+                    Text("Built in")
+                    Spacer()
+                    if BuiltInTools.isToggleable(agentID: agentID) {
+                        Button("Reset to Defaults") {
+                            BuiltinToolSettings.reset(agentID: agentID)
+                            disabledBuiltins = []
+                        }
+                        .controlSize(.small)
+                        .disabled(disabledBuiltins.isEmpty)
+                    }
+                }
             } footer: {
-                Text("What \(AgentKind.with(id: agentID)?.name ?? "your agent") can always use. These only read.")
+                Text(BuiltInTools.isToggleable(agentID: agentID)
+                     ? "What \(AgentKind.with(id: agentID)?.name ?? "your agent") can use. These only read. Turn one off to compare search speed; the search prompt then says it's unavailable. Your tools above aren't affected."
+                     : "What \(AgentKind.with(id: agentID)?.name ?? "your agent") can always use. Codex has no per-tool list, so nothing here can be turned off.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -637,8 +657,12 @@ private struct ToolsSettings: View {
         .onAppear {
             store.reloadIfChanged()
             detectRclip()
+            disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
         }
-        .onChange(of: agentID) { _, _ in detectRclip() }
+        .onChange(of: agentID) { _, _ in
+            detectRclip()
+            disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
+        }
         .sheet(isPresented: $settingUpPhotos) {
             PhotoSearchSetupSheet(installed: rclipInstalled, checkAgain: detectRclip) { settingUpPhotos = false }
         }

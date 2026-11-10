@@ -3,7 +3,7 @@
 Likely's search agent can only run a few read-only search commands (`mdfind`, `mdls`, `ls`, `grep`, `head`,
 `stat`, plus each agent's own file reading). Tools let you give it more: any command-line program you
 have installed, with instructions for when to use it. Settings → Tools lists the built-in ones under
-"Built in" (always on, read from the runners' own allowlists) below your tools.
+"Built in" (from `AgentBuiltins`, the runners' own allowlists) below your tools.
 
 Tools live in one file, the source of truth:
 
@@ -168,6 +168,29 @@ A tool that breaks a rule is still saved, but turned off, and the Tools tab says
 The command must be found on the agent's PATH: the agent's own folder, `/opt/homebrew/bin`,
 `/usr/local/bin`, `~/.local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, then Likely's inherited PATH.
 The **Test** button in the Tools tab checks this.
+
+## Turning built-in tools off
+
+Each built-in tool has a toggle (on by default), so you can compare search speed without one. The setting is
+per agent (`disabledBuiltinTools.<agentID>` in Likely's preferences, which agents can't write); "Reset to
+Defaults" turns them all back on. Your tools are never affected. What turning one off does:
+
+- **Claude Code**: `Read`, `Glob` and `Grep` are left out of `--tools` (the model never sees them) and passed
+  to `--disallowedTools`. A command (`mdfind`, `ls`, …) is left out of `--allowedTools`; Claude runs in
+  `dontAsk` mode, so it's refused if tried. It isn't denied outright, so a tool of yours with the same prefix
+  still works. With no command left (and no tools of yours), Bash is left out of `--tools` too.
+- **Gemini CLI**: `read_file`/`list_directory` leave `tools.core` and go to `tools.exclude`; commands leave
+  `--allowed-tools`. With no command left, `run_shell_command` is removed as well.
+- **OpenCode**: the tool or command is no longer allowed in `OPENCODE_PERMISSION`, so the leading `"*": "deny"`
+  applies (which also hides a tool). Its `grep` covers both the grep tool and the command. With no command
+  left, `bash` is denied entirely.
+- **Hermes**: the toolset (`terminal`, `file`, `vision`) is left out of `-t`. With all three off it gets `-t
+  todo`, since an empty `-t` would mean Hermes' default (much larger) set.
+- **Codex** has no per-tool list; its row is informational.
+
+The search prompt then names the tools that are off ("Unavailable tools … Don't try them") and, in the default
+template, drops the hints that use them (the `mdfind` examples, the `ls -lt` recent-files hint). Settings warns
+when nothing that finds files by name is left (e.g. `mdfind` and `Glob` both off for Claude), but allows it.
 
 ## How each agent applies tools
 
