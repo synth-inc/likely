@@ -25,19 +25,14 @@ final class GeminiRunner: AgentRunner {
     var onExit: ((AgentOutcome) -> Void)?
     var launchOptions = AgentLaunchOptions()
 
-    /// Plus the commands of the user's tools (see ToolStore), as `run_shell_command(<prefix>)`.
-    static let allowedCommands = ["mdfind", "mdls", "ls", "grep", "head", "stat"]
-
-    /// Only read_file, list_directory and the shell are registered: glob/search_file_content and the
-    /// codebase_investigator subagent crawl the whole home workspace and can stall for minutes;
-    /// memory, web, skills and hooks aren't wanted. Write tools aren't available headless anyway.
-    static let coreTools = ["read_file", "list_directory", "run_shell_command"]
-    private static let settings = Data("""
-        {"tools": {"core": [\(coreTools.map { "\"\($0)\"" }.joined(separator: ", "))], "enableHooks": false, "sandbox": false},
-         "hooksConfig": {"enabled": false}, "skills": {"enabled": false},
-         "agents": {"overrides": {"codebase_investigator": {"enabled": false}, "cli_help": {"enabled": false},
-                                  "generalist": {"enabled": false}}}}
-        """.utf8)
+    /// Only read_file, list_directory and the shell are registered (AgentBuiltins.gemini, minus what's
+    /// turned off in Settings): glob/search_file_content and the codebase_investigator subagent crawl the
+    /// whole home workspace and can stall for minutes; memory, web, skills and hooks aren't wanted. Write
+    /// tools aren't available headless anyway. Commands: AgentBuiltins.geminiCommands plus the user's
+    /// tools (see ToolStore), as `run_shell_command(<prefix>)`.
+    private var toolConfig: AgentBuiltins.GeminiConfig {
+        AgentBuiltins.gemini(disabled: launchOptions.disabledBuiltins(for: "gemini"), extra: launchOptions.toolCommands)
+    }
 
     private(set) var isBusy = false
     private var process: Process?
@@ -105,9 +100,9 @@ final class GeminiRunner: AgentRunner {
             "-e", "none",
             "--approval-mode", "default",
             "--include-directories", directories.joined(separator: ","),
-            // `=` form: the flag takes an array and would otherwise swallow the following arguments.
-            ToolPermissions.geminiAllowedToolsArgument(builtIn: Self.allowedCommands, extra: launchOptions.toolCommands),
         ]
+        // `=` form: the flag takes an array and would otherwise swallow the following arguments.
+        + (toolConfig.allowedToolsArgument.map { [$0] } ?? [])
     }
 
     private func stopProcess() {
@@ -151,7 +146,7 @@ final class GeminiRunner: AgentRunner {
         env["GOOGLE_CLOUD_LOCATION"] = Self.vertexLocation
         // Our own settings layer (overrides ~/.gemini/settings.json without touching it).
         let settingsURL = workDir.appendingPathComponent("gemini-settings.json")
-        try? OwnerOnly.write(Self.settings, to: settingsURL)
+        try? OwnerOnly.write(AgentBuiltins.geminiSettings(toolConfig), to: settingsURL)
         env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = settingsURL.path
         process.environment = env
 
