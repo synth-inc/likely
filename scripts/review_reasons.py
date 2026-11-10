@@ -15,6 +15,7 @@ _CATEGORIES = "Review: CCPA-style categories, sources and recipients were missin
 
 REASONS = {
     "privacy.html": {
+        "privacy.effective": "Owner decision: effective date set to the publish date, November 9, 2026.",
         "privacy.lede": "Decision 1: drop the unqualified “no analytics” claim; the app has none, but the server sends request analytics to PostHog and keeps Stripe purchase details. Review: “exactly” overclaimed.",
         "privacy.toc.providers": "Contents entry for the new “Our service providers” section (decision 1: name processors).",
         "privacy.toc.categories": "Contents entry for the new CCPA categories section (decision 3, rights).",
@@ -114,6 +115,7 @@ REASONS = {
         "privacy.contact.p1": "Review (GDPR): controller contact needs a postal address (placeholder).",
     },
     "terms.html": {
+        "terms.effective": "Owner decision: effective date set to the publish date, November 9, 2026.",
         "terms.toc.termination": "Section renamed to match its content: suspension now has its own rules (review: suspension).",
         "terms.definitions.li2": "Review (GPL): “Paid License” is activation of our license service plus updates and support, not a copyright license; software rights come from GPL-3.0.",
         "terms.eligibility.p1": "Review (children): 13–17 handled consistently with the privacy policy; eligibility covers use, not only purchase.",
