@@ -17,8 +17,8 @@ let package = Package(
         // package once a second app adopts it.
         .target(name: "OnboardingKit", path: "Sources/OnboardingKit"),
         // Owner-only files, the data key (Keychain) and AES-GCM encryption of history, Spotlight
-        // exclusion, the cleanup of older versions' screenshots. Foundation/CryptoKit/Security only, unit-tested with an
-        // in-memory key. See docs/PRIVACY.md.
+        // exclusion, the cleanup of older versions' screenshots. Foundation/CryptoKit/Security only,
+        // unit-tested with an in-memory key. See docs/PRIVACY.md.
         .target(name: "LikelyStorage", path: "Sources/LikelyStorage"),
         .testTarget(name: "LikelyStorageTests", dependencies: ["LikelyStorage"], path: "Tests/LikelyStorageTests"),
         // Eval case format, scoring and reports (Foundation only, unit-tested). See docs/EVALS.md.

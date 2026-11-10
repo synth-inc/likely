@@ -32,4 +32,12 @@ final class EvalCaseFileTests: XCTestCase {
         XCTAssertNotNil(c.context?.screenshot)
         XCTAssertEqual(try JSONDecoder().decode(EvalCase.self, from: Data(EvalCaseFile.encodeLine(c).utf8)), c)
     }
+
+    /// Screenshot-only cases (no query) have nothing to replay now; EvalCLI skips them.
+    func testScreenshotOnlyCasesHaveNoQuery() {
+        XCTAssertFalse(EvalCase(id: "a", query: [""], expect: Expectation(anyOf: ["/x"])).hasQuery)
+        XCTAssertFalse(EvalCase(id: "b", query: [], expect: Expectation(anyOf: ["/x"])).hasQuery)
+        XCTAssertFalse(EvalCase(id: "c", query: ["  ", "\n"], expect: Expectation(anyOf: ["/x"])).hasQuery)
+        XCTAssertTrue(EvalCase(id: "d", query: ["", "the lease"], expect: Expectation(anyOf: ["/x"])).hasQuery)
+    }
 }

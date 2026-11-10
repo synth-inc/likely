@@ -6,6 +6,8 @@ searching to its model provider; that's how the search works.
 
 Likely takes no screenshots and doesn't ask for Screen Recording. (Earlier versions could send a
 screenshot of the window behind the picker; at launch Likely deletes any they left, see "Less on disk".)
+If you allowed Screen Recording for an earlier version, you can remove Likely from System Settings →
+Privacy & Security → Screen Recording.
 
 ## What Likely stores, and where
 
@@ -112,12 +114,16 @@ session in place. Agents can't read any of these. Earlier versions of Likely did
 delete Likely's folders in `~/.claude/projects` (their names contain `Application-Support-Likely`) to
 remove what they left.
 
-**Less on disk.** Earlier versions could take screenshots. At every launch Likely deletes any they left
-(`LegacyScreenshots`): screenshots saved with tests (`…/Likely/evals/screenshots/`, encrypted or not), the
-screenshot sent with a search (`…/Likely/run/context*.png`), the debug view's copies
+**Less on disk.** Earlier versions could take screenshots. At launch Likely deletes any they left
+(`LegacyScreenshots`), and stops checking once a launch finds none: screenshots saved with tests
+(`…/Likely/evals/screenshots/`, encrypted or not), the screenshot sent with a search (`…/Likely/run/context*.png`), the debug view's copies
 (`…/Likely/debug/*.png`) and decrypted copies a killed eval run left (`screenshot-<id>.png` under
-`…/Likely/evals/runs`). It deletes only files with those names in those folders, and follows no links out
-of Likely's folder. Test cases that still name a screenshot keep working; the field is ignored.
+`…/Likely/evals/runs/<run>/cases/<case>/agent/`). It deletes only files with those names in those
+folders, and follows no links out of Likely's folder. If `…/Likely` is a link somewhere other than
+`Likely.noindex` next to it (you redirected the folder), Likely leaves it alone, logs that, and you can
+delete those files yourself. Test cases that still name a screenshot load, but the field is ignored, and
+a case saved with no query (one that searched on a screenshot alone) is skipped by eval runs and shows
+"needs a query" in Settings → Evals.
 
 **Spotlight.** `~/Library/Application Support/Likely` and `~/Library/Logs/Likely` are kept out of the
 Spotlight index, so eval reports, test cases and the log never turn up in an agent's `mdfind` (an eval's

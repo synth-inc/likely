@@ -2,21 +2,26 @@ import Darwin
 import Foundation
 
 /// Likely no longer takes screenshots. Older versions left them in its data folder; this deletes
-/// them once at launch (and again at later launches, which finds nothing):
+/// them at launch, until a pass finds nothing (DataProtection keeps the flag):
 /// - `evals/screenshots/*`: screenshots saved with test cases, encrypted (`.png.enc`) or not;
 /// - `run/context*.png`: the screenshot sent with a search (left by a crash);
 /// - `debug/*.png`: the Debug View's copies (dev builds);
-/// - `evals/runs/**/screenshot-<8 hex>.png`: decrypted copies an eval run left when it was killed.
+/// - `evals/runs/*/cases/*/agent/screenshot-<8 hex>.png`: decrypted copies an eval run left when it
+///   was killed (the only place they were written).
 ///
 /// Only regular files with those names, in those folders, are deleted. The data folder is resolved
 /// like OwnerOnly.repair does (…/Likely, or the `Likely.noindex` it links to); no other link is
 /// followed, so nothing outside Likely's folder is touched. Test cases that still name a screenshot
 /// keep the field; it's ignored.
 public enum LegacyScreenshots {
-    /// Returns how many files were deleted.
+    /// Returns how many files were deleted: 0 if there's no data folder, nil if there is one but it's
+    /// a link somewhere other than `Likely.noindex` next to it (left alone).
     @discardableResult
-    public static func removeAll(support: URL = LikelyDataPaths.support()) -> Int {
-        guard let root = OwnerOnly.repairRoot(support) else { return 0 }
+    public static func removeAll(support: URL = LikelyDataPaths.support()) -> Int? {
+        guard let root = OwnerOnly.repairRoot(support) else {
+            var st = stat()
+            return lstat(support.standardizedFileURL.path, &st) == 0 ? nil : 0
+        }
         var removed = 0
         removed += removeFiles(in: root + "/run") { $0.hasPrefix("context") && $0.lowercased().hasSuffix(".png") }
         removed += removeFiles(in: root + "/debug") { $0.lowercased().hasSuffix(".png") }
@@ -45,22 +50,20 @@ public enum LegacyScreenshots {
         return removed
     }
 
-    /// Walks real folders only (links aren't followed).
+    /// In `<runs>/<run>/cases/<case>/agent/` only (real folders; links aren't followed).
     private static func removeTemporaryCopies(under runs: String) -> Int {
-        guard isFolder(runs) else { return 0 }
         var removed = 0
-        var stack = [runs]
-        while let dir = stack.popLast() {
-            for name in (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [] {
-                let path = dir + "/" + name
-                if isFolder(path) {
-                    stack.append(path)
-                } else if isTemporaryCopy(name), isRegularFile(path), unlink(path) == 0 {
-                    removed += 1
-                }
+        for run in subfolders(of: runs) {
+            for caseDir in subfolders(of: run + "/cases") {
+                removed += removeFiles(in: caseDir + "/agent", where: isTemporaryCopy)
             }
         }
         return removed
+    }
+
+    private static func subfolders(of folder: String) -> [String] {
+        guard isFolder(folder) else { return [] }
+        return ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).map { folder + "/" + $0 }.filter(isFolder)
     }
 
     private static func type(_ path: String) -> mode_t? {

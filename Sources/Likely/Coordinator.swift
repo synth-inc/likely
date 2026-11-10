@@ -453,13 +453,7 @@ final class Coordinator {
     }
 
     private func launchAgent(picker: Picker) {
-        guard let agent = chosenAgent() else {
-            let name = AgentKind.with(id: Settings.agentID)?.name ?? "Your agent"
-            folder.setStatus("\(name) not found – see Likely settings")
-            debugRun?.outcome = "\(name) not found"
-            onStateChange?(.done, "\(name) not found")
-            return
-        }
+        guard let agent = chosenAgent() else { return agentNotFound() }
         prepareRunner(for: agent)
         ToolStore.shared.reloadIfChanged()   // in case tools.json was edited and the watcher hasn't fired yet
         let base = Self.prompt(picker: picker)
@@ -471,6 +465,17 @@ final class Coordinator {
         debugRun?.log("\(agent.kind.name) started")
         runner.start(executable: agent.path, model: agent.model, prompt: prompt,
                      workDir: supportDirectory.appendingPathComponent("run"))
+    }
+
+    /// The chosen agent isn't installed: say so in the folder and the bar, and stop the spinner.
+    private func agentNotFound() {
+        let name = AgentKind.with(id: Settings.agentID)?.name ?? "Your agent"
+        folder.setStatus("\(name) not found – see Likely settings")
+        debugRun?.outcome = "\(name) not found"
+        debugRun?.log("\(name) not found")
+        hud.model.working = false
+        hud.model.status = "\(name) not found. See Likely settings."
+        onStateChange?(.done, "\(name) not found")
     }
 
     private func runFinished(_ outcome: AgentOutcome) {
@@ -545,12 +550,16 @@ final class Coordinator {
         onStateChange?(.searching, status)
 
         if runner.send(message) { return }
-        if let lastPrompt, let agent = chosenAgent() {
-            // The agent's conversation is gone (crashed or never started); start over with the feedback attached.
-            prepareRunner(for: agent)
-            runner.start(executable: agent.path, model: agent.model, prompt: lastPrompt + "\n\n" + message,
-                         workDir: supportDirectory.appendingPathComponent("run"))
+        guard let lastPrompt else {
+            // The first search never started (no agent then): start it now, with everything typed so far.
+            pendingFeedback = typedQueries
+            return launchAgent(picker: picker)
         }
+        guard let agent = chosenAgent() else { return agentNotFound() }
+        // The agent's conversation is gone (crashed); start over with the feedback attached.
+        prepareRunner(for: agent)
+        runner.start(executable: agent.path, model: agent.model, prompt: lastPrompt + "\n\n" + message,
+                     workDir: supportDirectory.appendingPathComponent("run"))
     }
 
     static func prompt(picker: Picker) -> String {
@@ -588,8 +597,6 @@ enum PromptBuilder {
         return PromptTemplate.render(filled, values: [
             "context": context,
             "userName": name.isEmpty ? "" : "The user is \(name).",
-            // Templates saved by older versions may still have it: no screenshots any more.
-            "screenshot": "",
             "app": c.appName,
             "windowTitle": c.windowTitle ?? "",
             "likelyFolder": LikelyFolder.url.path,
@@ -656,8 +663,9 @@ enum PromptTemplate {
     Don't search inside app data stores (Photos, Mail, Messages, ~/Library) unless the user asks for that kind of item.
     """
 
+    /// Retired placeholders (`{{screenshot}}`) in templates saved by older versions are filled with nothing.
     static func render(_ template: String, values: [String: String]) -> String {
-        values.reduce(template) { $0.replacingOccurrences(of: "{{\($1.key)}}", with: $1.value) }
+        PromptRendering.render(template, values: values)
     }
 }
 
@@ -735,6 +743,7 @@ enum Settings {
         // which it replaced).
         defaults.removeObject(forKey: "sendScreenshot")
         defaults.removeObject(forKey: "autoSuggest")
+        defaults.removeObject(forKey: "OnboardingKit.screenRecordingAsked")
         // "Log every accessibility event (verbose)" is now part of "Log details for troubleshooting",
         // which turns itself off (see AppDelegate.applyLogDetails).
         defaults.removeObject(forKey: "verbose")

@@ -61,11 +61,26 @@ enum DataProtection {
 
     static func migrateInBackground() {
         DispatchQueue.global(qos: .utility).async {
-            // Likely no longer takes screenshots: delete any an older version left.
-            let removed = LegacyScreenshots.removeAll()
-            if removed > 0 { Log.write("privacy", "removed \(removed) screenshot(s) left by an older version") }
+            removeLegacyScreenshots()
             // Search history: SearchHistoryStore moves and encrypts it on its own queue.
             SearchHistoryStore.shared.convertPlaintext()
+        }
+    }
+
+    static let legacyScreenshotsCleanedKey = "legacyScreenshotsCleaned"
+
+    /// Likely no longer takes screenshots: delete any an older version left, at each launch until a
+    /// pass finds nothing.
+    private static func removeLegacyScreenshots() {
+        guard !UserDefaults.standard.bool(forKey: legacyScreenshotsCleanedKey) else { return }
+        guard let removed = LegacyScreenshots.removeAll() else {
+            Log.write("privacy", "data folder is redirected elsewhere; left old screenshots alone")
+            return
+        }
+        if removed > 0 {
+            Log.write("privacy", "removed \(removed) screenshot(s) left by an older version")
+        } else {
+            UserDefaults.standard.set(true, forKey: legacyScreenshotsCleanedKey)
         }
     }
 

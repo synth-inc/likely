@@ -31,6 +31,8 @@ final class LegacyScreenshotsTests: TempDirTestCase {
             "evals/runs/r1/cases/001-a/prompt.txt", "evals/runs/r1/cases/001-a/agent/screenshot-notes.png",
             "evals/runs/r1/cases/001-a/agent/gemini-settings.json", "run/last-run.jsonl", "run/gemini-settings.json",
             "run/photo.png", "debug/notes.txt", "History/history.enc.jsonl", "tools.json", "screenshot-0a1b2c3d.png",
+            // Copies were only ever written in a case's agent folder.
+            "evals/runs/r1/screenshot-0a1b2c3d.png", "evals/runs/r1/cases/001-a/screenshot-0a1b2c3d.png",
         ].map { try put($0) }
         // Links are never followed: not to a folder elsewhere, not to a file elsewhere.
         let outside = dir.appendingPathComponent("outside", isDirectory: true)
@@ -49,14 +51,15 @@ final class LegacyScreenshotsTests: TempDirTestCase {
         XCTAssertEqual(LegacyScreenshots.removeAll(support: support), 0)
     }
 
-    /// A data folder that's a link anywhere but `Likely.noindex` next to it is left alone.
+    /// A data folder that's a link anywhere but `Likely.noindex` next to it is left alone (nil, so
+    /// the app can log it).
     func testIgnoresAFolderLinkedElsewhere() throws {
         let fm = FileManager.default
         let elsewhere = dir.appendingPathComponent("elsewhere", isDirectory: true)
         let shot = try put("evals/screenshots/a.png", in: elsewhere)
         try fm.createDirectory(at: support.deletingLastPathComponent(), withIntermediateDirectories: true)
         try fm.createSymbolicLink(atPath: support.path, withDestinationPath: elsewhere.path)
-        XCTAssertEqual(LegacyScreenshots.removeAll(support: support), 0)
+        XCTAssertNil(LegacyScreenshots.removeAll(support: support))
         XCTAssertTrue(fm.fileExists(atPath: shot))
     }
 

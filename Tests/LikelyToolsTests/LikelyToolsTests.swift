@@ -572,3 +572,15 @@ final class ToolApprovalTests: XCTestCase {
         XCTAssertEqual(ToolApproval.fingerprint(of: spaced), ToolApproval.fingerprint(of: tool))
     }
 }
+
+/// Custom prompt templates saved by older versions can still contain `{{screenshot}}`.
+final class PromptRenderingTests: XCTestCase {
+    func testRetiredScreenshotPlaceholderRendersAsNothing() {
+        let template = "{{context}} {{userName}}\n{{screenshot}}\n\nFind the file. Look in {{searchFolders}}."
+        let out = PromptRendering.render(template, values: ["context": "The user opened a picker in Safari.", "userName": "",
+                                                             "searchFolders": "~/Documents"])
+        XCTAssertFalse(out.contains("{{"), out)
+        XCTAssertFalse(out.lowercased().contains("screenshot"), out)
+        XCTAssertTrue(out.contains("The user opened a picker in Safari.") && out.contains("~/Documents"), out)
+    }
+}

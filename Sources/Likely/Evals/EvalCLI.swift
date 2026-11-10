@@ -412,7 +412,7 @@ final class EvalSession {
         if result.transcriptPath != nil { result.transcriptPath = rel + "/transcript.jsonl" }
         if result.promptPath != nil { result.promptPath = rel + "/prompt.txt" }
         results.append((index, result))
-        let mark = !result.score.scorable ? "?" : result.pass ? "PASS" : "FAIL"
+        let mark = result.status == "skipped" ? "SKIP" : !result.score.scorable ? "?" : result.pass ? "PASS" : "FAIL"
         var line = "[\(results.count)/\(total)] \(mark) \(result.id)"
         if options.repeatCount > 1 { line += " #\(result.attempt)" }
         line += "  rank \(result.score.firstHitRank.map(String.init) ?? "–")  \(String(format: "%.1fs", result.totalSeconds))"
@@ -573,6 +573,8 @@ final class EvalCaseRun {
 
     func start(completion: @escaping (EvalCaseResult) -> Void) {
         self.completion = completion
+        // Saved by an older version that searched on a screenshot alone: nothing to replay.
+        guard evalCase.hasQuery else { return finish(status: "skipped", error: "screenshot-only case") }
         let prompt = firstPrompt()
         try? OwnerOnly.write(prompt, to: workDir.appendingPathComponent("prompt.txt"))
         try? OwnerOnly.createDirectory(agentDir)

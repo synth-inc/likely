@@ -20,7 +20,8 @@ public struct EvalCaseResult: Codable {
     public var expected: [String]
     /// 1-based, when a case is run several times (--repeat).
     public var attempt: Int
-    /// "ok", "timeout", "error", "cancelled" (run stopped), or "unscored" (no expected files).
+    /// "ok", "timeout", "error", "cancelled" (run stopped), "unscored" (no expected files), or
+    /// "skipped" (not run: a screenshot-only case from an older version, with no query).
     public var status: String
     public var error: String?
     /// The final turn's suggestions (what the user would be looking at), best first. Scored.
@@ -90,7 +91,7 @@ public struct EvalSummary: Codable {
     public var errors: Int
 
     public static func of(_ results: [EvalCaseResult]) -> EvalSummary {
-        let scored = results.filter { $0.score.scorable }
+        let scored = results.filter { $0.score.scorable && $0.status != "skipped" }
         let n = Double(max(1, scored.count))
         func rate(_ f: (EvalScore) -> Bool) -> Double { Double(scored.filter { f($0.score) }.count) / n }
         let precisions = scored.compactMap(\.score.precision)

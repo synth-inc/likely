@@ -195,6 +195,10 @@ struct EvalsSettings: View {
                     HStack(spacing: 4) {
                         Text(c.id).font(.caption2.monospaced()).foregroundStyle(.tertiary)
                         if let app = c.context?.app { Text("· \(app)").font(.caption2).foregroundStyle(.tertiary) }
+                        if !c.hasQuery {
+                            Text("needs a query").font(.caption2).foregroundStyle(.orange)
+                                .help("Saved by an older version that searched on a screenshot alone. Add a query (Edit) or it's skipped.")
+                        }
                         ForEach(c.tags, id: \.self) { t in
                             Text(t).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
                         }

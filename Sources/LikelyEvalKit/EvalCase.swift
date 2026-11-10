@@ -104,6 +104,9 @@ public struct EvalCase: Codable, Identifiable, Hashable {
     public static let needsExpectedTag = "needs-expected"
 
     public var needsExpected: Bool { expect.isEmpty }
+    /// Whether the user typed anything to replay. Older versions saved cases that searched on a
+    /// screenshot alone; without screenshots those test nothing (EvalCLI skips them).
+    public var hasQuery: Bool { query.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
 
     public static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
 
