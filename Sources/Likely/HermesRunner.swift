@@ -50,11 +50,14 @@ final class HermesRunner: AgentRunner {
     }
 
     /// `--source tool` keeps these sessions out of the user's session lists; `--ignore-rules` skips
-    /// SOUL.md/AGENTS.md/memory. terminal = shell (mdfind etc.), file = read_file/search_files,
-    /// vision = vision_analyze for images. Writes from any of them are stopped by the sandbox.
-    static let toolsets = ["terminal", "file", "vision"]
-    private static let baseArguments = ["chat", "--format", "stream-json", "--source", "tool", "--ignore-rules",
-                                        "-t", toolsets.joined(separator: ",")]
+    /// SOUL.md/AGENTS.md/memory. Toolsets (AgentBuiltins.hermesToolsets, minus the ones turned off in
+    /// Settings): terminal = shell (mdfind etc.), file = read_file/search_files, vision = vision_analyze
+    /// for images. Writes from any of them are stopped by the sandbox. A session keeps the toolsets it
+    /// was created with; each search creates a new one.
+    private var baseArguments: [String] {
+        ["chat", "--format", "stream-json", "--source", "tool", "--ignore-rules",
+         "-t", AgentBuiltins.hermesToolsets(disabled: launchOptions.disabledBuiltins(for: "hermes")).joined(separator: ",")]
+    }
 
     func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
@@ -65,7 +68,8 @@ final class HermesRunner: AgentRunner {
         let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        prepareThenLaunch(prompt + "\nTo look at an image, use vision_analyze (read_file only reads text).")
+        let vision = !launchOptions.disabledBuiltins(for: "hermes").contains("vision")
+        prepareThenLaunch(prompt + (vision ? "\nTo look at an image, use vision_analyze (read_file only reads text)." : ""))
     }
 
     @discardableResult
@@ -129,7 +133,7 @@ final class HermesRunner: AgentRunner {
         turnEnded = false
 
         let process = Process()
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: Self.baseArguments + arguments,
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: baseArguments + arguments,
                                                              profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules,
                                                              readable: [workDir.path], agent: .hermes)
         process.executableURL = launcher

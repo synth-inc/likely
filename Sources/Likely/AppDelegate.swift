@@ -283,6 +283,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
+    /// "Likely is running": the corner toast that ends onboarding, so it doesn't just vanish.
+    @MainActor private static func showReadyToast(on screen: NSScreen?) {
+        Log.write("app", "showing the ready toast")
+        CornerToast.shared.show(
+            title: "Likely is running",
+            message: "Open any file picker, and Likely's search bar appears above it.",
+            icon: Bundle.main.image(forResource: "AppIcon") ?? NSApp.applicationIconImage,
+            screen: screen)
+    }
+
     /// Onboarding opened straight on the license page (lapsed subscription, "Buy…" in Settings).
     func showLicense() {
         // Before the welcome screen's notice, `showOnboarding` starts there instead.
@@ -297,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CopyEditor.shared.saveURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Likely/debug/onboarding-copy.json")
         let view = LikelyOnboardingView {
+            let firstFinish = !Settings.onboarded
             Settings.onboarded = true
             LikelyOnboardingStep.clearSaved()
             if Settings.agentID == "claude", let path = AgentDetector.shared.path(for: AgentKind.all[0]) {
@@ -305,7 +316,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             Log.write("app", "onboarding finished, agent=\(meta: Settings.agentID)")
             self.startWhenTrusted()
-            MainActor.assumeIsolated { OnboardingWindowManager.shared.closeWindow() }
+            MainActor.assumeIsolated {
+                // Measured before the window goes, so the toast lands on the screen onboarding was on.
+                let screen = NSApp.keyWindow?.screen
+                OnboardingWindowManager.shared.closeWindow()
+                // First run only (not the license page reopened later): say Likely's now in the background.
+                if firstFinish { Self.showReadyToast(on: screen) }
+            }
         }
         // AppKit always calls this on the main thread.
         MainActor.assumeIsolated { OnboardingWindowManager.shared.showWindow(view) }
