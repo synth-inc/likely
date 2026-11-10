@@ -1,8 +1,12 @@
 """One-line reasons for each changed data-copy-id, shown in docs/review/index.html.
 
 "Decision N" refers to the owner's decisions for this round (1: disclose PostHog and Stripe; 2: screenshots
-off and name on by default; 3: apply the adversarial legal review's fixes; 4: landing page and README).
-"Review:" names the adversarial review finding being fixed.
+off and name on by default; 3: apply the adversarial legal review's fixes; 4: landing page and README;
+5: remove screenshots from the app entirely, synth-inc/likely PR #20, replacing decision 2's default-off;
+6: apply the second review's wording fixes that need no owner decision).
+"Review:" names the first adversarial review's finding being fixed; "Review 2 Nn:" the second review's.
+ROUND2 (at the end) adds the second round's reasons: appended to a first-round reason, or replacing it
+for elements decision 5 removed.
 """
 
 RENUMBER = "Renumbered: new sections were added before this one (no wording change)."
@@ -41,7 +45,6 @@ REASONS = {
         "privacy.table.updates.what": "Decision 1: the appcast is served after onit-server’s metrics middleware, so feed requests reach PostHog.",
         "privacy.table.updates.when": "Review (updates): only paid builds check for updates; free and dev builds don’t.",
         "privacy.leaves.p2": "Review: “Nothing else leaves your Mac” overclaimed; agents can reach the internet over HTTPS and added tools could send data elsewhere.",
-        "privacy.leaves.p3": "Decision 2: screenshots off unless turned on, and disclose the in-memory click-time snapshot (never on disk or sent unless you search).",
         "privacy.leaves.p4": "Decision 2: the name is included by default; how to turn it off.",
         "privacy.ai.p2": "Review (GDPR): the AI provider isn’t our processor; you and your provider decide how searches are handled.",
         "privacy.ai.p4": "Review (AI providers): consumer plans and free models may train on what you send; opt-out guidance.",
@@ -157,3 +160,72 @@ PAGE_NOTES = {
     "privacy.html": "The draft banner, the “Draft, pending legal review” comment and the effective-date placeholder are unchanged.",
     "terms.html": "The draft banner, the “Draft, pending legal review” comment and the effective-date placeholder are unchanged.",
 }
+
+
+# Second round. A reason here is appended to the first round's, except for the ids in ROUND2_REPLACES.
+_SHOTS = "Decision 5: Likely no longer takes screenshots (PR #20), so this goes."
+ROUND2 = {
+    "privacy.html": {
+        "privacy.collect.p1": "Review 2 N15: the list now includes what people send us.",
+        "privacy.collect.li2b": "Review 2 N8: Stripe events are stored exactly as sent, which includes more than the list said (phone, issuing country, card fingerprint, fraud checks). Review 2 N7: copies are also in the Redis Cloud job queue and, when processing fails, in full in the server logs.",
+        "privacy.collect.li5": "Review 2 N15: support emails, GitHub issues and detailed logs sent with bug reports, with a retention placeholder for attachments.",
+        "privacy.collect.no2": "Decision 5: no screenshots any more. Review 2 N15: “we don’t collect your searches” is qualified for what you send us.",
+        "privacy.table.ai.w3": _SHOTS,
+        "privacy.leaves.p2": "Decision 5: screenshots are no longer among what stays on your Mac.",
+        "privacy.ai.p1": "Review 2 N11: OpenCode’s free models need no account. Review 2 N10: tools you add are more than read-only search.",
+        "privacy.ai.p4": "Decision 5: screenshots are no longer sent.",
+        "privacy.ai.p3": "Decision 5: only the name has a switch now.",
+        "privacy.ai.p6": "Review 2 N14 (round-1 M11): Likely starts agents with its own settings, so the user’s agent config files (telemetry, data sharing) may not apply; Gemini runs through Vertex AI.",
+        "privacy.payment.p1": "Review 2 N7 and N8: the stored notifications’ contents are listed in section 2, and copies pass through Redis Cloud and, on failure, the server logs.",
+        "privacy.providers.redis": "Review 2 N7: Redis Cloud runs the job queue holding full Stripe events (BullMQ on REDISCLOUD_URL).",
+        "privacy.providers.p2": "Review 2 N11: “your own account” isn’t true for OpenCode’s free models; “agreement” covers both.",
+        "privacy.local.li2": "Decision 5: no temporary screenshots in run any more. Review 2 N24 (round-1 L4): search history is on by default, with what it holds and where to turn it off.",
+        "privacy.local.p2": "Review 2 N13: the .noindex folders, the data-protection keychain key, and deleting preferences removes the license activation. Decision 5: older versions’ screenshots are deleted at launch.",
+        "privacy.retention.redis": "Review 2 N7: retention for the job queue’s copies, as a placeholder for the owner.",
+        "privacy.retention.logs": "Review 2 N7: failed jobs log the whole Stripe event (email, address) to the server logs.",
+        "privacy.rights.p1": "Review 2 N6: “isn’t linked to anything that identifies you” contradicted the identifiers table; non-buyers get a way to make requests.",
+        "privacy.categories.ids.to": "Review 2 N7: Redis Cloud receives identifiers in Stripe events.",
+        "privacy.categories.records.what": "Review 2 N8: the stored events contain more payment details than listed.",
+        "privacy.categories.records.to": "Review 2 N7: Redis Cloud.",
+        "privacy.categories.commercial.to": "Review 2 N7: Redis Cloud.",
+        "privacy.gdpr.p6": "Review 2 N21: withdrawing consent, whether the data is required, and no automated decision-making (GDPR Art. 13(2)(c), (e), (f)).",
+        "privacy.gdpr.p4": "Review 2 N11: “your own account” → “your own agreement with it” (OpenCode’s free models need no account).",
+    },
+    "terms.html": {
+        "terms.lede": "Review 2 N16 (GPL §9): acceptance is tied to buying a Paid License or using the Services, not to running the software.",
+        "terms.ai.p1": "Review 2 N11: or a free model offered under the agent’s own terms (OpenCode’s default).",
+        "terms.ai.li3": "Decision 5: no screenshots. Review 2 N23 (round-1 L6): users don’t choose which files the agent opens, so “what you choose to send” becomes “what’s sent to it”.",
+        "terms.purchases.li1": "Review 2 N25: the License section is under Settings → General.",
+        "terms.purchases.li2": "Review 2 N28: moving a one-time license to another Mac needs our help or our server, and the shutdown build covers the rest.",
+        "terms.refunds.p2": "Review 2 N18 (round-1 M8): EU and UK withdrawal-right information, with a placeholder for the withdrawal link.",
+        "terms.files.p1": "Decision 5: no screenshots. Review 2 N15: we do receive what you send us (support, logs).",
+        "terms.thirdparty.p1": "Review 2 N9: we don’t disclaim our own processors (Heroku, PostHog, Redis Cloud, Stripe); we stay responsible for them.",
+        "terms.termination.p1": "Review 2 N19: suspension grounds defined (disputed charges, restored if resolved in your favor; unauthorized payment methods; abuse). Review 2 N22 (round-1 L1): “Changes” (section 18) and section 16 no longer survive termination.",
+        "terms.changes.p1": "Review 2 N17: a change never reduces what was already bought, and subscribers can cancel with a pro-rata refund. Review 2 N16: “keep using the Services”, not Likely (GPL).",
+    },
+    "index.html": {
+        "leaves.ai.w3": _SHOTS,
+        "faq.screenshots.q": _SHOTS + " The whole question is removed.",
+        "faq.screenshots.a": _SHOTS + " The whole question is removed, with the HTML comment above it.",
+        "faq.accessibility.a": "Decision 5: the Screen Recording sentence goes; Likely no longer asks for it.",
+        "faq.files.a": "Review 2 N10: read-only applies on your Mac; tools for online services such as Google Drive can do more.",
+        "faq.agent.a": "Review 2 N10: “can’t change or delete anything” holds for Likely’s own search tools; the Codex Photos gap is noted.",
+        "faq.provider.a": "Review 2 N11: OpenCode’s free models need no account.",
+        "leaves.ai.to": "Review 2 N11: OpenCode’s free models need no account.",
+        "leaves.updates.what": "Review 2 N30: update-feed requests are recorded in PostHog.",
+        "leaves.server.what": "Review 2 N7: the Stripe details are also in the Redis Cloud job queue and the server logs.",
+        "faq.account.q": "Review 2 N6: the honest question is “sign up”; there is an anonymous account.",
+        "faq.account.a": "Review 2 N6: “No account” contradicted the privacy policy; Likely registers an anonymous install ID at first start.",
+        "faq.log.a": "Review 2 N15: a detailed log has searches, titles and paths in full; check it before sending, and link to how we handle it.",
+    },
+}
+ROUND2_REPLACES = {"privacy.table.ai.w3", "leaves.ai.w3", "faq.screenshots.q", "faq.screenshots.a"}
+
+for _page, _items in ROUND2.items():
+    for _cid, _why in _items.items():
+        _old = REASONS[_page].get(_cid)
+        REASONS[_page][_cid] = _why if (_cid in ROUND2_REPLACES or not _old) else f"{_old} {_why}"
+
+PAGE_NOTES["index.html"] = ("The HTML comment above the old screenshots answer went with it (decision 5). "
+                            "Base for this view is the merge base with site-privacy-terms (07bffa8): that branch has "
+                            "since changed the hero subtitle and How it works step 2, which this branch doesn’t touch.")

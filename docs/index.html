@@ -240,15 +240,15 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
         </details>
         <details>
           <summary><span data-copy-id="faq.files.q">Does Likely change my files?</span></summary>
-          <p data-copy-id="faq.files.a">No. Your agent can search and read. It can’t edit, move or delete anything. Likely never modifies your files.</p>
+          <p data-copy-id="faq.files.a">No. Likely never modifies your files, and the agent is limited to searching and reading on your Mac. Tools you add that talk to online services, such as Google Drive, can do whatever that service allows them to.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.agent.q">Can the agent snoop around my Mac?</span></summary>
-          <p data-copy-id="faq.agent.a">It can search and read files to find what you asked for. It can’t change or delete anything, and it can’t read Likely’s own data, like your search history or logs. It’s kept out of Photos, Mail, Messages, Contacts, Notes and Safari unless you allow them in Settings → Permissions.</p>
+          <p data-copy-id="faq.agent.a">It can search and read files to find what you asked for. With Likely’s own search tools it can’t change or delete anything, and it can’t read Likely’s own data, like your search history or logs. It’s kept out of Photos, Mail, Messages, Contacts, Notes and Safari unless you allow them in Settings → Permissions (with Codex, Photos libraries in unusual places may not be covered).</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.provider.q">What leaves my Mac?</span></summary>
-          <p data-copy-id="faq.provider.a">Likely doesn’t run an AI. Searches go to the agent you chose, under your account with that provider. Likely never sends your searches or files to us.</p>
+          <p data-copy-id="faq.provider.a">Likely doesn’t run an AI. Searches go to the agent you chose, under your account with that provider, or, for OpenCode’s free models, under OpenCode’s terms with no account. Likely never sends your searches or files to us.</p>
           <div class="faq-table">
             <table class="data-table">
                   <thead>
@@ -260,12 +260,11 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
                   </thead>
                   <tbody>
                     <tr>
-                      <th scope="row" data-copy-id="leaves.ai.to">The AI agent you picked, through your own account (OpenAI, Anthropic, etc.)</th>
+                      <th scope="row" data-copy-id="leaves.ai.to">The AI agent you picked, through your own account (OpenAI, Anthropic, etc.), or OpenCode’s free models without one</th>
                       <td>
                         <ul>
                           <li data-copy-id="leaves.ai.w1">What you typed</li>
                           <li data-copy-id="leaves.ai.w2">The app’s name and window title</li>
-                          <li data-copy-id="leaves.ai.w3">A screenshot of the window behind the picker, only if you turn screenshots on (they’re off by default)</li>
                           <li data-copy-id="leaves.ai.w4">Your name (your Mac account’s full name), unless you turn it off in Settings → Prompt</li>
                           <li data-copy-id="leaves.ai.w5">Names and paths of files the agent finds, and the contents of files it opens</li>
                           <li data-copy-id="leaves.ai.w7">The picker’s button text, the paths of your Likely and search folders, and suggestions you turned down</li>
@@ -276,7 +275,7 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
                     </tr>
                     <tr>
                       <th scope="row" data-copy-id="leaves.server.to">Likely’s license server</th>
-                      <td data-copy-id="leaves.server.what">A random install ID, whether your license is active, and your IP address, like any web request. Each request is recorded in our analytics (PostHog), and the server keeps the purchase details Stripe sends it.</td>
+                      <td data-copy-id="leaves.server.what">A random install ID, whether your license is active, and your IP address, like any web request. Each request is recorded in our analytics (PostHog), and the server keeps the purchase details Stripe sends it, including in its job queue (Redis Cloud) and logs.</td>
                       <td data-copy-id="leaves.server.when">At first launch, when Likely checks your license, and when you buy</td>
                     </tr>
                     <tr>
@@ -286,7 +285,7 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
                     </tr>
                     <tr>
                       <th scope="row" data-copy-id="leaves.updates.to">Update checks</th>
-                      <td data-copy-id="leaves.updates.what">Your IP address and app version, like any download</td>
+                      <td data-copy-id="leaves.updates.what">Your IP address and app version. Requests to our update feed are recorded in our analytics (PostHog).</td>
                       <td data-copy-id="leaves.updates.when">When Likely checks for or downloads an update</td>
                     </tr>
                     <tr>
@@ -300,29 +299,24 @@ Passing <span class="fx-ok">3 / 4</span>  <span class="fx-dim">(was 2 / 4)</span
           <p class="faq-more" data-copy-id="faq.provider.more">The details are in our <a href="privacy.html">privacy policy</a>.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.screenshots.q">Are screenshots required? Where do they go?</span></summary>
-          <!-- DEFAULT: "Send a screenshot with searches" is off by default (synth-inc/likely PR "default-screenshots-off"). -->
-          <p data-copy-id="faq.screenshots.a">No. They’re off unless you turn on “Send a screenshot with searches” in Settings, which also needs the Screen Recording permission. When they’re on, Likely keeps one screenshot of the front window in memory, so it can show your agent what was behind the picker. It’s saved and sent only when you search, and only to the agent you chose.</p>
-        </details>
-        <details>
           <summary><span data-copy-id="faq.history.q">Does Likely keep a record of my searches?</span></summary>
           <p data-copy-id="faq.history.a">Only in Search history, which you can turn off or clear in Settings. In our downloadable app it’s encrypted with a key kept in your Mac’s Keychain, so other apps can’t read it. If you build Likely yourself, encryption stays off until you set up signing.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.log.q">What’s in Likely’s log?</span></summary>
-          <p data-copy-id="faq.log.a">Only what’s needed to fix bugs: which app opened a picker, how long a search took, whether it worked. Your searches, window titles and file names show up as short codes, not text. To send us a detailed log with a bug report, turn on “Log details for troubleshooting”. It switches itself off after 24 hours.</p>
+          <p data-copy-id="faq.log.a">Only what’s needed to fix bugs: which app opened a picker, how long a search took, whether it worked. Your searches, window titles and file names show up as short codes, not text. To send us a detailed log with a bug report, turn on “Log details for troubleshooting”. It switches itself off after 24 hours. A detailed log contains your searches, window titles and file paths in full, so check it before you send it; we use it only to fix the problem (see our <a href="privacy.html#collect">privacy policy</a>).</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.folder.q">What’s in the Likely folder?</span></summary>
           <p data-copy-id="faq.folder.a">The Likely folder holds copies. Originals stay put, and the folder is cleared shortly after you’re done.</p>
         </details>
         <details>
-          <summary><span data-copy-id="faq.account.q">Do I need an account?</span></summary>
-          <p data-copy-id="faq.account.a">No. There’s no sign-up or sign-in. Likely identifies your install with a random ID, and purchases work without an account.</p>
+          <summary><span data-copy-id="faq.account.q">Do I need to sign up?</span></summary>
+          <p data-copy-id="faq.account.a">No. There’s no sign-up or password. When it first starts, Likely registers an anonymous account on our license server, identified by a random install ID, and purchases attach to it.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.accessibility.q">Why does it want Accessibility permission?</span></summary>
-          <p data-copy-id="faq.accessibility.a">That’s how it notices a file picker opening, shows the search bar above it, and jumps the picker to the Likely folder in its sidebar. Screen Recording is optional and only needed for screenshots with searches.</p>
+          <p data-copy-id="faq.accessibility.a">That’s how it notices a file picker opening, shows the search bar above it, and jumps the picker to the Likely folder in its sidebar.</p>
         </details>
         <details>
           <summary><span data-copy-id="faq.better.q">Can I make it better at finding my stuff?</span></summary>
