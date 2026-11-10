@@ -4,3 +4,4 @@ build/
 .swiftpm/
 *.xcodeproj/xcuserdata/
 Resources/*.mp4
+!Resources/likely-demo.mp4
