@@ -26,6 +26,8 @@ Likely can't quietly ask for your Mail: a changed `needs` waits for approval lik
 tool waits, its switch and its **Allow…** button are off: only Approve, which shows the whole change,
 makes it usable. Switching a tool on or off never approves anything.
 
+**Share what works.** Found a tool that improves your results? Post it in [Share your tools](https://github.com/synth-inc/likely/discussions/32): the tool, your `tools.json` entry, what it helps find, and your before-and-after test numbers. Please don't post your searches, file names or paths. The tools that work best for people will become Likely's defaults.
+
 ## Measure what a tool adds
 
 Your saved tests (see [EVALS.md](EVALS.md)) tell you whether a tool actually helps:
