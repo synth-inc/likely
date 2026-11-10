@@ -18,16 +18,11 @@ final class ClaudeRunner: AgentRunner {
     var onExit: ((Outcome) -> Void)?
     var launchOptions = AgentLaunchOptions()
 
-    /// Search commands that can't write: `sort` (-o) and `file` (-C) can, so they're left out, like
-    /// `find` (-delete/-exec/-fprint) and `tee`.
-    static let allowedTools = [
-        "Read", "Glob", "Grep",
-        "Bash(ls:*)", "Bash(mdfind:*)", "Bash(mdls:*)", "Bash(head:*)", "Bash(stat:*)", "Bash(grep:*)",
-    ]
-
-    /// The built-in tools plus `Bash(<prefix>:*)` for each command of the user's tools (see ToolStore).
-    static func allowedTools(extra commands: [String]) -> [String] {
-        ToolPermissions.merged(allowedTools, ToolPermissions.claude(commands))
+    /// The built-in tools (AgentBuiltins: Read, Glob, Grep and search commands that can't write) minus
+    /// the ones turned off in Settings, plus `Bash(<prefix>:*)` for each command of the user's tools
+    /// (see ToolStore).
+    static func toolConfig(disabled: Set<String>, extra commands: [String]) -> AgentBuiltins.ClaudeConfig {
+        AgentBuiltins.claude(disabled: disabled, extra: commands)
     }
 
     private var process: Process?
@@ -47,10 +42,11 @@ final class ClaudeRunner: AgentRunner {
         cancel()
         buffer = Data()
         let userCommands = launchOptions.toolCommands
+        let tools = Self.toolConfig(disabled: launchOptions.disabledBuiltins(for: "claude"), extra: userCommands)
 
         let process = Process()
         process.currentDirectoryURL = workDir
-        let arguments = [
+        var arguments: [String] = [
             "-p",
             "--input-format", "stream-json",
             "--model", model,
@@ -61,12 +57,15 @@ final class ClaudeRunner: AgentRunner {
             // No transcript in ~/.claude/projects (the queries, in plaintext, where
             // later agents could read them). Follow-ups go to this same process, so nothing needs resuming.
             "--no-session-persistence",
-            "--tools", "Read,Glob,Grep,Bash",
+            // Turned-off file tools aren't offered at all ("" means none).
+            "--tools", tools.tools.joined(separator: ","),
             "--permission-mode", "dontAsk",
             "--add-dir", FileManager.default.homeDirectoryForCurrentUser.path,
-        ] + SearchFolder.outsideHome.flatMap { ["--add-dir", $0] } + [
-            "--allowedTools",
-        ] + Self.allowedTools(extra: userCommands)
+        ]
+        arguments += SearchFolder.outsideHome.flatMap { ["--add-dir", $0] }
+        // Both take a list, so they come last (an empty one would take the next flag as its value).
+        if !tools.allowed.isEmpty { arguments += ["--allowedTools"] + tools.allowed }
+        if !tools.disallowed.isEmpty { arguments += ["--disallowedTools"] + tools.disallowed }
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
         // With user tools enabled, also no writes outside Claude's own state: the validator can't prove
         // a tool read-only, the sandbox can.

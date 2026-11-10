@@ -43,8 +43,10 @@ public enum ToolPermissions {
         let builtIn = Set(allow.map(\.pattern))
         let user = openCode(extra).filter { !builtIn.contains($0.pattern) }
         let deny = bashDenied.map { (pattern: $0, action: "deny") }
-        let bash = orderedJSONObject((allow + user + deny).map { ($0.pattern, .string($0.action)) })
-        return orderedJSONObject((["*"] + fileTools).map { ($0, .string($0 == "*" ? "deny" : "allow")) } + [("bash", .raw(bash))])
+        // No command allowed at all (every built-in one turned off, no user tools): hide bash entirely.
+        let bash: JSONValue = bashAllowed.isEmpty && user.isEmpty
+            ? .string("deny") : .raw(orderedJSONObject((allow + user + deny).map { ($0.pattern, .string($0.action)) }))
+        return orderedJSONObject((["*"] + fileTools).map { ($0, .string($0 == "*" ? "deny" : "allow")) } + [("bash", bash)])
     }
 
     /// `items` followed by those `extra` items it doesn't already have, in order.

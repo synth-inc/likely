@@ -527,7 +527,7 @@ final class EvalCaseRun {
         let userName = context?.userName ?? (evalCase.source == "fixture" ? EvalCLI.fixturePersona : nil)
         let base = PromptBuilder.initial(PromptBuilder.Context(appName: context?.app ?? "an app", windowTitle: context?.windowTitle,
                                                                buttonTitle: context?.button,
-                                                               userName: userName, tools: tools),
+                                                               userName: userName, tools: tools, agentID: agent.kind.id),
                                          template: template)
         var prompt = base
         if wantsIsolation, let folders = searchFolders {

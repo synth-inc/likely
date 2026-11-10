@@ -39,6 +39,13 @@ struct AgentLaunchOptions {
     /// The user's tools this launch may use (allowlist and sandbox profile). nil: the ones the app
     /// uses (ToolStore's enabled, approved tools). Evals set it per case; [] means none.
     var tools: [CustomTool]?
+    /// Built-in tools turned off (Settings → Tools). nil: the app's setting for the runner's agent
+    /// (BuiltinToolSettings), which evals use too.
+    var disabledBuiltinTools: Set<String>?
+
+    func disabledBuiltins(for agentID: String) -> Set<String> {
+        disabledBuiltinTools ?? BuiltinToolSettings.disabled(for: agentID)
+    }
 }
 
 /// The raw JSON stream each runner saves (last-run.jsonl). It holds the queries, everything the agent

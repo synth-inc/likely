@@ -491,6 +491,8 @@ private struct ToolsSettings: View {
     @State private var needsProblem: String?
     /// The tool whose areas are being turned on (macOS may be showing its alert): its row waits.
     @State private var working: String?
+    /// The selected agent's built-in tools that are off (BuiltinToolSettings), reloaded when it changes.
+    @State private var disabledBuiltins: Set<String> = []
 
     private var photoState: PhotoSearch.State { PhotoSearch.state(tools: store.tools, rclipInstalled: rclipInstalled) }
 
@@ -572,6 +574,11 @@ private struct ToolsSettings: View {
             }
 
             Section {
+                if let warning = AgentBuiltins.searchWarning(agentID: agentID, disabled: disabledBuiltins) {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                let toggleable = BuiltInTools.isToggleable(agentID: agentID)
                 ForEach(BuiltInTools.entries(for: agentID), id: \.self) { entry in
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -581,13 +588,38 @@ private struct ToolsSettings: View {
                             }
                         }
                         Spacer()
-                        Text("Always on").font(.caption).foregroundStyle(.secondary)
+                        if toggleable {
+                            Toggle("", isOn: Binding(
+                                get: { !disabledBuiltins.contains(entry.name) },
+                                set: { on in
+                                    BuiltinToolSettings.setEnabled(on, name: entry.name, agentID: agentID)
+                                    disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
+                                }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        } else {
+                            Text("Always on").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             } header: {
-                Text("Built in")
+                HStack {
+                    Text("Built in")
+                    Spacer()
+                    if BuiltInTools.isToggleable(agentID: agentID) {
+                        Button("Reset to Defaults") {
+                            BuiltinToolSettings.reset(agentID: agentID)
+                            disabledBuiltins = []
+                        }
+                        .controlSize(.small)
+                        .disabled(disabledBuiltins.isEmpty)
+                    }
+                }
             } footer: {
-                Text("What \(AgentKind.with(id: agentID)?.name ?? "your agent") can always use. These only read.")
+                Text(BuiltInTools.isToggleable(agentID: agentID)
+                     ? "What \(AgentKind.with(id: agentID)?.name ?? "your agent") can use. These only read. Turn one off to compare search speed; the search prompt then says it's unavailable. Your tools above aren't affected."
+                     : "What \(AgentKind.with(id: agentID)?.name ?? "your agent") can always use. Codex has no per-tool list, so nothing here can be turned off.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -620,8 +652,12 @@ private struct ToolsSettings: View {
         .onAppear {
             store.reloadIfChanged()
             detectRclip()
+            disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
         }
-        .onChange(of: agentID) { _, _ in detectRclip() }
+        .onChange(of: agentID) { _, _ in
+            detectRclip()
+            disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
+        }
         .sheet(isPresented: $settingUpPhotos) {
             PhotoSearchSetupSheet(installed: rclipInstalled, checkAgain: detectRclip) { settingUpPhotos = false }
         }
