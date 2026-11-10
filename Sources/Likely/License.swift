@@ -19,30 +19,45 @@ enum License {
         /// Shown smaller beside the price ("/ month", "once").
         let priceUnit: String
         let detail: String
+        /// Billing terms shown right beside the offer (auto-renewal for subscriptions); nil for none.
+        let disclosure: String?
         /// What the server sells for this plan; nil for "build it yourself".
         let serverPlan: LicenseClient.Plan?
         let buttonTitle: String
     }
 
     static let sourceURL = URL(string: "https://github.com/synth-inc/likely")!
+    static let termsURL = URL(string: "https://synth-inc.github.io/likely/terms.html")!
+    static let privacyURL = URL(string: "https://synth-inc.github.io/likely/privacy.html")!
+
+    /// The welcome screen tells people Likely registers an anonymous install ID with the license
+    /// server, so nothing goes to the server (device login included) until they've continued past it.
+    /// Anyone who already finished onboarding keeps checking at launch, as before.
+    static var mayContactServer: Bool {
+        !isFreeBuild && (Settings.onboarded || LikelyOnboardingStep.saved != .welcome)
+    }
 
     static let plans: [Plan] = [
         Plan(kind: .subscription,
              headline: "I want Likely to keep getting better",
              price: "$3", priceUnit: "/ month",                                                          // TODO: confirm price
-             detail: "New agents, Photos search and smarter suggestions as they ship. Cancel anytime.",
+             detail: "New features and improvements as they ship.",
+             disclosure: "$3/month, renews automatically until you cancel. Cancel anytime in Settings → License or by email.",
              serverPlan: .monthly,
              buttonTitle: "Subscribe"),
         Plan(kind: .oneTime,
-             headline: "No updates please",
+             headline: "Just the app, please",
              price: "$29", priceUnit: "once",
-             detail: "One payment, and you can use the app, forever.",
+             // TODO(legal): the owner decides the update period; keep it in sync with the Terms.
+             detail: "One payment, and you can use the app for as long as you like. Includes updates for [update period].",
+             disclosure: nil,
              serverPlan: .lifetime,
              buttonTitle: "Buy Once"),
         Plan(kind: .free,
              headline: "I'm allergic to paying",
              price: "Free", priceUnit: "",
              detail: "You can use Likely for free, but we're not going to make it easy for you.",
+             disclosure: nil,
              serverPlan: nil,
              buttonTitle: "Open GitHub"),
     ]
@@ -169,6 +184,8 @@ final class LicenseStore: ObservableObject {
     @discardableResult
     func refresh() async -> Bool {
         if License.isFreeBuild { return true }
+        // Not past the welcome notice yet: no device login, keep whatever is cached.
+        guard License.mayContactServer else { return isActive }
         isChecking = true
         defer {
             isChecking = false
@@ -189,8 +206,10 @@ final class LicenseStore: ObservableObject {
     }
 
     /// Checks now and then every `recheckInterval`. Also notices the offline grace running out.
+    /// Does nothing until `License.mayContactServer`; onboarding calls it again once the user
+    /// continues past the welcome screen.
     func startPeriodicChecks() {
-        guard !License.isFreeBuild, timer == nil else { return }
+        guard !License.isFreeBuild, License.mayContactServer, timer == nil else { return }
         Task { await refresh() }
         timer = Timer.scheduledTimer(withTimeInterval: License.recheckInterval, repeats: true) { _ in
             Task { @MainActor in await LicenseStore.shared.refresh() }

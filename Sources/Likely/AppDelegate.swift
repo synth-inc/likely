@@ -58,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         MainActor.assumeIsolated {
             LicenseStore.shared.onActiveChange = { [weak self] active in self?.licenseChanged(active: active) }
+            // Waits for the welcome screen's notice on a fresh install (see `License.mayContactServer`);
+            // onboarding starts it once the user continues past that screen.
             LicenseStore.shared.startPeriodicChecks()
         }
     }
@@ -68,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let url = urls.first(where: { $0.scheme == "likely" }) else { return }
         Log.write("app", "opened by \(meta: url.scheme)://\(meta: url.host)")
         Task { @MainActor in
+            // Not past the welcome notice yet: show it rather than skipping ahead to the license page.
+            guard License.mayContactServer || License.isFreeBuild else { return self.showOnboarding() }
             await LicenseStore.shared.refresh()
             if !Settings.onboarded || !License.isActive || OnboardingWindowManager.shared.isVisible {
                 self.showLicense()

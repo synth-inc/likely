@@ -184,6 +184,9 @@ private struct GeneralSettings: View {
                     Button("Run Onboarding Again") { actions.showOnboarding() }
                 }
             }
+            Section("About") {
+                LegalLinks(size: NSFont.systemFontSize)
+            }
         }
         .formStyle(.grouped)
     }
