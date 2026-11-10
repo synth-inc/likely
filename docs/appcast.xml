@@ -6,6 +6,16 @@
         <description>Likely updates</description>
         <language>en</language>
         <item>
+            <title>Version 0.2.1</title>
+            <pubDate>Tue, 10 Nov 2026 05:59:21 GMT</pubDate>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <link>https://github.com/synth-inc/likely/releases/tag/v0.2.1</link>
+            <description><![CDATA[<p>Likely 0.2.1</p><p>Run your own tests</p><p>- Settings → Tests → Run Tests runs the searches you saved from History and shows what passed. Turn on &quot;Allow command-line test runs&quot; to let your coding agent run them too, so it can try changes and check they help.</p><p>Safer settings</p><p>- Your prompt, agent, models and tool approvals are protected. If something outside Likely changes them, Likely ignores the change and asks you whether to keep it.</p><p>Polish</p><p>- Friendlier onboarding copy.</p><p>- The &quot;Likely is running&quot; note now appears in the top-right corner, with text that wraps.</p>]]></description>
+            <enclosure url="https://github.com/synth-inc/likely/releases/download/v0.2.1/Likely.dmg" type="application/octet-stream" sparkle:edSignature="HRdac9gjHQgh2Q0vpNeVwqcVdJe4JTseytgHdotZYqcd52UES9eV0zY7rSbZIVly1rxAo2qvU6S5DAwZqoTEDA==" length="4281485"/>
+        </item>
+        <item>
             <title>Version 0.2.0</title>
             <pubDate>Tue, 10 Nov 2026 01:23:18 GMT</pubDate>
             <sparkle:version>2</sparkle:version>
