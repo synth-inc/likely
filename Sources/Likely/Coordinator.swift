@@ -731,7 +731,7 @@ enum Settings {
         get { UserDefaults.standard.bool(forKey: "onboardingCompleted") }
         set { UserDefaults.standard.set(newValue, forKey: "onboardingCompleted") }
     }
-    /// The user continued past the welcome screen, which says Likely registers an anonymous install ID
+    /// The user continued past the welcome screen, whose notice links the Terms and Privacy Policy (which describes the anonymous install ID)
     /// with the license server. Nothing reaches that server before this. Anyone who finished onboarding
     /// before the notice existed counts as having seen it.
     static var sawServerNotice: Bool {
