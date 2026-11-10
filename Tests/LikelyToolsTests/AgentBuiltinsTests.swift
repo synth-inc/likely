@@ -164,6 +164,14 @@ final class AgentBuiltinsTests: XCTestCase {
         XCTAssertTrue(prompt.hasSuffix("\n\nUnavailable tools (turned off in Likely's settings): `mdfind`, `Glob`. Don't try them; use your other tools."), prompt)
     }
 
+    func testPromptDropsPipedHintsWhenGrepOrHeadIsOff() {
+        let noGrep = AgentBuiltins.adjustPrompt(SearchPromptHints.defaultTemplate, agentID: "claude", disabled: ["grep"])
+        XCTAssertFalse(noGrep.contains("| grep -v"))
+        let noHead = AgentBuiltins.adjustPrompt(SearchPromptHints.defaultTemplate, agentID: "claude", disabled: ["head"])
+        XCTAssertFalse(noHead.contains("| head"))
+        XCTAssertFalse(noHead.contains("pipes to `head` are fine"))
+    }
+
     func testPromptDropsRecentFilesHint() {
         let prompt = AgentBuiltins.adjustPrompt(SearchPromptHints.defaultTemplate, agentID: "gemini", disabled: ["ls"])
         XCTAssertFalse(prompt.contains("ls -lt"))
