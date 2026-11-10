@@ -56,6 +56,8 @@ actor LicenseClient {
         case unavailable
         case server(status: Int, message: String?)
         case badResponse
+        /// The user hasn't seen the welcome screen's install-ID notice yet (`License.mayContactServer`).
+        case notYet
 
         var errorDescription: String? {
             switch self {
@@ -64,6 +66,7 @@ actor LicenseClient {
             // Server messages are developer-facing (zod validation etc.), so they only go to the log.
             case .server(let status, _): return "The Likely server returned an error (\(status)). Try again later."
             case .badResponse: return "The Likely server sent a response Likely didn't understand."
+            case .notYet: return "Finish setting up Likely first."
             }
         }
     }
@@ -92,7 +95,7 @@ actor LicenseClient {
     private static func stripePage(_ string: String, host: String) throws -> URL {
         guard let url = URL(string: string), url.scheme?.lowercased() == "https", url.host?.lowercased() == host,
               url.user == nil, url.password == nil, url.port == nil || url.port == 443 else {
-            Log.write("license", "refused session URL host=\(URL(string: string)?.host ?? "?")")
+            Log.write("license", "refused session URL host=\(meta: URL(string: string)?.host)")
             throw ClientError.badResponse
         }
         return url
@@ -115,6 +118,9 @@ actor LicenseClient {
     }
 
     private func login() async throws -> String {
+        // Every server call starts here (or with a token from an earlier login), so this one check
+        // covers entitlements, checkout, billing portal and restore.
+        guard License.mayContactServer else { throw ClientError.notYet }
         if let loginTask { return try await loginTask.value }
         let task = Task { () throws -> String in
             struct Body: Encodable { let app: String; let installId: String }
@@ -148,7 +154,7 @@ actor LicenseClient {
             return try await Self.perform(Self.request(method, path, query: query, body: body, token: first))
         } catch ClientError.server(let status, _) where status == 401 {
             // Expired (30-day TTL) or revoked: log in again with the same installId and retry once.
-            Log.write("license", "\(path) got 401, logging in again")
+            Log.write("license", "\(meta: path) got 401, logging in again")
             token = nil
             Keychain.delete(account: Self.keychainAccount)
             let fresh = try await login()
@@ -181,20 +187,20 @@ actor LicenseClient {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            Log.write("license", "\(request.url?.path ?? "?") failed: \(error.localizedDescription)")
+            Log.write("license", "\(meta: request.url?.path) failed: \(error: error)")
             throw ClientError.offline(error.localizedDescription)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let message = (try? JSONDecoder().decode(ServerError.self, from: data))?.message
-            Log.write("license", "\(request.httpMethod ?? "") \(request.url?.path ?? "?") -> \(status) \(message ?? "")")
+            Log.write("license", "\(meta: request.httpMethod) \(meta: request.url?.path) -> \(status) \(sensitive: message)")
             if status == 404 { throw ClientError.unavailable }
             throw ClientError.server(status: status, message: message)
         }
         do {
             return try JSONDecoder().decode(Response.self, from: data)
         } catch {
-            Log.write("license", "\(request.url?.path ?? "?") undecodable: \(error)")
+            Log.write("license", "\(meta: request.url?.path) undecodable: \(error: error)")
             throw ClientError.badResponse
         }
     }

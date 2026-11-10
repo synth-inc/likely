@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// A coding agent run headless for one picker. Implementations parse the agent's streamed output into
@@ -15,8 +16,7 @@ protocol AgentRunner: AnyObject {
     /// Per-runner launch settings (evals set these; the app uses the defaults).
     var launchOptions: AgentLaunchOptions { get set }
 
-    /// `image` is the screenshot, for agents that take images as input rather than reading files.
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL)
+    func start(executable: String, model: String, prompt: String, workDir: URL)
     /// Sends feedback to the current conversation. Returns false if there's no conversation to continue.
     @discardableResult func send(_ text: String) -> Bool
     func cancel()
@@ -31,21 +31,50 @@ struct AgentLaunchOptions {
     /// Append to last-run.jsonl instead of starting it over (evals keep every turn of a case,
     /// including relaunches).
     var appendTranscript = false
+    /// Where the raw JSON stream goes. nil: `transcripts/last-run.jsonl` next to the work folder
+    /// (AgentTranscript.url). Never inside the work folder: agents may read that one.
+    var transcriptURL: URL?
     /// Launched by `--eval`: Hermes then never reuses a gateway it didn't start with these rules.
     var isEval = false
     /// The user's tools this launch may use (allowlist and sandbox profile). nil: the ones the app
     /// uses (ToolStore's enabled, approved tools). Evals set it per case; [] means none.
     var tools: [CustomTool]?
+    /// Built-in tools turned off (Settings → Tools). nil: the app's setting for the runner's agent
+    /// (BuiltinToolSettings), which evals use too.
+    var disabledBuiltinTools: Set<String>?
+
+    func disabledBuiltins(for agentID: String) -> Set<String> {
+        disabledBuiltinTools ?? BuiltinToolSettings.disabled(for: agentID)
+    }
 }
 
-/// The raw JSON stream each runner saves to <workDir>/last-run.jsonl.
+/// The raw JSON stream each runner saves (last-run.jsonl). It holds the queries, everything the agent
+/// read and the files it found, so it's kept outside the work folder: that folder is the one part of
+/// Likely's data an agent may read (config files), and Codex's sandbox can't deny
+/// a file pattern inside it. Next to it instead (…/Likely/transcripts for searches; an eval case's
+/// own folder, whose `agent` subfolder is the work folder), which every agent is denied.
 enum AgentTranscript {
+    static func url(workDir: URL, options: AgentLaunchOptions) -> URL {
+        options.transcriptURL ?? workDir.deletingLastPathComponent().appendingPathComponent("transcripts/last-run.jsonl")
+    }
+
+    /// Where a search's transcript goes (the app's runs; evals pass their own `transcriptURL`).
+    static func searchURL(supportDirectory: URL) -> URL {
+        supportDirectory.appendingPathComponent("transcripts/last-run.jsonl")
+    }
+
+    /// It holds the whole search, so release builds keep it only while "Log details for
+    /// troubleshooting" is on, and only the last run (each run starts it over). Dev builds and evals
+    /// (`append`, their own case folders) always keep it.
+    static var isKept: Bool { Log.details.showsDetails }
+
+    /// Owner-only (0600) from creation. nil when transcripts aren't kept (an older one is removed).
     static func open(_ url: URL, append: Bool) -> FileHandle? {
-        let fm = FileManager.default
-        if !append || !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
-        if append { _ = try? handle.seekToEnd() }
-        return handle
+        guard isKept || append else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        return try? OwnerOnly.openForWriting(url, truncate: !append)
     }
 }
 
@@ -96,7 +125,7 @@ extension String {
 }
 
 /// Runs OpenAI's Codex CLI: `codex exec --json` in its read-only sandbox (commands run, writes are
-/// blocked), with the screenshot attached via `-i`. Codex can't take messages mid-turn, so feedback
+/// blocked). Codex can't take messages mid-turn, so feedback
 /// stops the current turn and continues the same conversation with `codex exec resume <thread>`.
 ///
 /// Unlike the other runners it isn't wrapped in AgentSandbox: Codex runs every command under its own
@@ -126,50 +155,84 @@ final class CodexRunner: AgentRunner {
     /// Run without the user's ~/.codex/config.toml (their default model may not be available to
     /// ChatGPT sign-ins, and their MCP servers/hooks would slow things down). Auth is unaffected.
     /// Sandbox: a permission profile that extends Codex's built-in read-only one and also makes
-    /// Likely's search history unreadable (same paths as AgentSandbox.historyRules). Equivalent to
-    /// `sandbox_mode="read-only"` otherwise; the two can't be combined. Verified with
-    /// `codex sandbox` (codex-cli 0.153): reads under the denied paths fail with EPERM.
-    private static let baseArguments: [String] = {
-        let denied = AgentSandbox.historyDeniedPaths
-        let entries = (denied.folders + denied.files).map { "\(tomlString($0)) = \"none\"" }.joined(separator: ", ")
+    /// Likely's data unreadable, except the run's work folder (same paths as
+    /// AgentSandbox.protectionRules). Equivalent to `sandbox_mode="read-only"` otherwise; the two
+    /// can't be combined. Verified with `codex sandbox` (codex-cli 0.153): reads under the denied
+    /// paths fail with EPERM, the more specific "read" entry for the work folder wins.
+    ///
+    /// Private data (PrivateDataArea): the table can't say "any `.photoslibrary`" or match container
+    /// names, so the containers are listed at each launch and Photos libraries outside the default
+    /// places come from PhotoLibraries (found in the background). Codex's `view_image` tool reads an
+    /// image file itself, outside the sandbox, so it's turned off while Photos is: otherwise it could
+    /// open a photo inside a library the sandbox denies.
+    private static func baseArguments(workDir: URL) -> [String] {
+        let blocked = PrivateDataAccess.blocked()
+        let photosBlocked = blocked.contains(.photos)
         return ["--json", "--skip-git-repo-check", "--ignore-user-config",
                 "-c", "default_permissions=\"likely\"",
                 "-c", "permissions.likely.extends=\":read-only\"",
-                "-c", "permissions.likely.filesystem={ \(entries) }"]
-    }()
-
-    private static func tomlString(_ s: String) -> String {
-        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+                "-c", "permissions.likely.filesystem=" + AgentSandbox.codexFilesystem(
+                    readable: [workDir.path], blockedAreas: blocked, photoLibraries: photosBlocked ? PhotoLibraries.current : [])]
+            + (photosBlocked ? ["-c", "features.view_image=false"] : [])
     }
 
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
         threadID = nil
+        if PrivateDataAccess.blocked().contains(.photos) { PhotoLibraries.refresh() }   // for the next search
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var arguments = ["exec"] + Self.baseArguments + ["-m", model, prompt]
-        if let image { arguments += ["-i", image.path] }   // after the prompt: -i takes several values
-        launch(arguments)
+        launch(["exec"] + Self.baseArguments(workDir: workDir) + ["-m", model, prompt])
     }
 
     @discardableResult
     func send(_ text: String) -> Bool {
-        guard let threadID, executable != nil else { return false }
+        guard let threadID, executable != nil, let workDir else { return false }
         // No mid-turn input: stop the current turn (the conversation so far is kept) and resume.
         stopProcess()
-        launch(["exec", "resume"] + Self.baseArguments + ["-m", model, threadID, text])
+        launch(["exec", "resume"] + Self.baseArguments(workDir: workDir) + ["-m", model, threadID, text])
         return true
     }
 
     func cancel() {
         stopProcess()
+        if let threadID { Self.deleteSession(threadID) }
         threadID = nil
         try? transcript?.close()
         transcript = nil
+    }
+
+    /// Codex keeps each conversation in ~/.codex/sessions/<yyyy>/<MM>/<dd>/rollout-<time>-<thread>.jsonl
+    /// (the queries, in plaintext). `codex exec --ephemeral` would keep
+    /// none, but then a follow-up couldn't `resume` it, so instead the file is deleted when the picker
+    /// closes. Looked for in the folders of the last few days (local and UTC dates can differ).
+    static func deleteSession(_ threadID: String, codexHome: URL = CodexRunner.codexHome, now: Date = Date()) {
+        guard threadID.range(of: #"^[A-Za-z0-9-]+$"#, options: .regularExpression) != nil else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let fm = FileManager.default
+            let sessions = codexHome.appendingPathComponent("sessions")
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy/MM/dd"
+            let days = Set((-2...1).map { formatter.string(from: now.addingTimeInterval(Double($0) * 86_400)) })
+            for day in days {
+                let folder = sessions.appendingPathComponent(day)
+                for name in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasSuffix("-\(threadID).jsonl") {
+                    if (try? fm.removeItem(at: folder.appendingPathComponent(name))) != nil {
+                        Log.write("codex", "deleted its session file for this search")
+                    }
+                }
+            }
+        }
+    }
+
+    static var codexHome: URL {
+        if let home = ProcessInfo.processInfo.environment["CODEX_HOME"], !home.isEmpty { return URL(fileURLWithPath: home) }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
     }
 
     private func stopProcess() {
@@ -210,7 +273,7 @@ final class CodexRunner: AgentRunner {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.hasPrefix("Reading additional input") { Log.write("codex-stderr", trimmed) }
+            if !trimmed.hasPrefix("Reading additional input") { Log.write("codex-stderr", "\(trimmed.count) chars: \(sensitive: trimmed)") }
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -230,9 +293,9 @@ final class CodexRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("codex", "started \(arguments.first == "exec" && arguments.dropFirst().first == "resume" ? "resume" : "exec") model=\(model) pid=\(process.processIdentifier)")
+            Log.write("codex", "started \(public: arguments.first == "exec" && arguments.dropFirst().first == "resume" ? "resume" : "exec") model=\(meta: model) pid=\(process.processIdentifier)")
         } catch {
-            Log.write("codex", "failed to launch \(executable): \(error)")
+            Log.write("codex", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch codex", costUSD: nil))
         }
     }
@@ -274,7 +337,7 @@ final class CodexRunner: AgentRunner {
             turnEnded = true
             isBusy = false
             let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
-            Log.write("codex", "turn failed: \(message.prefix(300))")
+            Log.write("codex", "turn failed kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(300))")
             onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
         default:
             break
@@ -289,6 +352,37 @@ final class CodexRunner: AgentRunner {
             return inner
         }
         return message
+    }
+}
+
+/// Photos libraries outside the default places (PhotoLibraryScan), for Codex's permission table.
+/// Found in the background at launch (when Codex is the agent) and again at each Codex search; a
+/// search uses what was found by then. Thread-safe.
+enum PhotoLibraries {
+    private static let lock = NSLock()
+    private static var known: [String] = []
+    private static var scanning = false
+
+    static var current: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return known
+    }
+
+    static func refresh() {
+        lock.lock()
+        guard !scanning else { return lock.unlock() }
+        scanning = true
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async {
+            let found = PhotoLibraryScan.find()
+            lock.lock()
+            let changed = found != known
+            known = found
+            scanning = false
+            lock.unlock()
+            if changed { Log.write("codex", "Photos libraries outside the default places: \(found.count)") }
+        }
     }
 }
 

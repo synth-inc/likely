@@ -13,9 +13,8 @@ pinned to the sidebar (see Recent files below); most of the time, that's the one
 Type it in plain English in the bar above the picker ("my 2025 W-2", "the logo with the transparent
 background"). Your coding agent (Claude Code, Codex, Gemini CLI, OpenCode or Hermes, under your own account)
 searches your Mac with Spotlight and read-only tools, and Likely clones the best matches into `~/Likely` in
-place of the recent files. Not it? Say so, and it keeps looking. The agent runs only when you submit a search;
-with the optional Screenshots permission and Settings → Send a screenshot with searches (off by default),
-it also sees the window behind the picker. A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
+place of the recent files. Not it? Say so, and it keeps looking. The agent runs only when you submit a search.
+A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
 The copies stay until the next picker opens (or 10 minutes after you close one), so apps that read the file later still find it.
 
 **Recent files.** Often the file you want is the one you just downloaded, saved or screenshotted, so the
@@ -27,7 +26,7 @@ Files that came in one go (a copied folder, an unzipped archive) count once. Fil
 background are left out: a file is kept if it was opened, is a screenshot or was downloaded, or else if it
 arrived on its own, outside app and project folders (an Obsidian vault, a repo), and isn't still being
 rewritten (`RecentSelector`, tested with `swift test`). The count (1–10) and an off switch are in Settings,
-and `scripts/recent-files.sh [count] [-v]` prints what it would pick (`-v`: and why it skipped the rest). Menu → Jump to Likely Folder When a
+and `scripts/recent-files.sh [count] [-v]` prints what it would pick (`-v`: and why it skipped the rest). Settings → General → Jump to the Likely folder when a
 Picker Opens (on by default) selects the folder in the picker's sidebar; when off, only once you search.
 
 ## Build & run
@@ -37,25 +36,28 @@ Picker Opens (on by default) selects the folder in the picker's sidebar; when of
 open build/Likely.app
 ```
 
-The setup window walks through Accessibility, Screen Recording, creating `~/Likely` (drag it into
+The setup window walks through Accessibility, creating `~/Likely` (drag it into
 the Finder sidebar), and finding the `claude` CLI.
 
+Encryption of your search history is off in builds without a provisioning profile. To turn it on
+with your own Apple team, and for all build options, see [docs/BUILDING.md](docs/BUILDING.md).
+
 For debugging, run the bare binary from a terminal (`.build/release/Likely`): it inherits the
-terminal's Accessibility / Screen Recording grants and logs to stderr.
+terminal's Accessibility grant and logs to stderr.
 
 ## Releases & updates
 
-Likely updates itself with [Sparkle](https://sparkle-project.org). The feed is
-`public/likely/appcast.xml` on onit-server (`SUFeedURL` in Info.plist); updates are signed with an
-EdDSA key kept in the release machine's login Keychain (account `likely`).
+Likely updates itself with [Sparkle](https://sparkle-project.org). The feed is `docs/appcast.xml` in
+this repo, served by GitHub Pages at https://synth-inc.github.io/likely/appcast.xml (`SUFeedURL` in
+Info.plist), so updates don't depend on the license server. Updates are signed with an EdDSA key kept in
+the release machine's login Keychain (account `likely`).
 
 ```sh
 scripts/bump-version.sh patch && git commit -am "Bump version"
+# LIKELY_PROFILE must point at the Developer ID provisioning profile (docs/BUILDING.md)
 scripts/release.sh --dry-run   # build, Developer ID sign, Likely.dmg, notarize, appcast → build/release
-scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Likely.dmg, write the appcast
+scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Likely.dmg, and commit + push docs/appcast.xml
 ```
-
-Then commit and deploy the appcast in onit-server (the script prints the commands).
 
 ## How it works
 
@@ -63,10 +65,8 @@ Then commit and deploy the appcast in onit-server (the script prints the command
   `AXIdentifier` `open-panel` (Chrome: `AXSheetCreated`; TextEdit: `AXFocusedWindowChanged` /
   `AXWindowCreated`) and the sandboxed system dialog is `OpenPanel`. Button/browser heuristics are the fallback.
 - **Close**: `AXUIElementDestroyed` on the panel, plus a poll for the panel's frame disappearing.
-- **Screenshot** (`WindowCapture`): once open, the picker is drawn into the app's window, so the app
-  snapshots the front window on every click / ⌘-shortcut (in memory) and keeps the one from just before the picker.
-  It's written to disk (`run/context-<run>.png`, removed when the picker closes) and sent only when you search.
-  Settings → Send a screenshot with searches (off by default) controls all of it.
+- **Context**: the app's name, the title of the window behind the picker and the picker's button title,
+  all read through Accessibility. Likely takes no screenshots and doesn't need Screen Recording.
 - **Recent files** (`RecentFiles`, `LikelyFolder.showRecent`): a synchronous `MDQuery` sorted by
   `kMDItemDateAdded` (last hour, then day, then 30 days), falling back to the top level of Desktop /
   Downloads / Documents; runs on its own queue, then clones on the Likely folder's copy queue. Copies are
@@ -94,12 +94,11 @@ to check a tool helps, run evals on your own files (below).
 
 Likely doesn't run an AI. Searches go to
 the AI provider you choose, through your own CLI and account, only when you submit one: your query and
-follow-ups, the app name, window title and picker button, your name (on by default; Settings → Prompt), a
-screenshot if you turn that on (off by default), your Likely and search folder paths, the output of the agent's
+follow-ups, the app name, window title and picker button, your name (on by default; Settings → Prompt), your Likely and search folder paths, the output of the agent's
 searches and the contents of files it opens, your prompt, and your tools' instructions. The license server gets
 a random install ID, records each request in PostHog (analytics: path, IP address, user agent, account number),
 and stores the purchase details Stripe sends it (email, name, billing address, card brand, last 4 digits and
-expiry). Checkout goes through Stripe. Your files, search history, eval cases, screenshots and logs stay on your
+expiry). Checkout goes through Stripe. Your files, search history, eval cases and logs stay on your
 Mac. Details:
 [Privacy Policy](https://synth-inc.github.io/likely/privacy.html) ([source](docs/privacy.html)).
 
@@ -111,7 +110,16 @@ Eval mode, Settings → Evals and "Save as test" exist only in dev builds (`./bu
 Your own cases live in `~/Library/Application Support/Likely/evals/cases.jsonl` ("Save as test" in the bar above a
 picker, Settings → History → Make Eval, Settings → Evals, or automatic saving of picks). See [docs/EVALS.md](docs/EVALS.md).
 
-Logs: `~/Library/Logs/Likely/likely.log` (menu → Verbose AX Logging logs every AX event).
+Logs: `~/Library/Logs/Likely/likely.log`. Release builds leave out queries, window titles, paths and agent text
+unless Settings → General → "Log details for troubleshooting" is on (24 hours at most; it also logs every AX
+event). Dev builds always log details. See docs/PRIVACY.md.
+
+## Your data
+
+Everything Likely keeps stays on this Mac, owner-only, unreadable to the search agents and out of Spotlight;
+in official releases, search history is also encrypted (builds from source
+need a provisioning profile for that: [docs/BUILDING.md](docs/BUILDING.md)). What's stored, where, and
+how to delete it: [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## License
 

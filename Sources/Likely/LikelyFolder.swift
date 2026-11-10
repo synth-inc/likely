@@ -1,4 +1,5 @@
 import AppKit
+import LikelyStorage
 import LikelyTools
 
 /// Manages ~/Likely: APFS clones of candidate files, plus a " …status…" file whose name is the
@@ -27,7 +28,7 @@ final class LikelyFolder {
     static func resetToDefault() {
         UserDefaults.standard.removeObject(forKey: "likelyFolderPath")
         try? create()
-        Log.write("likely", "folder reset to \(defaultURL.path)")
+        Log.write("likely", "folder reset to \(path: defaultURL)")
     }
 
     /// Asks the user to pick the folder. Returns false if they cancelled.
@@ -54,7 +55,7 @@ final class LikelyFolder {
             }
         }
         url = chosen
-        Log.write("likely", "folder set to \(chosen.path)")
+        Log.write("likely", "folder set to \(path: chosen)")
         return true
     }
     static var exists: Bool {
@@ -62,8 +63,9 @@ final class LikelyFolder {
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
+    /// No trailing slash: also matches the real folder, …/Likely.noindex (see SpotlightExclusion).
     private static let supportPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/Likely").path + "/"
+        .appendingPathComponent("Library/Application Support/Likely").path
 
     private let fm = FileManager.default
     private let manifestURL: URL
@@ -171,7 +173,7 @@ final class LikelyFolder {
             }
             statusURL = target
         } catch {
-            Log.write("likely", "status rename failed: \(error.localizedDescription)")
+            Log.write("likely", "status rename failed: \(error: error)")
         }
     }
 
@@ -261,7 +263,7 @@ final class LikelyFolder {
         let likelyURL = Self.url
         guard !sources.contains(source.path), !pending.contains(source.path) else { return completion(false) }
         if let reason = screened.refusal {
-            if reason != "in the Likely folder" { Log.write("likely", "skip \(source.path) (\(reason))") }
+            if reason != "in the Likely folder" { Log.write("likely", "skip \(path: source) (\(meta: reason))") }
             return completion(false)
         }
         let home = fm.homeDirectoryForCurrentUser.path
@@ -314,14 +316,14 @@ final class LikelyFolder {
             guard let match = (try? fm.contentsOfDirectory(atPath: resolved))?.first(where: { key($0) == wanted }) else { return path }
             resolved = (resolved as NSString).appendingPathComponent(match)
         }
-        Log.write("likely", "matched \(path) to \(resolved)")
+        Log.write("likely", "matched \(path: path) to \(path: resolved)")
         return resolved
     }
 
     static func screen(path: String) -> (source: URL, refusal: String?) {
         let source = URL(fileURLWithPath: existingPath(for: (path as NSString).expandingTildeInPath)).resolvingSymlinksInPath()
         if source.path.hasPrefix(url.path + "/") { return (source, "in the Likely folder") }
-        // Never suggest Likely's own files (e.g. the screenshot an agent was shown).
+        // Never suggest Likely's own files (e.g. an agent's config file).
         if source.path.hasPrefix(supportPath) { return (source, "Likely's own file") }
         // Credentials, keychains, dotfiles, system files: never staged where any picker can grab them.
         // Checked on the real path too (Foundation's resolution drops /private, realpath keeps it), and
@@ -395,7 +397,7 @@ final class LikelyFolder {
             let url = Self.url.appendingPathComponent(name)
             guard Copier.isTagged(url), !listed.contains(url.standardizedFileURL.path) else { continue }
             try? fm.removeItem(at: url)
-            Log.write("likely", "removed unlisted copy \(name)")
+            Log.write("likely", "removed unlisted copy \(path: name)")
         }
     }
 
@@ -464,7 +466,7 @@ final class LikelyFolder {
     private func saveManifest() {
         if let data = try? JSONEncoder().encode(Manifest(paths: added.map(\.path), releasedAt: releasedAt,
                                                           recent: recent.map(\.path))) {
-            try? data.write(to: manifestURL)
+            try? OwnerOnly.write(data, to: manifestURL)   // 0600
         }
     }
 }
@@ -496,24 +498,24 @@ extension LikelyFolder {
         /// Copies a file, package or folder into the Likely folder. Returns the copy, or nil.
         func copy(_ source: URL) -> URL? {
             guard let item = Opened(source.path) else {
-                Log.write("likely", "skip missing or unreadable \(source.path)")
+                Log.write("likely", "skip missing or unreadable \(path: source)")
                 return nil
             }
             defer { close(item.fd) }
             if let reason = refusal(for: item.realPath) {
-                Log.write("likely", "skip \(source.path) (opened \(item.realPath): \(reason))")
+                Log.write("likely", "skip \(path: source) (opened \(path: item.realPath): \(meta: reason))")
                 return nil
             }
             if item.isDirectory && !NSWorkspace.shared.isFilePackage(atPath: item.realPath) {
                 return copyFolder(item, source: source)
             }
             guard item.isRegular || item.isDirectory else {
-                Log.write("likely", "skip non-regular file \(source.path)")
+                Log.write("likely", "skip non-regular file \(path: source)")
                 return nil
             }
             guard let destination = clone(item, toFolder: likelyURL, name: source.lastPathComponent) else { return nil }
             Self.copyDateAdded(from: URL(fileURLWithPath: item.realPath), to: destination)
-            Log.write("likely", "added \(source.path)")
+            Log.write("likely", "added \(path: source)")
             return destination
         }
 
@@ -530,7 +532,7 @@ extension LikelyFolder {
             let root = URL(fileURLWithPath: folder.realPath, isDirectory: true)
             let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .isPackageKey]
             guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
-                Log.write("likely", "skip unreadable folder \(source.path)")
+                Log.write("likely", "skip unreadable folder \(path: source)")
                 return nil
             }
             // Plan first: which files go in, and whether the folder is too big.
@@ -550,12 +552,12 @@ extension LikelyFolder {
                 files.append(String(entry.path.dropFirst(root.path.count + 1)))
                 bytes += Int64(values?.fileSize ?? 0)
                 if files.count > LikelyFolder.folderFileLimit || bytes > LikelyFolder.folderByteLimit {
-                    Log.write("likely", "skip folder \(source.path): over \(LikelyFolder.folderFileLimit) files or 5 GB")
+                    Log.write("likely", "skip folder \(path: source): over \(LikelyFolder.folderFileLimit) files or 5 GB")
                     return nil
                 }
             }
             guard !files.isEmpty else {
-                Log.write("likely", "skip empty folder \(source.path)")
+                Log.write("likely", "skip empty folder \(path: source)")
                 return nil
             }
 
@@ -571,7 +573,7 @@ extension LikelyFolder {
                 // path could have been swapped for a symlink since the plan was made).
                 guard item.realPath.hasPrefix(root.path + "/"), refusal(for: item.realPath) == nil,
                       item.isRegular || item.isDirectory else {
-                    Log.write("likely", "skip \(path) in folder (changed or not allowed)")
+                    Log.write("likely", "skip \(path: path) in folder (changed or not allowed)")
                     continue
                 }
                 let target = destination.appendingPathComponent(relative)
@@ -587,11 +589,11 @@ extension LikelyFolder {
             }
             guard copiedCount > 0 else {
                 try? fm.removeItem(at: destination)
-                Log.write("likely", "folder copy failed \(source.path)")
+                Log.write("likely", "folder copy failed \(path: source)")
                 return nil
             }
             Self.copyDateAdded(from: root, to: destination)
-            Log.write("likely", "added folder \(source.path) (\(copiedCount) files)")
+            Log.write("likely", "added folder \(path: source) (\(copiedCount) files)")
             return destination
         }
 
@@ -623,7 +625,7 @@ extension LikelyFolder {
                 if copied { return tagged(destination, unique) }
                 let copyError = errno
                 if copyError == EEXIST && unique && attempt < 1000 { attempt += 1; continue }
-                Log.write("likely", "copy failed \(item.realPath): \(String(cString: strerror(copyError)))")
+                Log.write("likely", "copy failed \(path: item.realPath): \(errno: copyError)")
                 if copyError != EEXIST, item.isDirectory { try? fm.removeItem(at: destination) }
                 return nil
             }
@@ -634,7 +636,7 @@ extension LikelyFolder {
                 let destination = likelyURL.appendingPathComponent(Self.numbered(name, attempt))
                 if mkdir(destination.path, 0o755) == 0 { return Self.tag(destination) }
                 if errno != EEXIST {
-                    Log.write("likely", "couldn't create \(destination.path): \(String(cString: strerror(errno)))")
+                    Log.write("likely", "couldn't create \(path: destination): \(errno: errno)")
                     return nil
                 }
             }
@@ -655,7 +657,7 @@ extension LikelyFolder {
             guard lstat(url.path, &info) == 0 else { return url }
             let value = Array(String(info.st_ino).utf8)
             if setxattr(url.path, tagName, value, value.count, 0, XATTR_NOFOLLOW) != 0 {
-                Log.write("likely", "couldn't tag \(url.lastPathComponent): \(String(cString: strerror(errno)))")
+                Log.write("likely", "couldn't tag \(path: url.lastPathComponent): \(errno: errno)")
             }
             return url
         }
@@ -691,7 +693,7 @@ extension LikelyFolder {
             let url = folder.appendingPathComponent(name)
             let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
             guard fd >= 0 else {
-                Log.write("likely", "couldn't create \(name): \(String(cString: strerror(errno)))")
+                Log.write("likely", "couldn't create \(path: name): \(errno: errno)")
                 return nil
             }
             close(fd)
@@ -706,7 +708,7 @@ extension LikelyFolder {
             let seconds = date.timeIntervalSince1970.rounded(.down)
             var time = timespec(tv_sec: Int(seconds), tv_nsec: Int((date.timeIntervalSince1970 - seconds) * 1_000_000_000))
             if setattrlist(destination.path, &list, &time, MemoryLayout<timespec>.size, UInt32(FSOPT_NOFOLLOW)) != 0 {
-                Log.write("likely", "couldn't set Date Added on \(destination.lastPathComponent): \(String(cString: strerror(errno)))")
+                Log.write("likely", "couldn't set Date Added on \(path: destination.lastPathComponent): \(errno: errno)")
             }
         }
     }

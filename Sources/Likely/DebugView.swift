@@ -1,5 +1,6 @@
 import AppKit
 import LikelyEvalKit
+import LikelyStorage
 import SwiftUI
 
 /// Record of one picker → claude run, for the debug window.
@@ -8,9 +9,6 @@ final class DebugRun: ObservableObject, Identifiable {
     let date = Date()
     let appName: String
     let detectedVia: String
-    @Published var captureMode: String?
-    @Published var screenshotURL: URL?
-    @Published var image: NSImage?
     @Published var prompt: String?
     @Published var model: String?
     @Published var events: [(Date, String)] = []
@@ -35,33 +33,18 @@ final class DebugRun: ObservableObject, Identifiable {
     func log(_ message: String) { events.append((Date(), message)) }
 }
 
-/// Keeps the most recent runs, with a copy of each run's screenshot (the live one is overwritten).
+/// Keeps the most recent runs, in memory only.
 final class DebugStore: ObservableObject {
     static let shared = DebugStore()
     static let maxRuns = 15
 
     @Published private(set) var runs: [DebugRun] = []
-    private let directory: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/Likely/debug", isDirectory: true)
 
     func begin(appName: String, detectedVia: String) -> DebugRun {
         let run = DebugRun(appName: appName, detectedVia: detectedVia)
         runs.insert(run, at: 0)
-        while runs.count > Self.maxRuns {
-            let old = runs.removeLast()
-            if let url = old.screenshotURL { try? FileManager.default.removeItem(at: url) }
-        }
+        if runs.count > Self.maxRuns { runs.removeLast(runs.count - Self.maxRuns) }
         return run
-    }
-
-    func attachScreenshot(_ source: URL, mode: String, to run: DebugRun) {
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let copy = directory.appendingPathComponent("\(run.id.uuidString).png")
-        try? FileManager.default.removeItem(at: copy)
-        guard (try? FileManager.default.copyItem(at: source, to: copy)) != nil else { return }
-        run.screenshotURL = copy
-        run.image = NSImage(contentsOf: copy)
-        run.captureMode = mode
     }
 }
 
@@ -111,21 +94,6 @@ private struct RunDetail: View {
                     Spacer()
                     Button("Make This a Test…") { testEditor = makeTest() }
                         .help("Save this run's query and context as an eval case, with the file(s) you wanted")
-                }
-
-                section("Screenshot sent to Claude", detail: run.captureMode) {
-                    if let image = run.image {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 420)
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
-                        if let url = run.screenshotURL {
-                            Button("Open in Preview") { NSWorkspace.shared.open(url) }
-                        }
-                    } else {
-                        Text(run.captureMode == nil ? "Capturing…" : "No screenshot (capture failed)").foregroundStyle(.secondary)
-                    }
                 }
 
                 section("Prompt") {

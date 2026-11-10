@@ -36,7 +36,7 @@ enum SidebarFavorites {
         let item = LSSharedFileListInsertItemURL(list, anchor, url.lastPathComponent as CFString, nil, url as CFURL,
                                                  [:] as CFDictionary, [] as CFArray)
         let pinned = item != nil && contains(url)
-        Log.write("sidebar", pinned ? "pinned \(url.path)" : "couldn't pin \(url.path)")
+        Log.write("sidebar", pinned ? "pinned \(path: url)" : "couldn't pin \(path: url)")
         return pinned
     }
 }

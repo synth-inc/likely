@@ -1,4 +1,5 @@
 import AppKit
+import LikelyStorage
 import LikelyTools
 import OnboardingKit
 import SwiftUI
@@ -8,7 +9,7 @@ struct SettingsActions {
     /// Onboarding, opened on the license page.
     var showLicense: () -> Void
     var showDebugView: () -> Void
-    var verboseChanged: (Bool) -> Void
+    var logDetailsChanged: (Bool) -> Void
 }
 
 /// The selected Settings tab, so the menu bar can open Settings on a given tab.
@@ -85,14 +86,24 @@ private struct DebugSettings: View {
 private struct GeneralSettings: View {
     let actions: SettingsActions
     @AppStorage("openToLikely") private var openToLikely = true
-    @AppStorage("verbose") private var verbose = false
+    /// LogDetailsSwitch's expiry (seconds since 1970), 0 when off.
+    @AppStorage(LogDetailsSwitch.defaultsKey) private var logDetailsUntil: Double = 0
     @AppStorage("showRecentFiles") private var showRecentFiles = true
     @AppStorage("recentFileCount") private var recentFileCount = 3
-    /// Settings.sendScreenshot (migrated from "autoSuggest" at launch).
-    @AppStorage("sendScreenshot") private var sendScreenshot = true
-    private var screenshotsAllowed: Bool { CGPreflightScreenCaptureAccess() }
     @State private var folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
     @State private var pinned = SidebarFavorites.contains(LikelyFolder.url)
+
+    private var logDetailsCaption: String {
+        _ = logDetailsUntil   // the stored copy: changes re-render this; the switch itself decides
+        var text: String
+        if let until = Log.details.expiry {
+            text = "On until \(until.formatted(date: .abbreviated, time: .shortened)): the log includes what you type, window titles, file names and paths, and your agent's output, plus every accessibility event. It turns off by itself after 24 hours or when you quit Likely. Those lines go to a separate detailed log, deleted when details turn off."
+        } else {
+            text = "Off: the log keeps events, timings and counts, but not what you type, window titles, file names or your agent's output. Turn on to send the log with a bug report; it turns off by itself after 24 hours or when you quit Likely."
+        }
+        if Log.details.alwaysOn { text += " This dev build always logs details." }
+        return text
+    }
 
     private func refreshFolder() {
         folderPath = (LikelyFolder.url.path as NSString).abbreviatingWithTildeInPath
@@ -146,26 +157,22 @@ private struct GeneralSettings: View {
                 Text("Your newest downloads, screenshots and saved files, ready in the Likely folder under …Recent…. Likely searches with your agent when you type in the bar above the picker.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("When you search") {
-                Toggle("Send a screenshot with searches", isOn: $sendScreenshot)
-                    .disabled(!screenshotsAllowed)
-                Text(!screenshotsAllowed
-                     ? "Needs the optional Screenshots permission (Permissions tab). Without it, your agent gets what you type, the app name and the window title."
-                     : sendScreenshot
-                     ? "Your agent also gets a screenshot of the window behind the picker. It's taken when you search, never just because a picker opened."
-                     : "Your agent gets only what you type, the app name and the window title. No screenshots are taken.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             if Updater.isEnabled { UpdatesSection() }
             Section("Troubleshooting") {
-                Toggle("Log every accessibility event (verbose)", isOn: $verbose)
-                    .onChange(of: verbose) { _, value in actions.verboseChanged(value) }
+                Toggle("Log details for troubleshooting", isOn: Binding(
+                    get: { logDetailsUntil > 0 && Log.details.isSwitchedOn },
+                    set: { actions.logDetailsChanged($0) }))
+                Text(logDetailsCaption).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Open Debug View") { actions.showDebugView() }
-                    Button("Open Log") { NSWorkspace.shared.open(Log.fileURL) }
+                    Button("Open Log") { NSWorkspace.shared.open(Log.fileToOpen) }
+                    Button("Clear Log") { Log.clear() }
                     Spacer()
                     Button("Run Onboarding Again") { actions.showOnboarding() }
                 }
+            }
+            Section("About") {
+                LegalLinks(size: NSFont.systemFontSize)
             }
         }
         .formStyle(.grouped)
@@ -226,7 +233,11 @@ private struct LicenseSection: View {
                     if !store.isActive {
                         Button("Buy…") { actions.showLicense() }
                     }
-                    Button("Check Again") { Task { await store.refresh() } }.disabled(store.isChecking)
+                    if License.mayContactServer {
+                        Button("Check Again") { Task { await store.refresh() } }.disabled(store.isChecking)
+                    } else {
+                        Text("Finish setting up Likely first").foregroundStyle(.secondary)
+                    }
                 }
             }
             if let message = portalError ?? store.lastError, !License.isFreeBuild {
@@ -387,15 +398,11 @@ private struct PermissionSettings: View {
                     icon: "accessibility", title: "Accessibility",
                     description: "Notices when a file picker opens and jumps it to your Likely folder.",
                     isGranted: state.accessibility, shouldPulse: false, action: Permissions.requestAccessibility)
-                OnboardingPermissionRow(
-                    icon: "camera.viewfinder", title: "Screenshots", badge: "Optional",
-                    description: "Lets Likely send your agent a screenshot of the app you're uploading from, so it knows what you're uploading to when you search.",
-                    isGranted: state.screenRecording, shouldPulse: false,
-                    note: "Already allowed it?", secondaryTitle: "Quit & Reopen", secondaryAction: Permissions.relaunch,
-                    action: Permissions.requestScreenRecording)
                 Divider()
                 Text("Folders Likely searches").font(.headline)
                 SearchFolderList(state: state)
+                Divider()
+                PrivateDataSection()
             }
             .padding(4)
         }
@@ -405,6 +412,65 @@ private struct PermissionSettings: View {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
+    }
+}
+
+/// Settings → Permissions → Private data: macOS-protected stores the agents are kept out of unless
+/// turned on here (see PrivateDataArea, PrivateDataPermission).
+private struct PrivateDataSection: View {
+    @ObservedObject private var tools = ToolStore.shared
+    @State private var working: PrivateDataArea?
+    @State private var problem: (area: PrivateDataArea, message: String)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Private data").font(.headline)
+            Text("Off so searches never wander into them by surprise").font(.caption).foregroundStyle(.secondary)
+            ForEach(PrivateDataArea.allCases) { area in
+                HStack(alignment: .firstTextBaseline) {
+                    Toggle(isOn: binding(area)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(area.title)
+                            Text(area.detail + (area.needsFullDiskAccess ? " Only readable with Full Disk Access for Likely, which then applies to the search agents too." : ""))
+                                .font(.caption).foregroundStyle(.secondary)
+                            let users = tools.tools.filter { $0.neededAreas.contains(area) }.map(\.name)
+                            if !users.isEmpty {
+                                Text("Needed by \(users.joined(separator: ", "))").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(working != nil)
+                    if working == area { ProgressView().controlSize(.small) }
+                }
+                if let problem, problem.area == area {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(problem.message).font(.caption).foregroundStyle(.orange)
+                        if area.needsFullDiskAccess {
+                            Button("Open Full Disk Access Settings") { NSWorkspace.shared.open(PrivateDataPermission.fullDiskAccessURL) }
+                                .controlSize(.small)
+                        }
+                    }
+                }
+            }
+            Text("Turning one on asks macOS for access now (Mail, Messages and Safari: macOS doesn't ask; add Likely to Full Disk Access yourself). Turning it off blocks the agents again, but the permission macOS gave stays in System Settings → Privacy & Security until you remove it there. Stores only Full Disk Access opens (call history, Keychains, cookies, iPhone backups, …) are always off.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func binding(_ area: PrivateDataArea) -> Binding<Bool> {
+        Binding(get: { _ = tools.tools; return PrivateDataAccess.isAllowed(area) }, set: { on in
+            problem = nil
+            if on {
+                working = area
+                PrivateDataPermission.enable(area) { outcome in
+                    working = nil
+                    if case .denied(let message) = outcome { problem = (area, message) }
+                }
+            } else {
+                PrivateDataPermission.disable(area)
+            }
+        })
     }
 }
 
@@ -420,6 +486,13 @@ private struct ToolsSettings: View {
     @State private var copied = false
     @State private var rclipInstalled = false
     @State private var settingUpPhotos = false
+    /// A tool being turned on whose private data areas are still off: "<Tool> needs access to … Allow?"
+    @State private var askingNeeds: CustomTool?
+    @State private var needsProblem: String?
+    /// The tool whose areas are being turned on (macOS may be showing its alert): its row waits.
+    @State private var working: String?
+    /// The selected agent's built-in tools that are off (BuiltinToolSettings), reloaded when it changes.
+    @State private var disabledBuiltins: Set<String> = []
 
     private var photoState: PhotoSearch.State { PhotoSearch.state(tools: store.tools, rclipInstalled: rclipInstalled) }
 
@@ -432,6 +505,11 @@ private struct ToolsSettings: View {
             if !store.pending.isEmpty {
                 Section {
                     ApprovalBanner(pending: store.pending, approve: store.approvePending)
+                }
+            }
+            if let needsProblem {
+                Section {
+                    Text(needsProblem).font(.caption).foregroundStyle(.orange)
                 }
             }
 
@@ -455,8 +533,17 @@ private struct ToolsSettings: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(store.tools) { tool in
+                    // A tool waiting for approval can't be switched on or have its needs allowed here: only
+                    // Approve (with the full change list above) makes it usable.
                     ToolRow(tool: tool, results: testResults[tool.id],
-                            waitingForApproval: store.pending.contains { $0.tool.id == tool.id },
+                            waitingForApproval: store.isPending(tool),
+                            unmetNeeds: store.unmetNeeds(of: tool),
+                            working: working == tool.id,
+                            setEnabled: { on in
+                                guard !store.isPending(tool) else { return }
+                                if on, !store.unmetNeeds(of: tool).isEmpty { askingNeeds = tool } else { store.setEnabled(on, id: tool.id) }
+                            },
+                            allow: { if !store.isPending(tool) { askingNeeds = tool } },
                             agentNote: ["codex", "hermes"].contains(agentID) && tool.isActive ? ToolPermissions.agentNotes[agentID] : nil,
                             edit: { editing = ToolDraft(tool, isNew: false) },
                             test: { testResults[tool.id] = ToolCheck.run(tool.cleanedCommands, agentID: agentID) },
@@ -487,6 +574,11 @@ private struct ToolsSettings: View {
             }
 
             Section {
+                if let warning = AgentBuiltins.searchWarning(agentID: agentID, disabled: disabledBuiltins) {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                let toggleable = BuiltInTools.isToggleable(agentID: agentID)
                 ForEach(BuiltInTools.entries(for: agentID), id: \.self) { entry in
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -496,13 +588,38 @@ private struct ToolsSettings: View {
                             }
                         }
                         Spacer()
-                        Text("Always on").font(.caption).foregroundStyle(.secondary)
+                        if toggleable {
+                            Toggle("", isOn: Binding(
+                                get: { !disabledBuiltins.contains(entry.name) },
+                                set: { on in
+                                    BuiltinToolSettings.setEnabled(on, name: entry.name, agentID: agentID)
+                                    disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
+                                }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        } else {
+                            Text("Always on").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             } header: {
-                Text("Built in")
+                HStack {
+                    Text("Built in")
+                    Spacer()
+                    if BuiltInTools.isToggleable(agentID: agentID) {
+                        Button("Reset to Defaults") {
+                            BuiltinToolSettings.reset(agentID: agentID)
+                            disabledBuiltins = []
+                        }
+                        .controlSize(.small)
+                        .disabled(disabledBuiltins.isEmpty)
+                    }
+                }
             } footer: {
-                Text("What \(AgentKind.with(id: agentID)?.name ?? "your agent") can always use. These only read.")
+                Text(BuiltInTools.isToggleable(agentID: agentID)
+                     ? "What \(AgentKind.with(id: agentID)?.name ?? "your agent") can use. These only read. Turn one off to compare search speed; the search prompt then says it's unavailable. Your tools above aren't affected."
+                     : "What \(AgentKind.with(id: agentID)?.name ?? "your agent") can always use. Codex has no per-tool list, so nothing here can be turned off.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -535,8 +652,12 @@ private struct ToolsSettings: View {
         .onAppear {
             store.reloadIfChanged()
             detectRclip()
+            disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
         }
-        .onChange(of: agentID) { _, _ in detectRclip() }
+        .onChange(of: agentID) { _, _ in
+            detectRclip()
+            disabledBuiltins = BuiltinToolSettings.disabled(for: agentID)
+        }
         .sheet(isPresented: $settingUpPhotos) {
             PhotoSearchSetupSheet(installed: rclipInstalled, checkAgain: detectRclip) { settingUpPhotos = false }
         }
@@ -549,6 +670,16 @@ private struct ToolsSettings: View {
                 editing = nil
             }
         }
+        .alert(askingNeeds.map { "\($0.name) needs access to \(Self.list(store.unmetNeeds(of: $0).map(\.phrase))). Allow?" } ?? "",
+               isPresented: Binding(get: { askingNeeds != nil }, set: { if !$0 { askingNeeds = nil } })) {
+            Button("Allow") {
+                if let tool = askingNeeds { allowNeeds(of: tool) }
+                askingNeeds = nil
+            }
+            Button("Cancel", role: .cancel) { askingNeeds = nil }
+        } message: {
+            Text(askingNeeds.map { Self.allowMessage(store.unmetNeeds(of: $0)) } ?? "")
+        }
         .alert("Delete \(deleting?.name ?? "tool")?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete", role: .destructive) {
                 if let deleting { store.delete(id: deleting.id) }
@@ -558,6 +689,50 @@ private struct ToolsSettings: View {
         } message: {
             Text("It's removed from tools.json. The command-line tool itself stays installed.")
         }
+    }
+
+    /// What Allow does, per kind of area: macOS asks for some; Mail, Messages and Safari only open with
+    /// Full Disk Access, which then applies to the agents too.
+    static func allowMessage(_ areas: [PrivateDataArea]) -> String {
+        let asking = areas.filter { !$0.needsFullDiskAccess }
+        let fullDisk = areas.filter(\.needsFullDiskAccess)
+        var text = "Searches can then read there."
+        if !asking.isEmpty { text += " macOS asks you too for \(list(asking.map(\.title)))." }
+        if !fullDisk.isEmpty {
+            text += " \(list(fullDisk.map(\.title))) can only be read with Full Disk Access for Likely, which macOS doesn't ask for: you add it in System Settings → Privacy & Security, and it applies to the search agents too."
+        }
+        return text + " You can turn it off again in Settings → Permissions → Private data."
+    }
+
+    static func list(_ items: [String]) -> String {
+        items.count <= 1 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last!
+    }
+
+    /// Turns on each area the tool needs (one macOS alert at a time), then the tool. Stops at the
+    /// first area macOS refuses; the tool stays off and says why.
+    private func allowNeeds(of tool: CustomTool) {
+        guard !store.isPending(tool), working == nil else { return }
+        needsProblem = nil
+        working = tool.id
+        var remaining = store.unmetNeeds(of: tool)
+        func next() {
+            guard let area = remaining.first else {
+                working = nil
+                // Never approves: a tool that became pending meanwhile stays off (see ToolStore.setEnabled).
+                if !store.isPending(tool) { store.setEnabled(true, id: tool.id) }
+                return
+            }
+            remaining.removeFirst()
+            PrivateDataPermission.enable(area) { outcome in
+                if case .denied(let message) = outcome {
+                    working = nil
+                    needsProblem = "\(tool.name) stays off: \(message)"
+                } else {
+                    next()
+                }
+            }
+        }
+        next()
     }
 
     private func revealFile() {
@@ -571,6 +746,12 @@ private struct ToolRow: View {
     let tool: CustomTool
     let results: [ToolCheck]?
     let waitingForApproval: Bool
+    /// Private data areas it needs that are still off: it isn't used until they're on.
+    let unmetNeeds: [PrivateDataArea]
+    /// Its areas are being turned on.
+    let working: Bool
+    let setEnabled: (Bool) -> Void
+    let allow: () -> Void
     let agentNote: String?
     let edit: () -> Void
     let test: () -> Void
@@ -580,8 +761,8 @@ private struct ToolRow: View {
         let problems = tool.problems
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Toggle(isOn: Binding(get: { tool.enabled && problems.isEmpty },
-                                     set: { ToolStore.shared.setEnabled($0, id: tool.id) })) {
+                Toggle(isOn: Binding(get: { tool.enabled && problems.isEmpty && unmetNeeds.isEmpty },
+                                     set: setEnabled)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(tool.name)
                         Text(tool.cleanedCommands.isEmpty ? "No commands" : tool.cleanedCommands.joined(separator: "   "))
@@ -589,7 +770,8 @@ private struct ToolRow: View {
                     }
                 }
                 .toggleStyle(.switch)
-                .disabled(!problems.isEmpty)
+                .disabled(!problems.isEmpty || waitingForApproval || working)
+                if working { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Test", action: test).controlSize(.small)
                 Button("Edit…", action: edit).controlSize(.small)
@@ -601,6 +783,15 @@ private struct ToolRow: View {
                     .font(.caption).foregroundStyle(.orange)
             } else if waitingForApproval {
                 Text("Not used until you approve the change above").font(.caption).foregroundStyle(.orange)
+            } else if tool.enabled, !unmetNeeds.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Off: needs access to \(ToolsSettings.list(unmetNeeds.map(\.phrase))), which is off in Settings → Permissions → Private data")
+                        .font(.caption).foregroundStyle(.orange)
+                    Button("Allow…", action: allow).controlSize(.small).disabled(working)
+                }
+            }
+            if !tool.neededAreas.isEmpty {
+                Text("Needs access to " + ToolsSettings.list(tool.neededAreas.map(\.phrase))).font(.caption).foregroundStyle(.secondary)
             }
             if let agentNote { Text(agentNote).font(.caption).foregroundStyle(.secondary) }
             if let results { ToolCheckList(results: results) }

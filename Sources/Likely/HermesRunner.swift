@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// Runs Nous Research's Hermes Agent: `hermes chat -q … --format stream-json` in its own `likely`
@@ -16,9 +17,9 @@ import LikelyTools
 ///   denied so nothing can hand work to launchd;
 /// - a daemon for the profile that isn't sandboxed (the user ran `hermes -p likely` by hand) is stopped.
 ///
-/// The screenshot is viewed with the `vision_analyze` tool (`--image` isn't supported by the gateway
-/// client). Feedback continues the same named session with `-c`; a turn in flight can't be stopped
-/// from the CLI, so the gateway finishes it (read-only) and then answers the feedback.
+/// Images are viewed with the `vision_analyze` tool. Feedback continues the same named session with
+/// `-c`; a turn in flight can't be stopped from the CLI, so the gateway finishes it (read-only) and
+/// then answers the feedback.
 final class HermesRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -33,6 +34,8 @@ final class HermesRunner: AgentRunner {
     private var pendingText = ""
     private var textSinceTool = false
     private var sessionName: String?
+    /// The session's id, from the first `result` (deleted when the picker closes).
+    private var sessionID: String?
     private var executable: String?
     private var model = ""
     private var workDir: URL?
@@ -47,25 +50,26 @@ final class HermesRunner: AgentRunner {
     }
 
     /// `--source tool` keeps these sessions out of the user's session lists; `--ignore-rules` skips
-    /// SOUL.md/AGENTS.md/memory. terminal = shell (mdfind etc.), file = read_file/search_files,
-    /// vision = vision_analyze for the screenshot. Writes from any of them are stopped by the sandbox.
-    static let toolsets = ["terminal", "file", "vision"]
-    private static let baseArguments = ["chat", "--format", "stream-json", "--source", "tool", "--ignore-rules",
-                                        "-t", toolsets.joined(separator: ",")]
+    /// SOUL.md/AGENTS.md/memory. Toolsets (AgentBuiltins.hermesToolsets, minus the ones turned off in
+    /// Settings): terminal = shell (mdfind etc.), file = read_file/search_files, vision = vision_analyze
+    /// for images. Writes from any of them are stopped by the sandbox. A session keeps the toolsets it
+    /// was created with; each search creates a new one.
+    private var baseArguments: [String] {
+        ["chat", "--format", "stream-json", "--source", "tool", "--ignore-rules",
+         "-t", AgentBuiltins.hermesToolsets(disabled: launchOptions.disabledBuiltins(for: "hermes")).joined(separator: ",")]
+    }
 
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
         self.executable = executable
         self.model = model
         self.workDir = workDir
         sessionName = "likely-\(UUID().uuidString.prefix(8).lowercased())"
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        var prompt = prompt
-        if let image { prompt += "\n\nThe screenshot is at \(image.path)." }
-        prompt += "\nTo look at an image, use vision_analyze (read_file only reads text)."
-        prepareThenLaunch(prompt)
+        let vision = !launchOptions.disabledBuiltins(for: "hermes").contains("vision")
+        prepareThenLaunch(prompt + (vision ? "\nTo look at an image, use vision_analyze (read_file only reads text)." : ""))
     }
 
     @discardableResult
@@ -80,6 +84,8 @@ final class HermesRunner: AgentRunner {
     func cancel() {
         generation += 1
         stopProcess()
+        if let sessionID, let executable { Self.deleteSession(sessionID, executable: executable) }
+        sessionID = nil
         sessionName = nil
         try? transcript?.close()
         transcript = nil
@@ -109,7 +115,7 @@ final class HermesRunner: AgentRunner {
             DispatchQueue.main.async {
                 guard generation == self.generation else { return }
                 if let problem {
-                    Log.write("hermes", "not started: \(problem)")
+                    Log.write("hermes", "not started: \(meta: problem)")
                     self.isBusy = false
                     self.onExit?(AgentOutcome(success: false, summary: problem, costUSD: nil))
                     return
@@ -127,8 +133,9 @@ final class HermesRunner: AgentRunner {
         turnEnded = false
 
         let process = Process()
-        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: Self.baseArguments + arguments,
-                                                             profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules)
+        let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: baseArguments + arguments,
+                                                             profile: Self.sandboxProfile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path], agent: .hermes)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -147,7 +154,7 @@ final class HermesRunner: AgentRunner {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { Log.write("hermes-stderr", trimmed) }
+            if !trimmed.isEmpty { Log.write("hermes-stderr", "\(trimmed.count) chars: \(sensitive: trimmed)") }
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -167,10 +174,10 @@ final class HermesRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("hermes", "started session=\(sessionName ?? "?") model=\(model) pid=\(process.processIdentifier)")
+            Log.write("hermes", "started session=\(meta: sessionName) model=\(meta: model) pid=\(process.processIdentifier)")
         } catch {
             isBusy = false
-            Log.write("hermes", "failed to launch \(executable): \(error)")
+            Log.write("hermes", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch hermes", costUSD: nil))
         }
     }
@@ -208,18 +215,19 @@ final class HermesRunner: AgentRunner {
                 onStatus?(status)
             }
         case "result":
+            if let id = event["session_id"] as? String, !id.isEmpty { sessionID = id }
             flushText()
             // `text` repeats the last message; parse it only if it wasn't streamed.
             if !textSinceTool { AgentProtocol.parse(text: event["text"] as? String ?? "", onStatus: onStatus, onFile: reportFile) }
             turnEnded = true
             isBusy = false
-            if launchOptions.isEval { Self.noteEvalGateway(rules: launchOptions.extraSandboxRules) }
+            if launchOptions.isEval, let workDir { Self.noteEvalGateway(rules: Self.gatewayRules(launchOptions, workDir: workDir)) }
             let exitCode = event["exit_code"] as? Int ?? 1
             if exitCode == 0 {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
             } else {
                 let message = (event["error"] as? String) ?? (event["text"] as? String) ?? "hermes failed"
-                Log.write("hermes", "turn failed (\(exitCode)): \(message.prefix(300))")
+                Log.write("hermes", "turn failed (\(exitCode)) kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(300))")
                 onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
             }
         default:
@@ -325,9 +333,8 @@ extension HermesRunner {
         // which makes it start the gateway as a plain child process.
         let stub = stubDir(workDir).appendingPathComponent("launchctl")
         if !fm.isExecutableFile(atPath: stub.path) {
-            try? fm.createDirectory(at: stubDir(workDir), withIntermediateDirectories: true)
-            try? "#!/bin/sh\n[ \"$1\" = print ] && exit 113\nexit 1\n".write(to: stub, atomically: true, encoding: .utf8)
-            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+            // Owner-only, executable (0700) from creation.
+            try? OwnerOnly.write(Data("#!/bin/sh\n[ \"$1\" = print ] && exit 113\nexit 1\n".utf8), to: stub, mode: OwnerOnly.executableMode)
         }
 
         let config = profileDir.appendingPathComponent("config.yaml")
@@ -352,11 +359,52 @@ extension HermesRunner {
            (json["served_profiles"] as? [String])?.contains(profileName) == true {
             return "Your Hermes gateway is serving the \(profileName) profile; restart it with: hermes gateway restart"
         }
-        if options.isEval, let problem = prepareEvalGateway(executable: executable, rules: options.extraSandboxRules) { return problem }
+        if options.isEval, let problem = prepareEvalGateway(executable: executable, rules: gatewayRules(options, workDir: workDir)) { return problem }
+        if !options.isEval, let problem = restartGatewayIfAreasChanged() { return problem }
+        return nil
+    }
+
+    /// The private data areas the app's gateway was started with (its sandbox is fixed at start).
+    /// Only recorded once no gateway with other rules can be running.
+    private static var appGatewayAreas: [PrivateDataArea]?
+
+    /// A Private data toggle changed since the gateway started (or it's left from an earlier session,
+    /// rules unknown): stop it, so the next client starts one with the current rules. Fails closed: if
+    /// the gateway doesn't stop, the search doesn't start (it would run with the old rules, e.g. an
+    /// area the user just turned off still open), and the next search tries again.
+    private static func restartGatewayIfAreasChanged() -> String? {
+        evalGatewayLock.lock()
+        defer { evalGatewayLock.unlock() }
+        let areas = PrivateDataAccess.blocked()
+        guard appGatewayAreas != areas else { return nil }
+        guard let pid = gatewayPID(profileDir), pid > 1, kill(pid, 0) == 0 else {
+            appGatewayAreas = areas   // none running: the next client starts one with these rules
+            return nil
+        }
+        // An unsandboxed gateway was stopped (or refused) in `prepare` already; never adopt one.
+        guard isSandboxed(pid) else {
+            return "An unsandboxed Hermes gateway is serving the \(profileName) profile; run: hermes -p \(profileName) gateway stop"
+        }
+        Log.write("hermes", "restarting gateway pid=\(pid) for the current private data settings")
+        kill(pid, SIGTERM)
+        let deadline = Date().addingTimeInterval(10)
+        while kill(pid, 0) == 0, Date() < deadline { usleep(100_000) }
+        guard kill(pid, 0) != 0 else {
+            Log.write("hermes", "gateway pid=\(pid) didn't stop; not searching with its old private data rules")
+            return "Couldn't restart the Hermes gateway (pid \(pid)) for your Private data settings. Try again, or run: hermes -p \(profileName) gateway stop"
+        }
+        appGatewayAreas = areas
         return nil
     }
 
     // MARK: Evals
+
+    /// What makes a gateway's sandbox: the eval's extra rules and the work folder it may read (each
+    /// case has its own), so a gateway is only reused by the same case.
+    static func gatewayRules(_ options: AgentLaunchOptions, workDir: URL) -> String {
+        options.extraSandboxRules + "\n; readable " + workDir.path
+            + "\n; blocked " + PrivateDataAccess.blocked().map(\.rawValue).joined(separator: ",")
+    }
 
     /// The gateway inherits the sandbox of the client that started it, extra eval rules included, and
     /// then serves every later client. So an eval only reuses a gateway it started itself with the
@@ -405,6 +453,17 @@ extension HermesRunner {
         Log.write("hermes", "eval: stopped gateway pid=\(pid)")
     }
 
+    /// The session's messages (the queries, what the agent read) stay in the profile's session store
+    /// until deleted; Likely continues a session only while its picker is open. In the background.
+    /// The gateway may still be finishing a turn it was asked to stop (see `stopProcess`), so this is
+    /// best effort.
+    static func deleteSession(_ id: String, executable: String) {
+        guard id.range(of: #"^[A-Za-z0-9_.:-]+$"#, options: .regularExpression) != nil else { return }
+        DispatchQueue.global(qos: .utility).async {
+            run(executable, ["-p", profileName, "sessions", "delete", id, "--yes"])
+        }
+    }
+
     /// At quit: stop the sandboxed gateway Likely started for the `likely` profile (an unsandboxed one
     /// belongs to the user and is left alone). SIGTERM, so it shuts down like `hermes gateway stop`.
     static func stopGateway() {
@@ -440,7 +499,7 @@ extension HermesRunner {
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return -1 }
         process.waitUntilExit()
-        Log.write("hermes", "\(arguments.prefix(4).joined(separator: " ")) → \(process.terminationStatus)")
+        Log.write("hermes", "\(meta: arguments.prefix(4).joined(separator: " ")) → \(process.terminationStatus)")
         return process.terminationStatus
     }
 }

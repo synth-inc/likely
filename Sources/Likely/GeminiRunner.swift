@@ -1,9 +1,11 @@
+import CryptoKit
 import Foundation
+import LikelyStorage
 import LikelyTools
 
 /// Runs Google's Gemini CLI: `gemini -p … -o stream-json`, authenticated through Vertex AI with the
 /// user's gcloud application-default credentials (project/location passed as env vars, nothing written
-/// to ~/.gemini). The screenshot is attached by prefixing the prompt with `@/path/to/image.png`.
+/// to ~/.gemini).
 ///
 /// Read-only: headless Gemini runs in the default approval mode, where anything that would need
 /// confirmation is denied (write_file/replace aren't even registered, save_memory and web_fetch are
@@ -13,7 +15,9 @@ import LikelyTools
 /// `file` (-C) can write, so they're left out; mdfind and Gemini's list_directory cover them.
 ///
 /// Gemini can't take messages mid-turn, so feedback stops the current turn and continues the same
-/// conversation with `--resume <session_id>` (sessions are stored per working directory).
+/// conversation with `--resume <session_id>` (sessions are stored per working directory). That needs
+/// the session on disk (Gemini has no way to turn it off), so when the picker closes the work
+/// folder's whole session folder (~/.gemini/tmp/<sha256 of the folder>: the chats and logs.json) and shell history are deleted (`deleteSessions`).
 final class GeminiRunner: AgentRunner {
     var onStatus: ((String) -> Void)?
     var onFile: ((String) -> Void)?
@@ -21,19 +25,14 @@ final class GeminiRunner: AgentRunner {
     var onExit: ((AgentOutcome) -> Void)?
     var launchOptions = AgentLaunchOptions()
 
-    /// Plus the commands of the user's tools (see ToolStore), as `run_shell_command(<prefix>)`.
-    static let allowedCommands = ["mdfind", "mdls", "ls", "grep", "head", "stat"]
-
-    /// Only read_file, list_directory and the shell are registered: glob/search_file_content and the
-    /// codebase_investigator subagent crawl the whole home workspace and can stall for minutes;
-    /// memory, web, skills and hooks aren't wanted. Write tools aren't available headless anyway.
-    static let coreTools = ["read_file", "list_directory", "run_shell_command"]
-    private static let settings = Data("""
-        {"tools": {"core": [\(coreTools.map { "\"\($0)\"" }.joined(separator: ", "))], "enableHooks": false, "sandbox": false},
-         "hooksConfig": {"enabled": false}, "skills": {"enabled": false},
-         "agents": {"overrides": {"codebase_investigator": {"enabled": false}, "cli_help": {"enabled": false},
-                                  "generalist": {"enabled": false}}}}
-        """.utf8)
+    /// Only read_file, list_directory and the shell are registered (AgentBuiltins.gemini, minus what's
+    /// turned off in Settings): glob/search_file_content and the codebase_investigator subagent crawl the
+    /// whole home workspace and can stall for minutes; memory, web, skills and hooks aren't wanted. Write
+    /// tools aren't available headless anyway. Commands: AgentBuiltins.geminiCommands plus the user's
+    /// tools (see ToolStore), as `run_shell_command(<prefix>)`.
+    private var toolConfig: AgentBuiltins.GeminiConfig {
+        AgentBuiltins.gemini(disabled: launchOptions.disabledBuiltins(for: "gemini"), extra: launchOptions.toolCommands)
+    }
 
     private(set) var isBusy = false
     private var process: Process?
@@ -47,18 +46,16 @@ final class GeminiRunner: AgentRunner {
     private var turnEnded = false
     private var transcript: FileHandle?
 
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         cancel()
         sessionID = nil
         self.executable = executable
         self.model = model
         self.workDir = workDir
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
-        // `@path` attaches the file as model input; it must be inside the workspace (see baseArguments).
-        let fullPrompt = image.map { "@\($0.path)\n\n\(prompt)" } ?? prompt
-        launch(baseArguments(imageDirectory: image?.deletingLastPathComponent()) + ["-p", fullPrompt])
+        launch(baseArguments() + ["-p", prompt])
     }
 
     @discardableResult
@@ -66,31 +63,46 @@ final class GeminiRunner: AgentRunner {
         guard let sessionID, executable != nil else { return false }
         // No mid-turn input: stop the current turn (the conversation so far is kept) and resume.
         stopProcess()
-        launch(baseArguments(imageDirectory: nil) + ["--resume", sessionID, "-p", text])
+        launch(baseArguments() + ["--resume", sessionID, "-p", text])
         return true
     }
 
     func cancel() {
         stopProcess()
+        if sessionID != nil, let workDir { Self.deleteSessions(workDir: workDir) }
         sessionID = nil
         try? transcript?.close()
         transcript = nil
     }
 
+    /// Gemini keeps a project's sessions in ~/.gemini/tmp/<sha256 of its path> and its shell history
+    /// in ~/.gemini/history/<same>. The project is Likely's work folder, used by nothing else, so both
+    /// go entirely. Both spellings of the path (Gemini uses the resolved one).
+    static func deleteSessions(workDir: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
+        let gemini = URL(fileURLWithPath: home).appendingPathComponent(".gemini")
+        for path in Set([workDir.path, AgentSandbox.realPath(workDir.path)]) {
+            let hash = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+            for folder in ["tmp", "history"] {
+                let url = gemini.appendingPathComponent(folder).appendingPathComponent(hash)
+                if (try? FileManager.default.removeItem(at: url)) != nil { Log.write("gemini", "deleted its session files for this search") }
+            }
+        }
+    }
+
     /// `-e none` skips the user's extensions. The workspace (where read_file/glob may look) is the
-    /// working directory plus home, the search folders outside it, and the screenshot's folder.
-    private func baseArguments(imageDirectory: URL?) -> [String] {
+    /// working directory plus home and the search folders outside it.
+    private func baseArguments() -> [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let directories = [home] + SearchFolder.outsideHome + (imageDirectory.map { [$0.path] } ?? [])
+        let directories = [home] + SearchFolder.outsideHome
         return [
             "-m", model,
             "-o", "stream-json",
             "-e", "none",
             "--approval-mode", "default",
             "--include-directories", directories.joined(separator: ","),
-            // `=` form: the flag takes an array and would otherwise swallow the following arguments.
-            ToolPermissions.geminiAllowedToolsArgument(builtIn: Self.allowedCommands, extra: launchOptions.toolCommands),
         ]
+        // `=` form: the flag takes an array and would otherwise swallow the following arguments.
+        + (toolConfig.allowedToolsArgument.map { [$0] } ?? [])
     }
 
     private func stopProcess() {
@@ -116,7 +128,8 @@ final class GeminiRunner: AgentRunner {
         // With user tools enabled, also no writes outside ~/.gemini and temp folders.
         let profile = launchOptions.toolCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.geminiProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: executable, arguments: arguments,
-                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path], agent: .gemini)
         process.executableURL = launcher
         process.arguments = launchArguments
         process.currentDirectoryURL = workDir
@@ -133,7 +146,7 @@ final class GeminiRunner: AgentRunner {
         env["GOOGLE_CLOUD_LOCATION"] = Self.vertexLocation
         // Our own settings layer (overrides ~/.gemini/settings.json without touching it).
         let settingsURL = workDir.appendingPathComponent("gemini-settings.json")
-        try? Self.settings.write(to: settingsURL)
+        try? OwnerOnly.write(AgentBuiltins.geminiSettings(toolConfig), to: settingsURL)
         env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = settingsURL.path
         process.environment = env
 
@@ -150,7 +163,7 @@ final class GeminiRunner: AgentRunner {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.hasPrefix("Hook registry initialized") { Log.write("gemini-stderr", String(trimmed.prefix(500))) }
+            if !trimmed.hasPrefix("Hook registry initialized") { Log.write("gemini-stderr", "\(trimmed.count) chars: \(sensitive: trimmed.prefix(500))") }
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -170,9 +183,9 @@ final class GeminiRunner: AgentRunner {
             try process.run()
             self.process = process
             isBusy = true
-            Log.write("gemini", "started \(arguments.contains("--resume") ? "resume" : "new") model=\(model) project=\(Self.vertexProject ?? "-") location=\(Self.vertexLocation) pid=\(process.processIdentifier)")
+            Log.write("gemini", "started \(public: arguments.contains("--resume") ? "resume" : "new") model=\(meta: model) project=\(sensitive: Self.vertexProject) location=\(meta: Self.vertexLocation) pid=\(process.processIdentifier)")
         } catch {
-            Log.write("gemini", "failed to launch \(executable): \(error)")
+            Log.write("gemini", "failed to launch \(path: executable): \(error: error)")
             onExit?(AgentOutcome(success: false, summary: "Couldn't launch gemini", costUSD: nil))
         }
     }
@@ -217,7 +230,7 @@ final class GeminiRunner: AgentRunner {
                 onTurnFinished?(AgentOutcome(success: true, summary: "done", costUSD: nil))
             } else {
                 let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "turn failed"
-                Log.write("gemini", "turn failed: \(message.prefix(500))")
+                Log.write("gemini", "turn failed kind=\(AgentFailureKind.classify(message)): \(sensitive: message.prefix(500))")
                 onTurnFinished?(AgentOutcome(success: false, summary: Self.readableError(message), costUSD: nil))
             }
         default:

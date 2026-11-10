@@ -3,7 +3,7 @@ import ApplicationServices
 import LikelyEvalKit
 
 /// Turns real use into eval cases automatically: when a picker is confirmed, what the user typed
-/// (plus the app, window title and screenshot) and the file(s) they actually picked are added to
+/// (plus the app and window title) and the file(s) they actually picked are added to
 /// cases.jsonl, tagged "captured". Cancelled pickers are never recorded. If the pick couldn't be
 /// read, nothing goes into cases; a "needs expected" entry goes to drafts.jsonl instead.
 ///
@@ -19,27 +19,17 @@ enum EvalCapture {
     }
 
     /// Saves a case (or, without a known pick, a draft). Nothing is saved if there's nothing to replay
-    /// (no typed query and no screenshot).
-    static func saveCaptured(app: String, windowTitle: String?, button: String?, queries: [String], screenshot: URL?,
+    /// (no typed query).
+    static func saveCaptured(app: String, windowTitle: String?, button: String?, queries: [String],
                           picked: [String], how: String, suggested: [String]) {
-        guard !queries.isEmpty || screenshot != nil else {
-            Log.write("evals", "picked without typing or a screenshot, not saved")
+        guard !queries.isEmpty else {
+            Log.write("evals", "picked without typing, not saved")
             return
         }
         let existing = (try? EvalCaseFile.load(EvalStorage.draftsURL).cases) ?? []
         let cases = (try? EvalCaseFile.load(EvalStorage.casesURL).cases) ?? []
         let stamp = Self.stamp()
         let id = EvalCaseFile.uniqueID(EvalCase.slug(queries.first ?? app, fallback: "captured") + "-" + stamp, existing: existing + cases)
-
-        var screenshotPath: String?
-        if let screenshot {
-            // The live screenshot is overwritten by the next picker: keep a copy with the case.
-            let copy = EvalStorage.screenshotsURL.appendingPathComponent("\(id).png")
-            try? FileManager.default.createDirectory(at: EvalStorage.screenshotsURL, withIntermediateDirectories: true)
-            // copyItem fails if the file exists (a leftover from a case that was removed by hand).
-            try? FileManager.default.removeItem(at: copy)
-            if (try? FileManager.default.copyItem(at: screenshot, to: copy)) != nil { screenshotPath = copy.path }
-        }
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let tilde: (String) -> String = { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 }
@@ -55,7 +45,6 @@ enum EvalCapture {
         } else {
             tags.append(EvalCase.needsExpectedTag)
         }
-        if screenshot != nil { tags.append("screenshot") }
         if queries.count > 1 { tags.append("multi-turn") }
 
         var notes = "Captured \(how)."
@@ -63,18 +52,17 @@ enum EvalCapture {
             let hit = picked.contains { p in suggested.contains { EvalPath.same(EvalPath.normalize($0), EvalPath.normalize(p)) } }
             notes += " Likely suggested \(suggested.count) file\(suggested.count == 1 ? "" : "s")\(hit ? ", including the pick" : ", not the pick")."
         }
-        let draft = EvalCase(id: id, query: queries.isEmpty ? [""] : queries,
-                             context: EvalCase.Context(app: app, windowTitle: windowTitle, screenshot: screenshotPath, button: button),
+        let draft = EvalCase(id: id, query: queries,
+                             context: EvalCase.Context(app: app, windowTitle: windowTitle, button: button),
                              expect: expect, tags: tags, source: "captured", notes: notes)
         // Unknown pick: keep it out of the tests; it waits under "Needs expected" in Settings → Evals.
         let destination = picked.isEmpty ? EvalStorage.draftsURL : EvalStorage.casesURL
         do {
             try EvalCaseFile.append(draft, to: destination)
-            Log.write("evals", picked.isEmpty ? "pick unknown: \(id) saved to drafts (needs expected)" : "test \(id) saved (\(picked.count) picked)")
+            Log.write("evals", picked.isEmpty ? "pick unknown: \(sensitive: id) saved to drafts (needs expected)" : "test \(sensitive: id) saved (\(picked.count) picked)")
             DispatchQueue.main.async { EvalCaseStore.shared.reload() }
         } catch {
-            Log.write("evals", "couldn't save captured test: \(error)")
-            if let screenshotPath { try? FileManager.default.removeItem(atPath: screenshotPath) }
+            Log.write("evals", "couldn't save captured test: \(error: error)")
         }
     }
 
@@ -183,7 +171,8 @@ final class PickTracker {
             let point = Self.axPoint(NSEvent.mouseLocation)
             if let button = AX.element(window, kAXDefaultButtonAttribute), let frame = AX.frame(button), frame.contains(point) {
                 readSelection()
-                intent = (.confirm("confirmed with \(AX.string(button, kAXTitleAttribute).map { "“\($0)”" } ?? "the default button")"), Date())
+                // Fixed wording (it's logged): the button's title can be anything the app put there.
+                intent = (.confirm("confirmed with the default button"), Date())
             } else if let button = AX.element(window, kAXCancelButtonAttribute), let frame = AX.frame(button), frame.contains(point) {
                 intent = (.cancel("cancelled with the Cancel button"), Date())
             } else if event.clickCount == 2, let frame = AX.frame(window), frame.contains(point) {

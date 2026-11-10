@@ -12,14 +12,14 @@ enum PickerNavigator {
         guard isCurrent(), AX.isAlive(window) else { return }
         switch trySelect(in: window) {
         case .selected:
-            Log.write("navigate", "selected \"\(folderName)\" in sidebar")
+            Log.write("navigate", "selected \(path: folderName) in sidebar")
             onResult?("selected \"\(folderName)\"", false)
         case .alreadySelected:
-            Log.write("navigate", "\"\(folderName)\" already selected")
+            Log.write("navigate", "\(path: folderName) already selected")
             onResult?("\"\(folderName)\" already selected", false)
         case .notFound(let why, let noSidebar):
             guard attempt < 8 else {
-                Log.write("navigate", "gave up: \(why). Is ~/Likely pinned in the Finder sidebar?")
+                Log.write("navigate", "gave up: \(meta: why). Is ~/Likely pinned in the Finder sidebar?")
                 onResult?("gave up: \(why)", noSidebar)
                 return
             }
@@ -37,7 +37,7 @@ enum PickerNavigator {
         guard let sidebar = findSidebar(in: window) else { return .notFound("no sidebar", noSidebar: true) }
         let rows = AX.elements(sidebar, kAXRowsAttribute)
         guard let row = rows.first(where: { rowTitle($0) == folderName }) else {
-            return .notFound("no \"\(folderName)\" row among \(rows.count)")
+            return .notFound("no Likely folder row among \(rows.count)")
         }
         if (AX.value(row, kAXSelectedAttribute) as? Bool) == true { return .alreadySelected }
         let err = AXUIElementSetAttributeValue(row, kAXSelectedAttribute as CFString, kCFBooleanTrue)

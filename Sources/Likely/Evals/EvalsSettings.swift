@@ -1,5 +1,6 @@
 import AppKit
 import LikelyEvalKit
+import LikelyStorage
 import SwiftUI
 
 /// Personal eval cases and drafts (~/Library/Application Support/Likely/evals), for Settings → Evals
@@ -42,8 +43,7 @@ final class EvalCaseStore: ObservableObject {
 
     /// Adds or replaces (by `replacing` id, or the case's own id) a case in cases.jsonl.
     func save(_ c: EvalCase, replacing oldID: String? = nil) {
-        let old = cases.first { $0.id == (oldID ?? c.id) }
-        write(EvalStorage.casesURL, id: oldID ?? c.id, with: c, released: old)
+        write(EvalStorage.casesURL, id: oldID ?? c.id, with: c)
     }
 
     /// Appends a case to cases.jsonl (EvalCaseFile.append, so lines this version can't read are kept).
@@ -61,16 +61,16 @@ final class EvalCaseStore: ObservableObject {
     }
 
     func delete(_ c: EvalCase) {
-        write(EvalStorage.casesURL, id: c.id, with: nil, released: c)
+        write(EvalStorage.casesURL, id: c.id, with: nil)
     }
 
     func saveDraft(_ c: EvalCase, replacing oldID: String) {
-        guard let old = drafts.first(where: { $0.id == oldID }) else { return }
-        write(EvalStorage.draftsURL, id: oldID, with: c, released: old)
+        guard drafts.contains(where: { $0.id == oldID }) else { return }
+        write(EvalStorage.draftsURL, id: oldID, with: c)
     }
 
     func discardDraft(_ c: EvalCase) {
-        write(EvalStorage.draftsURL, id: c.id, with: nil, released: c)
+        write(EvalStorage.draftsURL, id: c.id, with: nil)
     }
 
     /// Moves a draft (as edited) into cases.jsonl.
@@ -83,9 +83,8 @@ final class EvalCaseStore: ObservableObject {
         if lastError == nil { discardDraft(drafts.first { $0.id == draftID } ?? c) }
     }
 
-    /// Replaces or removes one case's line. `released`: the case as it was, whose screenshot is
-    /// deleted if nothing refers to it any more.
-    private func write(_ url: URL, id: String, with replacement: EvalCase?, released: EvalCase?) {
+    /// Replaces or removes one case's line.
+    private func write(_ url: URL, id: String, with replacement: EvalCase?) {
         if let problem = loadProblems[url] {
             lastError = problem
             return
@@ -93,30 +92,11 @@ final class EvalCaseStore: ObservableObject {
         do {
             try EvalCaseFile.replace(id: id, with: replacement, in: url)
             reload()
-            if let shot = released?.context?.screenshot { removeScreenshotIfUnused(shot) }
         } catch {
             lastError = "Couldn't save: \(error.localizedDescription)"
         }
     }
 
-    /// Deletes a screenshot Likely copied into the evals folder once no case or draft uses it.
-    func removeScreenshotIfUnused(_ path: String) {
-        let folder = EvalStorage.screenshotsURL.standardizedFileURL.path + "/"
-        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
-        guard standardized.hasPrefix(folder), loadProblems.isEmpty else { return }
-        let used = (cases + drafts).contains { $0.context?.screenshot.map { URL(fileURLWithPath: $0).standardizedFileURL.path } == standardized }
-        if !used { try? FileManager.default.removeItem(atPath: standardized) }
-    }
-
-    /// Copies a screenshot next to the cases (debug-view copies are deleted as runs roll over).
-    static func keepScreenshot(_ url: URL, id: String) -> String? {
-        let fm = FileManager.default
-        if url.path.hasPrefix(EvalStorage.screenshotsURL.path) { return url.path }
-        try? fm.createDirectory(at: EvalStorage.screenshotsURL, withIntermediateDirectories: true)
-        let copy = EvalStorage.screenshotsURL.appendingPathComponent("\(id).png")
-        try? fm.removeItem(at: copy)
-        return (try? fm.copyItem(at: url, to: copy)) != nil ? copy.path : nil
-    }
 }
 
 // MARK: - Settings tab
@@ -215,6 +195,10 @@ struct EvalsSettings: View {
                     HStack(spacing: 4) {
                         Text(c.id).font(.caption2.monospaced()).foregroundStyle(.tertiary)
                         if let app = c.context?.app { Text("· \(app)").font(.caption2).foregroundStyle(.tertiary) }
+                        if !c.hasQuery {
+                            Text("needs a query").font(.caption2).foregroundStyle(.orange)
+                                .help("Saved by an older version that searched on a screenshot alone. Add a query (Edit) or it's skipped.")
+                        }
                         ForEach(c.tags, id: \.self) { t in
                             Text(t).font(.caption2).padding(.horizontal, 4).background(.quaternary, in: RoundedRectangle(cornerRadius: 3))
                         }
@@ -252,7 +236,7 @@ struct EditorRequest: Identifiable {
     /// Files Likely suggested in the run this comes from, offered as checkboxes.
     var suggestions: [String] = []
 
-    /// A new test prefilled from a picker run: typed queries, app, window title, screenshot,
+    /// A new test prefilled from a picker run: typed queries, app, window title,
     /// Likely's suggestions as checkboxes, and the user's pick (if Accessibility read it) checked.
     static func from(run: DebugRun) -> EditorRequest {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -261,9 +245,9 @@ struct EditorRequest: Identifiable {
         let c = EvalCase(id: EvalCase.slug(run.queries.first ?? run.appName, fallback: "case"),
                          query: run.queries,
                          context: EvalCase.Context(app: run.appName, windowTitle: run.windowTitle,
-                                                   screenshot: run.screenshotURL?.path, button: run.buttonTitle),
+                                                   button: run.buttonTitle),
                          expect: picked.count > 1 ? Expectation(allOf: picked) : Expectation(anyOf: picked.isEmpty ? nil : picked),
-                         tags: run.screenshotURL != nil ? ["screenshot"] : [], source: "manual")
+                         source: "manual")
         return EditorRequest(evalCase: c, mode: .newCase, suggestions: run.files.filter(\.added).map(\.path))
     }
 }
@@ -278,7 +262,6 @@ struct EvalCaseEditor: View {
     @State private var queries: String
     @State private var app: String
     @State private var windowTitle: String
-    @State private var screenshot: String
     @State private var kind: Expectation.Kind
     @State private var paths: [String]
     @State private var tags: String
@@ -294,7 +277,6 @@ struct EvalCaseEditor: View {
         _queries = State(initialValue: c.query.joined(separator: "\n"))
         _app = State(initialValue: c.context?.app ?? "")
         _windowTitle = State(initialValue: c.context?.windowTitle ?? "")
-        _screenshot = State(initialValue: c.context?.screenshot ?? "")
         _kind = State(initialValue: c.expect.kind == .none ? .anyOf : c.expect.kind)
         _paths = State(initialValue: c.expect.paths)
         _tags = State(initialValue: c.tags.filter { $0 != EvalCase.needsExpectedTag }.joined(separator: ", "))
@@ -333,14 +315,6 @@ struct EvalCaseEditor: View {
                 }
                 TextField("App", text: $app, prompt: Text("Google Chrome"))
                 TextField("Window title", text: $windowTitle, prompt: Text("optional"))
-                if !screenshot.isEmpty {
-                    LabeledContent("Screenshot") {
-                        HStack {
-                            Text(EvalPath.display(screenshot)).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
-                            Button("Remove") { screenshot = "" }
-                        }
-                    }
-                }
                 Picker("Expected", selection: $kind) {
                     Text("Any of these files").tag(Expectation.Kind.anyOf)
                     Text("All of these files").tag(Expectation.Kind.allOf)
@@ -407,7 +381,7 @@ struct EvalCaseEditor: View {
         c.id = typedID.isEmpty ? EvalCase.slug(queryList.first ?? "", fallback: "case") : typedID
         c.query = queryList
         let context = EvalCase.Context(app: app.isEmpty ? nil : app, windowTitle: windowTitle.isEmpty ? nil : windowTitle,
-                                       screenshot: screenshot.isEmpty ? nil : screenshot, button: c.context?.button,
+                                       button: c.context?.button,
                                        userName: c.context?.userName, useTools: c.context?.useTools)
         c.context = context.isEmpty ? nil : context
         c.expect = Expectation.make(kind: paths.isEmpty ? .none : kind, paths: kind == .folder ? Array(paths.prefix(1)) : paths)
@@ -423,13 +397,7 @@ struct EvalCaseEditor: View {
         switch request.mode {
         case .newCase:
             c.id = EvalCaseFile.uniqueID(c.id, existing: store.cases)
-            var copied: String?
-            if let shot = c.context?.screenshot, let kept = EvalCaseStore.keepScreenshot(URL(fileURLWithPath: shot), id: c.id) {
-                if kept != shot { copied = kept }
-                c.context?.screenshot = kept
-            }
             store.save(c)
-            if store.lastError != nil, let copied { store.removeScreenshotIfUnused(copied) }
         case .editCase(let oldID):
             if c.id != oldID { c.id = EvalCaseFile.uniqueID(c.id, existing: store.cases.filter { $0.id != oldID }) }
             store.save(c, replacing: oldID)

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>Likely</title>
+        <link>https://github.com/synth-inc/likely</link>
+        <description>Likely updates</description>
+        <language>en</language>
+        <item>
+            <title>Version 0.1.0</title>
+            <pubDate>Wed, 04 Nov 2026 23:30:19 GMT</pubDate>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <link>https://github.com/synth-inc/likely/releases/tag/v0.1.0</link>
+            <description><![CDATA[<p>First release of Likely: the file you need, waiting in every file picker.</p>]]></description>
+            <enclosure url="https://github.com/synth-inc/likely/releases/download/v0.1.0/Likely.dmg" type="application/octet-stream" sparkle:edSignature="puy1F1oLjFnUJpV2ljIlYu6XMeXaJitpMFnXpkynAUpA8+UtLU09nKJ7xCXWlRiaH4sT39Kth6eHY4aYStljCw==" length="1967761"/>
+        </item>
+    </channel>
+</rss>

@@ -55,7 +55,8 @@ Each run writes `~/Library/Application Support/Likely/evals/runs/<time>-<agent>-
   it says so too ("tools changed: +rclip"), without passing over the run: see Your tools.
 - `cases/<n>-<id>/prompt.txt` and `cases/<n>-<id>/transcript.jsonl`: the exact first message and the
   agent's raw stream (every turn, relaunches included). `<n>` is the case's position in the suite, so
-  cases that share an id keep separate folders.
+  cases that share an id keep separate folders. The agent runs in `cases/<n>-<id>/agent/`, the only part
+  it may read: its config files, never the prompt or transcript files.
 - `prompt-template.txt`: the template used (its hash is in the report, to tell prompt versions apart).
 
 The command prints one line per case and a summary, and exits 0 when the run completes (whatever the
@@ -88,7 +89,7 @@ One JSON object per line. Blank lines and lines starting with `#` or `//` are ig
 | `query` | required | a string, or an array of successive messages: the first starts the search, each later one is sent like typing again in the bar ("not these, …"; the previous suggestions count as rejected) |
 | `context.app` | optional | app that opened the picker (default: "an app") |
 | `context.windowTitle` | optional | title of the window behind the picker |
-| `context.screenshot` | optional | path to a screenshot of that window. With one, the case runs like automatic mode (screenshot + "the user already added: …"); without, input-first (typed description only) |
+| `context.screenshot` | ignored | written by older versions, which sent a screenshot with the search. Still accepted so old cases load; Likely no longer sends screenshots |
 | `context.button` | optional | the picker's confirm button ("Open", "Upload", …) |
 | `context.userName` | optional | the name sent as `{{userName}}` ("The user is …"). Unset: none for personal cases (evals never send your real name), "Jordan Rivera" for `source: "fixture"` cases |
 | `context.useTools` | optional | `true`/`false`: whether the agent gets your tools (tools.json) for this case. Unset: personal cases do, fixture cases don't (see Your tools) |
@@ -177,10 +178,9 @@ model is weak.
 
 With **Settings → Evals → "Automatically save picks as tests"** turned on (off by default in every build),
 each confirmed pick becomes a case in `cases.jsonl` right away, with no approval step: what you typed,
-the app, the window title, the screenshot (if one was taken, copied to `…/evals/screenshots/`), and the
-file(s) you picked. Captured cases have `"source": "captured"` and the tag `captured`, so they're easy to
-filter, edit or delete in Settings → Evals. Nothing is recorded for cancelled pickers, or when you neither
-typed anything nor had a screenshot. If the pick can't be read, it stays out of your tests: it's logged
+the app, the window title, and the file(s) you picked. Captured cases have `"source": "captured"` and the tag `captured`, so they're easy to
+filter, edit or delete in Settings → Evals. Nothing is recorded for cancelled pickers, or when you didn't
+type anything. If the pick can't be read, it stays out of your tests: it's logged
 and kept in `drafts.jsonl`, shown under **Needs expected** in Settings → Evals, where you can choose the
 file (Fix…) and add it to your tests, or discard it.
 
@@ -206,18 +206,25 @@ How the pick is read (Accessibility; `PickTracker` in `Sources/Likely/Evals/Eval
 ## Search history
 
 With **Settings → History → "Save search history"** on (the default; independent of automatic saving),
-every picker Likely searched for is kept in `~/Library/Application Support/Likely/History/history.jsonl`,
+every picker Likely searched for is kept in `~/Library/Application Support/Likely/History/history.enc.jsonl`
+(`history.jsonl` in builds without encryption),
 newest 500 only: the time, the app, the window title and confirm button, what you typed (in order), the
 originals the agent suggested (not the `~/Likely` copies), and what you picked, when the picker was
 confirmed and the pick could be read (same `PickTracker` as Capture). Pickers where nothing ran (nothing
-typed in input-first mode, or no license), and a picker still open when Likely quits, aren't recorded.
+typed, or no license), and a picker still open when Likely quits, aren't recorded.
 
 **Privacy.** History never leaves the Mac and isn't included in eval runs.
 - The folder is `0700` and the file `0600`. (Pre-release builds kept `history.jsonl` one level up; it's
   moved into `History/` on launch.)
-- No search agent can read it: every `sandbox-exec` profile (`AgentSandbox.historyRules`) denies the
-  `History` folder and the old path, and Codex gets a permission profile that extends its built-in
-  read-only one with the same paths set to `"none"` (`CodexRunner.baseArguments`).
+- No search agent can read it: every `sandbox-exec` profile (`AgentSandbox.protectionRules`) denies all of
+  `~/Library/Application Support/Likely` and `~/Library/Logs/Likely` except the run's work folder, and Codex
+  gets a permission profile that extends its built-in read-only one with the same paths set to `"none"`
+  (`AgentSandbox.codexFilesystem`). See [PRIVACY.md](PRIVACY.md).
+- In builds with encryption (official releases; see [BUILDING.md](BUILDING.md)) each line is encrypted
+  (AES-GCM, with a key in the data-protection keychain): `lk1:<key id>:<base64>`. Plaintext history (an
+  older version's, or a build without encryption's) is moved into the encrypted file on launch. A build
+  without encryption leaves the encrypted file alone and says "History is encrypted by another build of
+  Likely"; lines sealed with a key this build can't read are reported and left alone too.
 - The first time a search is recorded, Settings → History shows a short line about it (until you click
   OK), and the next picker's bar shows the same line once: "Likely keeps a private history of your
   searches on this Mac so you can turn them into tests. Turn it off in Settings → History."
@@ -260,11 +267,10 @@ image, a landscape and an app icon, all for a made-up "Jordan Rivera". Its cases
 - the prompt's search folders become the fixture folder, plus a note to search only there;
 - the prompt drops the template's "Elsewhere in ~ is fine too";
 - the agent's sandbox denies reading **all of your home folder** and `/Volumes` (and your extra search
-  folders), then allows back only the fixture folder, the case's work folder, the agent CLIs' own config
+  folders), then allows back only the fixture folder, the case's `agent` folder, the agent CLIs' own config
   and state (`~/.claude`, `~/.claude.json`, `~/.gemini`, `~/.hermes`, `~/.config`, `~/.local`, `~/.cache`,
   toolchains such as `~/.nvm` or `~/.bun`, shell startup files, the login keychain) and the agent's install
-  folder. So a fixture run can't read `~/Likely`, `~/Library/Application Support/Likely` (your cases and
-  their screenshots), `~/Library/Logs/Likely` or your documents. Rules are per case (`EvalIsolation` in
+  folder. So a fixture run can't read `~/Likely`, `~/Library/Application Support/Likely` (your cases), `~/Library/Logs/Likely` or your documents. Rules are per case (`EvalIsolation` in
   `LikelyEvalKit`), so `--jobs` > 1 never mixes them up;
 - Spotlight is blocked (its index would list your files by name), so agents use `ls`/`find`/`grep`;
 - Hermes: its gateway runs inside the sandbox of the client that started it, so an eval never reuses a

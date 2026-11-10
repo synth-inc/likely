@@ -6,7 +6,7 @@ import LikelyTools
 ///
 /// Input is stream-json too, so the process stays alive while the picker is open and `send(_:)` can
 /// add user feedback at any time: mid-turn messages are picked up after Claude's current step,
-/// later ones start a new turn with the whole conversation (screenshot, earlier searches) in context.
+/// later ones start a new turn with the whole conversation (earlier searches) in context.
 final class ClaudeRunner: AgentRunner {
     typealias Outcome = AgentOutcome
 
@@ -18,16 +18,11 @@ final class ClaudeRunner: AgentRunner {
     var onExit: ((Outcome) -> Void)?
     var launchOptions = AgentLaunchOptions()
 
-    /// Search commands that can't write: `sort` (-o) and `file` (-C) can, so they're left out, like
-    /// `find` (-delete/-exec/-fprint) and `tee`.
-    static let allowedTools = [
-        "Read", "Glob", "Grep",
-        "Bash(ls:*)", "Bash(mdfind:*)", "Bash(mdls:*)", "Bash(head:*)", "Bash(stat:*)", "Bash(grep:*)",
-    ]
-
-    /// The built-in tools plus `Bash(<prefix>:*)` for each command of the user's tools (see ToolStore).
-    static func allowedTools(extra commands: [String]) -> [String] {
-        ToolPermissions.merged(allowedTools, ToolPermissions.claude(commands))
+    /// The built-in tools (AgentBuiltins: Read, Glob, Grep and search commands that can't write) minus
+    /// the ones turned off in Settings, plus `Bash(<prefix>:*)` for each command of the user's tools
+    /// (see ToolStore).
+    static func toolConfig(disabled: Set<String>, extra commands: [String]) -> AgentBuiltins.ClaudeConfig {
+        AgentBuiltins.claude(disabled: disabled, extra: commands)
     }
 
     private var process: Process?
@@ -39,8 +34,7 @@ final class ClaudeRunner: AgentRunner {
     /// True between sending a message and its result.
     private(set) var isBusy = false
 
-    /// Claude Code reads the screenshot itself (its path is in the prompt), so `image` is unused.
-    func start(executable: String, model: String, prompt: String, image: URL?, workDir: URL) {
+    func start(executable: String, model: String, prompt: String, workDir: URL) {
         start(claudePath: executable, model: model, prompt: prompt, workDir: workDir)
     }
 
@@ -48,10 +42,11 @@ final class ClaudeRunner: AgentRunner {
         cancel()
         buffer = Data()
         let userCommands = launchOptions.toolCommands
+        let tools = Self.toolConfig(disabled: launchOptions.disabledBuiltins(for: "claude"), extra: userCommands)
 
         let process = Process()
         process.currentDirectoryURL = workDir
-        let arguments = [
+        var arguments: [String] = [
             "-p",
             "--input-format", "stream-json",
             "--model", model,
@@ -59,18 +54,25 @@ final class ClaudeRunner: AgentRunner {
             // Skip the user's settings (hooks etc.) and MCP servers: faster startup, no side effects.
             "--setting-sources", "local",
             "--strict-mcp-config",
-            "--tools", "Read,Glob,Grep,Bash",
+            // No transcript in ~/.claude/projects (the queries, in plaintext, where
+            // later agents could read them). Follow-ups go to this same process, so nothing needs resuming.
+            "--no-session-persistence",
+            // Turned-off file tools aren't offered at all ("" means none).
+            "--tools", tools.tools.joined(separator: ","),
             "--permission-mode", "dontAsk",
             "--add-dir", FileManager.default.homeDirectoryForCurrentUser.path,
-        ] + SearchFolder.outsideHome.flatMap { ["--add-dir", $0] } + [
-            "--allowedTools",
-        ] + Self.allowedTools(extra: userCommands)
+        ]
+        arguments += SearchFolder.outsideHome.flatMap { ["--add-dir", $0] }
+        // Both take a list, so they come last (an empty one would take the next flag as its value).
+        if !tools.allowed.isEmpty { arguments += ["--allowedTools"] + tools.allowed }
+        if !tools.disallowed.isEmpty { arguments += ["--disallowedTools"] + tools.disallowed }
         // No Accessibility, Screen Recording or Apple Events through Likely's grants (see AgentSandbox).
         // With user tools enabled, also no writes outside Claude's own state: the validator can't prove
         // a tool read-only, the sandbox can.
         let profile = userCommands.isEmpty ? AgentSandbox.privacyOnlyProfile : AgentSandbox.claudeProfile()
         let (launcher, launchArguments) = AgentSandbox.wrap(executable: claudePath, arguments: arguments,
-                                                             profile: profile, extraRules: launchOptions.extraSandboxRules)
+                                                             profile: profile, extraRules: launchOptions.extraSandboxRules,
+                                                             readable: [workDir.path], agent: .claude)
         process.executableURL = launcher
         process.arguments = launchArguments
 
@@ -88,7 +90,7 @@ final class ClaudeRunner: AgentRunner {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        let transcriptURL = workDir.appendingPathComponent("last-run.jsonl")
+        let transcriptURL = AgentTranscript.url(workDir: workDir, options: launchOptions)
         transcript = AgentTranscript.open(transcriptURL, append: launchOptions.appendTranscript)
 
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -98,7 +100,8 @@ final class ClaudeRunner: AgentRunner {
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Log.write("claude-stderr", text.trimmingCharacters(in: .whitespacesAndNewlines))
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            Log.write("claude-stderr", "\(trimmed.count) chars: \(sensitive: trimmed)")
         }
         process.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
@@ -117,10 +120,10 @@ final class ClaudeRunner: AgentRunner {
             try process.run()
             self.process = process
             input = stdin.fileHandleForWriting
-            Log.write("claude", "started \(claudePath) model=\(model) pid=\(process.processIdentifier)")
+            Log.write("claude", "started \(path: claudePath) model=\(meta: model) pid=\(process.processIdentifier)")
             send(prompt)
         } catch {
-            Log.write("claude", "failed to launch \(claudePath): \(error)")
+            Log.write("claude", "failed to launch \(path: claudePath): \(error: error)")
             onExit?(Outcome(success: false, summary: "Couldn't launch claude", costUSD: nil))
         }
     }
@@ -135,7 +138,7 @@ final class ClaudeRunner: AgentRunner {
         do {
             try input.write(contentsOf: data)
         } catch {
-            Log.write("claude", "send failed: \(error)")
+            Log.write("claude", "send failed: \(error: error)")
             return false
         }
         isBusy = true
@@ -190,7 +193,7 @@ final class ClaudeRunner: AgentRunner {
         case "result":
             let isError = event["is_error"] as? Bool ?? false
             let result = event["result"] as? String ?? ""
-            Log.write("claude", "result is_error=\(isError) turns=\(event["num_turns"] ?? "?") cost=\(event["total_cost_usd"] ?? "?") result=\(result.prefix(300))")
+            Log.write("claude", "result is_error=\(isError) kind=\(isError ? AgentFailureKind.classify(result) : nil) subtype=\(ClaudeResultSubtype(event["subtype"] as? String)) turns=\(event["num_turns"] as? Int) cost=\(event["total_cost_usd"] as? Double) result=\(sensitive: result.prefix(300))")
             isBusy = false
             onTurnFinished?(Outcome(success: !isError, summary: isError ? result : "done", costUSD: event["total_cost_usd"] as? Double))
         default:
@@ -218,5 +221,14 @@ final class ClaudeRunner: AgentRunner {
         default:
             return nil
         }
+    }
+}
+
+/// Claude Code's `result` subtypes, a fixed vocabulary; anything else logs as "other".
+enum ClaudeResultSubtype: String, LogSafeEnum {
+    case success, error_max_turns, error_during_execution, error_max_budget_usd, other, none
+
+    init(_ raw: String?) {
+        self = raw.map { ClaudeResultSubtype(rawValue: $0) ?? .other } ?? .none
     }
 }

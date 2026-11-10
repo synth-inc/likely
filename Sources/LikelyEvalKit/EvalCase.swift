@@ -1,4 +1,5 @@
 import Foundation
+import LikelyStorage
 
 /// One eval case: what the user typed (and where), and which file(s) they actually wanted.
 /// Stored one per line in a JSON Lines file. The format is documented in docs/EVALS.md.
@@ -25,7 +26,8 @@ public struct EvalCase: Codable, Identifiable, Hashable {
         public var app: String?
         /// Title of the window behind the picker.
         public var windowTitle: String?
-        /// Optional path to a screenshot of that window. Without one, the case runs input-first.
+        /// Ignored: Likely no longer sends screenshots. Still decoded so cases saved by older versions
+        /// load; editing a case in Settings drops it.
         public var screenshot: String?
         /// The picker's confirm button ("Open", "Upload", …), if known.
         public var button: String?
@@ -36,18 +38,17 @@ public struct EvalCase: Codable, Identifiable, Hashable {
         /// do, fixture cases don't unless the run passes `--with-tools` (see EvalToolPolicy).
         public var useTools: Bool?
 
-        public init(app: String? = nil, windowTitle: String? = nil, screenshot: String? = nil, button: String? = nil,
+        public init(app: String? = nil, windowTitle: String? = nil, button: String? = nil,
                     userName: String? = nil, useTools: Bool? = nil) {
             self.app = app
             self.windowTitle = windowTitle
-            self.screenshot = screenshot
             self.button = button
             self.userName = userName
             self.useTools = useTools
         }
 
         public var isEmpty: Bool {
-            app == nil && windowTitle == nil && screenshot == nil && button == nil && userName == nil && useTools == nil
+            app == nil && windowTitle == nil && button == nil && userName == nil && useTools == nil
         }
     }
 
@@ -103,6 +104,9 @@ public struct EvalCase: Codable, Identifiable, Hashable {
     public static let needsExpectedTag = "needs-expected"
 
     public var needsExpected: Bool { expect.isEmpty }
+    /// Whether the user typed anything to replay. Older versions saved cases that searched on a
+    /// screenshot alone; without screenshots those test nothing (EvalCLI skips them).
+    public var hasQuery: Bool { query.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
 
     public static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
 
@@ -262,8 +266,7 @@ public enum EvalCaseFile {
         let fm = FileManager.default
         let text = fm.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : ""
         let updated = replacing(id: id, with: replacement, in: text)
-        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try updated.write(to: url, atomically: true, encoding: .utf8)
+        try OwnerOnly.write(Data(updated.utf8), to: url)
     }
 
     /// The text of a cases file with one case replaced or removed (see `replace(id:with:in:)`).
@@ -290,12 +293,11 @@ public enum EvalCaseFile {
     /// Adds one case at the end of the file. The file is created only if it doesn't exist; an
     /// existing file is never truncated.
     public static func append(_ c: EvalCase, to url: URL) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if !fm.fileExists(atPath: url.path) {
-            // Fails (rather than truncating) if another writer created it in the meantime.
-            let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL, 0o644)
-            if fd >= 0 { close(fd) } else if errno != EEXIST { throw WriteError("Can't create \(url.path): \(String(cString: strerror(errno)))") }
+        // Owner-only (0600) from creation; never truncates a file another writer created meanwhile.
+        do {
+            try OwnerOnly.createExclusive(url)
+        } catch {
+            throw WriteError("\(error)")
         }
         let handle = try FileHandle(forUpdating: url)
         defer { try? handle.close() }
@@ -333,8 +335,6 @@ public enum EvalStorage {
     public static var casesURL: URL { root.appendingPathComponent("cases.jsonl") }
     public static var draftsURL: URL { root.appendingPathComponent("drafts.jsonl") }
     public static var runsURL: URL { root.appendingPathComponent("runs", isDirectory: true) }
-    /// Screenshots referenced by captured cases (copied here so they outlive the debug view).
-    public static var screenshotsURL: URL { root.appendingPathComponent("screenshots", isDirectory: true) }
     /// A case's folder in a run: `<index>-<slug>` (1-based index in the suite, so cases that share an
     /// id don't overwrite each other's files), plus `-<attempt>` when cases are repeated.
     public static func caseFolderName(index: Int, id: String, attempt: Int, repeated: Bool) -> String {

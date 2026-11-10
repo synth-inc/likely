@@ -1,3 +1,4 @@
+import LikelyStorage
 import Foundation
 import LikelyTools
 
@@ -40,8 +41,21 @@ final class ToolStore: ObservableObject {
         startWatching()
     }
 
-    /// Enabled, valid and approved: the tools the agent gets.
-    var activeTools: [CustomTool] { ToolApproval.usable(tools, approvals: approvals) }
+    /// Enabled, valid, approved, and every private data area it needs turned on (Settings →
+    /// Permissions): the tools the agent gets. A tool whose areas are still off isn't used, since its
+    /// commands would fail in the sandbox (and the user hasn't agreed to open them).
+    var activeTools: [CustomTool] {
+        PrivateDataAccess.activeTools(tools, approvals: approvals) { PrivateDataAccess.isAllowed($0) }
+    }
+
+    /// Whether `tool` changed outside Likely and waits for the user's Approve.
+    func isPending(_ tool: CustomTool) -> Bool { pending.contains { $0.tool.id == tool.id } }
+
+    /// Areas `tool` needs that are still off.
+    func unmetNeeds(of tool: CustomTool) -> [PrivateDataArea] { PrivateDataAccess.unmetNeeds(of: tool) }
+
+    /// A Private data toggle changed: views showing tools redraw.
+    func privateDataChanged() { objectWillChange.send() }
 
     /// Enabled, valid tools changed outside Likely and not yet approved.
     var pending: [ToolApproval.Pending] { ToolApproval.pending(tools, approvals: approvals) }
@@ -73,7 +87,7 @@ final class ToolStore: ObservableObject {
     func approvePending() {
         var approvals = self.approvals
         for item in pending { approvals[item.tool.id] = ToolApproval.record(for: item.tool) }
-        Log.write("tools", "approved: \(pending.map(\.tool.name).joined(separator: ", "))")
+        Log.write("tools", "approved \(pending.count): \(sensitive: pending.map(\.tool.name))")
         storeApprovals(approvals)
     }
 
@@ -83,7 +97,7 @@ final class ToolStore: ObservableObject {
         guard keys != announcedPending else { return }
         announcedPending = keys
         if !keys.isEmpty {
-            Log.write("tools", "changed outside Likely, waiting for approval: \(pending.map(\.tool.name).joined(separator: ", "))")
+            Log.write("tools", "changed outside Likely, waiting for approval: \(sensitive: pending.map(\.tool.name))")
         }
         NotificationCenter.default.post(name: Self.approvalNeeded, object: nil)
     }
@@ -111,15 +125,14 @@ final class ToolStore: ObservableObject {
             let file = try ToolsFile.decode(try Data(contentsOf: Self.fileURL))
             apply(file, error: nil)
             let active = file.tools.filter(\.isActive).map(\.name)
-            Log.write("tools", "loaded \(file.tools.count) tool(s), active: \(active.isEmpty ? "none" : active.joined(separator: ", "))"
-                      + (file.issues.isEmpty ? "" : "; issues: \(file.issues.joined(separator: "; "))"))
+            Log.write("tools", "loaded \(file.tools.count) tool(s), \(active.count) active: \(sensitive: active); \(file.issues.count) issue(s) \(sensitive: file.issues)")
             for tool in file.tools where tool.enabled && !tool.isActive {
-                Log.write("tools", "\(tool.name) disabled: \(tool.problems.joined(separator: "; "))")
+                Log.write("tools", "\(sensitive: tool.name) disabled: \(tool.problems.count) problem(s) \(sensitive: tool.problems)")
             }
             checkPending()
         } catch {
             let message = (error as? ToolsFile.DecodeError)?.description ?? "Couldn't read tools.json: \(error.localizedDescription)"
-            Log.write("tools", "\(message); using built-in commands only")
+            Log.write("tools", "\(error: error); using built-in commands only")
             apply(ToolsFile(), error: message)
         }
     }
@@ -159,11 +172,14 @@ final class ToolStore: ObservableObject {
         write(tools.filter { $0.id != id })
     }
 
-    /// Turning a tool on only works if it's valid.
+    /// Turning a tool on only works if it's valid. Unlike `save` (an edit made in Likely's editor),
+    /// this never approves anything (ToolApproval.afterToggle): a tool changed outside Likely stays
+    /// pending until the user clicks Approve, whatever its switch says.
     func setEnabled(_ enabled: Bool, id: String) {
         guard var tool = tools.first(where: { $0.id == id }), !(enabled && !tool.problems.isEmpty) else { return }
         tool.enabled = enabled
-        save(tool)
+        storeApprovals(ToolApproval.afterToggle(tool, approvals: approvals), check: false)
+        write(tools.map { $0.id == id ? tool : $0 })
     }
 
     /// A fresh id for a new tool named `name`.
@@ -178,7 +194,7 @@ final class ToolStore: ObservableObject {
     private func write(_ list: [CustomTool]) {
         let fm = FileManager.default
         do {
-            try fm.createDirectory(at: Self.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try OwnerOnly.createDirectory(Self.fileURL.deletingLastPathComponent())
             if loadError != nil, fm.fileExists(atPath: Self.fileURL.path) {
                 // Don't silently replace a file someone was editing by hand: keep the broken one beside it.
                 let backup = Self.fileURL.deletingLastPathComponent().appendingPathComponent("tools.invalid.json")
@@ -186,9 +202,9 @@ final class ToolStore: ObservableObject {
                 try? fm.moveItem(at: Self.fileURL, to: backup)
                 Log.write("tools", "kept the unreadable tools.json as tools.invalid.json")
             }
-            try ToolsFile(tools: list).encoded().write(to: Self.fileURL, options: .atomic)
+            try OwnerOnly.write(try ToolsFile(tools: list).encoded(), to: Self.fileURL)   // 0600, atomic
         } catch {
-            Log.write("tools", "couldn't write tools.json: \(error)")
+            Log.write("tools", "couldn't write tools.json: \(error: error)")
         }
         reloadIfChanged()
         checkPending()
@@ -201,7 +217,7 @@ final class ToolStore: ObservableObject {
     /// agents usually write a new file and rename it), the file itself for in-place writes.
     private func startWatching() {
         let directory = Self.fileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? OwnerOnly.createDirectory(directory)
         let fd = open(directory.path, O_EVTONLY)
         if fd >= 0 {
             let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)

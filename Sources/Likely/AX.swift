@@ -50,15 +50,14 @@ enum AX {
         return AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value) != .invalidUIElement
     }
 
-    static func describe(_ element: AXUIElement) -> String {
-        let role = string(element, kAXRoleAttribute) ?? "?"
-        var parts = [role]
-        if let subrole = string(element, kAXSubroleAttribute) { parts.append("subrole=\(subrole)") }
-        if let title = string(element, kAXTitleAttribute), !title.isEmpty { parts.append("title=\"\(title)\"") }
-        if let id = string(element, kAXIdentifierAttribute) { parts.append("id=\(id)") }
-        if let frame = frame(element) {
-            parts.append("frame=\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
-        }
-        return parts.joined(separator: " ")
+    /// For the log: role, subrole, identifier and frame; the title (a document name, an email subject)
+    /// is private.
+    static func describe(_ element: AXUIElement) -> LogMessage {
+        var line: LogMessage = "\(meta: string(element, kAXRoleAttribute) ?? "?")"
+        if let subrole = string(element, kAXSubroleAttribute) { line = "\(line) subrole=\(meta: subrole)" }
+        if let title = string(element, kAXTitleAttribute), !title.isEmpty { line = "\(line) title=\(sensitive: title)" }
+        if let id = string(element, kAXIdentifierAttribute) { line = "\(line) id=\(meta: id)" }
+        if let frame = frame(element) { line = "\(line) frame=\(frame)" }
+        return line
     }
 }

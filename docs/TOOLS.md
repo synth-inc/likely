@@ -3,7 +3,7 @@
 Likely's search agent can only run a few read-only search commands (`mdfind`, `mdls`, `ls`, `grep`, `head`,
 `stat`, plus each agent's own file reading). Tools let you give it more: any command-line program you
 have installed, with instructions for when to use it. Settings → Tools lists the built-in ones under
-"Built in" (always on, read from the runners' own allowlists) below your tools.
+"Built in" (from `AgentBuiltins`, the runners' own allowlists) below your tools.
 
 Tools live in one file, the source of truth:
 
@@ -20,8 +20,11 @@ the file is missing, there are no extra tools; if it isn't valid JSON, Likely lo
 coding agent, a script, an editor) and the commands or instructions of an enabled tool change, that tool
 isn't used until you click **Approve** in Settings → Tools. The tab shows which tools changed and a short
 diff of their commands; the menu bar icon gets a dot and its menu shows "Approve Tool Changes…" (plus a
-notification, if Likely is allowed to post them). Likely stores a SHA-256 of each approved tool's commands
-and instructions in its preferences, which no agent can write.
+notification, if Likely is allowed to post them). Likely stores a SHA-256 of each approved tool's commands,
+instructions and `needs` in its preferences, which no agent can write. So a tool planted or edited outside
+Likely can't quietly ask for your Mail: a changed `needs` waits for approval like a new command. While a
+tool waits, its switch and its **Allow…** button are off: only Approve, which shows the whole change,
+makes it usable. Switching a tool on or off never approves anything.
 
 ## Schema
 
@@ -49,6 +52,55 @@ and instructions in its preferences, which no agent can write.
 | `commands` | [string] | Command prefixes the agent may run (a single string is accepted too). |
 | `instructions` | string | Added to the agent's prompt: when to use the tool, the exact command line, what it prints. |
 | `setup` | string | Optional. How it was installed and how to maintain it. Not sent to the agent. |
+| `needs` | [string] | Optional. Private data areas the tool reads (see below): `photos`, `mail`, `messages`, `contacts`, `notes`, `safari`, `app-data`. |
+
+## Private data (`needs`)
+
+Search agents are kept out of macOS's protected stores by default (Settings → Permissions → Private
+data, all off): Photos libraries (`~/Library/Photos`, `~/Pictures/Photos Library.photoslibrary` and any
+`*.photoslibrary`), Mail, Messages, Contacts & Calendars (and Reminders), Notes, Safari, and other apps'
+containers (`~/Library/Containers`, `~/Library/Group Containers`). Otherwise a search for a tax form that
+walks through ~ ends with macOS asking whether "Likely" may access your Photos.
+
+Each area also covers its own folders inside those containers, matched by name (for example
+`com.apple.photoanalysisd`, `com.apple.MobileSMS.*`, `com.apple.mail.*`, `group.com.apple.contacts`,
+`com.apple.Safari.*`, `group.com.apple.notes`). Turning Contacts on opens Contacts' containers even while
+"Other apps' private data" is off; turning that one on doesn't open Mail's.
+
+Some stores only Full Disk Access opens, and no area is about them: the TCC database, call history,
+Knowledge and Biome activity, Suggestions, iPhone backups, Accounts, IdentityServices, HomeKit, Core
+Spotlight's index, FaceTime, cookies and the data-protection keychain (`~/Library/Keychains/*/`). They're
+always denied, so granting Likely Full Disk Access for Mail doesn't open them to the agents. Mail, Messages
+and Safari themselves can only be read with Full Disk Access, which macOS never asks for: you add Likely
+in System Settings → Privacy & Security, and the agents then get it too wherever the area is on.
+
+Codex can't use patterns, so for Codex Likely lists the containers at each search, and finds Photos
+libraries outside the default places in the background (the home folder 3 levels deep, outside
+~/Library, and each local volume 2 levels deep). A library deeper than that, or added since the last
+scan, isn't denied to Codex. Codex's `view_image` tool opens an image itself, outside its sandbox, so
+it's turned off while Photos is off.
+
+A tool that reads one of them declares it:
+
+```json
+{
+  "id": "osxphotos",
+  "name": "Photos library (osxphotos)",
+  "enabled": true,
+  "commands": ["osxphotos query --json"],
+  "instructions": "When the user wants a photo from their Photos library, run `osxphotos query --json --description \"<words>\"` …",
+  "setup": "pipx install osxphotos (or brew install osxphotos).",
+  "needs": ["photos"]
+}
+```
+
+- Turning on a tool whose areas are off asks "Photos library (osxphotos) needs access to your Photos.
+  Allow?". Allow turns the area on and triggers macOS's own permission alert in one step (for Mail,
+  Messages and Safari there's no alert: they need Full Disk Access, see above).
+- Until every area it needs is on, the tool isn't used: its row says which area is off, with an
+  **Allow…** button.
+- An unknown id in `needs` makes the tool invalid (it's disabled, and the row says why).
+- `needs` is part of what you approve (see Approval).
 
 A bare array of tools (without the `{"tools": …}` wrapper) is also accepted. Entries that can't be read
 (not an object, no name) are skipped and listed in the Tools tab; the rest still load.
@@ -89,6 +141,29 @@ A tool that breaks a rule is still saved, but turned off, and the Tools tab says
 The command must be found on the agent's PATH: the agent's own folder, `/opt/homebrew/bin`,
 `/usr/local/bin`, `~/.local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, then Likely's inherited PATH.
 The **Test** button in the Tools tab checks this.
+
+## Turning built-in tools off
+
+Each built-in tool has a toggle (on by default), so you can compare search speed without one. The setting is
+per agent (`disabledBuiltinTools.<agentID>` in Likely's preferences, which agents can't write); "Reset to
+Defaults" turns them all back on. Your tools are never affected. What turning one off does:
+
+- **Claude Code**: `Read`, `Glob` and `Grep` are left out of `--tools` (the model never sees them) and passed
+  to `--disallowedTools`. A command (`mdfind`, `ls`, …) is left out of `--allowedTools`; Claude runs in
+  `dontAsk` mode, so it's refused if tried. It isn't denied outright, so a tool of yours with the same prefix
+  still works. With no command left (and no tools of yours), Bash is left out of `--tools` too.
+- **Gemini CLI**: `read_file`/`list_directory` leave `tools.core` and go to `tools.exclude`; commands leave
+  `--allowed-tools`. With no command left, `run_shell_command` is removed as well.
+- **OpenCode**: the tool or command is no longer allowed in `OPENCODE_PERMISSION`, so the leading `"*": "deny"`
+  applies (which also hides a tool). Its `grep` covers both the grep tool and the command. With no command
+  left, `bash` is denied entirely.
+- **Hermes**: the toolset (`terminal`, `file`, `vision`) is left out of `-t`. With all three off it gets `-t
+  todo`, since an empty `-t` would mean Hermes' default (much larger) set.
+- **Codex** has no per-tool list; its row is informational.
+
+The search prompt then names the tools that are off ("Unavailable tools … Don't try them") and, in the default
+template, drops the hints that use them (the `mdfind` examples, the `ls -lt` recent-files hint). Settings warns
+when nothing that finds files by name is left (e.g. `mdfind` and `Glob` both off for Claude), but allows it.
 
 ## How each agent applies tools
 

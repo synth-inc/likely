@@ -70,7 +70,9 @@ public final class CopyEditor: ObservableObject {
             try data.write(to: saveURL)
             lastSaved = Date()
         } catch {
-            NSLog("CopyEditor: save failed: \(error)")
+            // Domain and code only: the description names the file (NSLog goes to the unified log).
+            let ns = error as NSError
+            NSLog("CopyEditor: save failed: %@ %ld", ns.domain, ns.code)
         }
     }
 

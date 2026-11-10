@@ -1,9 +1,12 @@
 import Foundation
 import XCTest
 @testable import LikelyEvalKit
+import LikelyStorage
 
 final class SearchHistoryTests: XCTestCase {
     private var dir: URL!
+    /// An in-memory key: tests never touch the Keychain.
+    private var cipher = DataCipher(store: InMemoryKeyStore())
     private var url: URL { dir.appendingPathComponent("history.jsonl") }
 
     override func setUpWithError() throws {
@@ -20,11 +23,11 @@ final class SearchHistoryTests: XCTestCase {
     }
 
     func testAppendAndLoadRoundTrip() throws {
-        XCTAssertEqual(try SearchHistoryFile.load(url), [])   // no file yet
+        XCTAssertEqual(try SearchHistoryFile.load(url, cipher: cipher), [])   // no file yet
         let a = entry("a", queries: ["my lease", "the signed one"], suggested: ["/d/lease.pdf"], picked: ["/d/lease-signed.pdf"])
-        try SearchHistoryFile.append(a, to: url)
-        try SearchHistoryFile.append(entry("b"), to: url)
-        let loaded = try SearchHistoryFile.load(url)
+        try SearchHistoryFile.append(a, to: url, cipher: cipher)
+        try SearchHistoryFile.append(entry("b"), to: url, cipher: cipher)
+        let loaded = try SearchHistoryFile.load(url, cipher: cipher)
         XCTAssertEqual(loaded.map(\.id), ["a", "b"])
         XCTAssertEqual(loaded[0], a)
         XCTAssertTrue(loaded[0].wasPicked)
@@ -33,15 +36,15 @@ final class SearchHistoryTests: XCTestCase {
     }
 
     func testAppendCapsToLimitDroppingOldest() throws {
-        for i in 0..<12 { try SearchHistoryFile.append(entry("e\(i)"), to: url, limit: 5) }
-        XCTAssertEqual(try SearchHistoryFile.load(url).map(\.id), ["e7", "e8", "e9", "e10", "e11"])
+        for i in 0..<12 { try SearchHistoryFile.append(entry("e\(i)"), to: url, cipher: cipher, limit: 5) }
+        XCTAssertEqual(try SearchHistoryFile.load(url, cipher: cipher).map(\.id), ["e7", "e8", "e9", "e10", "e11"])
     }
 
     func testClear() throws {
-        try SearchHistoryFile.append(entry("a"), to: url)
+        try SearchHistoryFile.append(entry("a"), to: url, cipher: cipher)
         try SearchHistoryFile.clear(url)
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
-        XCTAssertEqual(try SearchHistoryFile.load(url), [])
+        XCTAssertEqual(try SearchHistoryFile.load(url, cipher: cipher), [])
         try SearchHistoryFile.clear(url)   // clearing nothing is fine
     }
 
@@ -67,12 +70,12 @@ final class SearchHistoryTests: XCTestCase {
     func testUpdateMarksEvalAndKeepsUnreadableLines() throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try "garbage line\n".write(to: url, atomically: true, encoding: .utf8)
-        try SearchHistoryFile.append(entry("a"), to: url)
-        try SearchHistoryFile.append(entry("b"), to: url)
-        let updated = try SearchHistoryFile.update(id: "a", in: url) { $0.evalCaseID = "my-case" }
+        try SearchHistoryFile.append(entry("a"), to: url, cipher: cipher)
+        try SearchHistoryFile.append(entry("b"), to: url, cipher: cipher)
+        let updated = try SearchHistoryFile.update(id: "a", in: url, cipher: cipher) { $0.evalCaseID = "my-case" }
         XCTAssertEqual(updated?.evalCaseID, "my-case")
-        XCTAssertNil(try SearchHistoryFile.update(id: "missing", in: url) { $0.evalCaseID = "x" })
-        let loaded = try SearchHistoryFile.load(url)
+        XCTAssertNil(try SearchHistoryFile.update(id: "missing", in: url, cipher: cipher) { $0.evalCaseID = "x" })
+        let loaded = try SearchHistoryFile.load(url, cipher: cipher)
         XCTAssertEqual(loaded.map(\.id), ["a", "b"])
         XCTAssertTrue(loaded[0].hasEval)
         XCTAssertFalse(loaded[1].hasEval)
@@ -86,40 +89,40 @@ final class SearchHistoryTests: XCTestCase {
         // Not valid UTF-8: reading fails, so neither append nor update may replace the file.
         let bad = Data([0x7B, 0x22, 0x69, 0x64, 0x22, 0xFF, 0xFE, 0x0A])
         try bad.write(to: url)
-        XCTAssertThrowsError(try SearchHistoryFile.load(url))
-        XCTAssertThrowsError(try SearchHistoryFile.append(entry("a"), to: url))
-        XCTAssertThrowsError(try SearchHistoryFile.update(id: "a", in: url) { $0.evalCaseID = "x" })
+        XCTAssertThrowsError(try SearchHistoryFile.load(url, cipher: cipher))
+        XCTAssertThrowsError(try SearchHistoryFile.append(entry("a"), to: url, cipher: cipher))
+        XCTAssertThrowsError(try SearchHistoryFile.update(id: "a", in: url, cipher: cipher) { $0.evalCaseID = "x" })
         XCTAssertEqual(try Data(contentsOf: url), bad)
     }
 
     func testFileAndFolderAreOwnerOnly() throws {
         let nested = dir.appendingPathComponent("History/history.jsonl")
-        try SearchHistoryFile.append(entry("a"), to: nested)
+        try SearchHistoryFile.append(entry("a"), to: nested, cipher: cipher)
         let fileMode = try FileManager.default.attributesOfItem(atPath: nested.path)[.posixPermissions] as? Int
         let dirMode = try FileManager.default.attributesOfItem(atPath: nested.deletingLastPathComponent().path)[.posixPermissions] as? Int
         XCTAssertEqual(fileMode, 0o600)
         XCTAssertEqual(dirMode, 0o700)
-        try SearchHistoryFile.update(id: "a", in: nested) { $0.evalCaseID = "c" }
+        try SearchHistoryFile.update(id: "a", in: nested, cipher: cipher) { $0.evalCaseID = "c" }
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: nested.path)[.posixPermissions] as? Int, 0o600)
     }
 
     func testMigrateMovesLegacyFileOnce() throws {
         let legacy = dir.appendingPathComponent("history.jsonl")
         let moved = dir.appendingPathComponent("History/history.jsonl")
-        try SearchHistoryFile.append(entry("old"), to: legacy)
+        try SearchHistoryFile.append(entry("old"), to: legacy, cipher: cipher)
         try SearchHistoryFile.migrate(from: legacy, to: moved)
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
-        XCTAssertEqual(try SearchHistoryFile.load(moved).map(\.id), ["old"])
+        XCTAssertEqual(try SearchHistoryFile.load(moved, cipher: cipher).map(\.id), ["old"])
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: moved.path)[.posixPermissions] as? Int, 0o600)
         // Never overwrites an existing file at the new location.
-        try SearchHistoryFile.append(entry("stray"), to: legacy)
+        try SearchHistoryFile.append(entry("stray"), to: legacy, cipher: cipher)
         try SearchHistoryFile.migrate(from: legacy, to: moved)
-        XCTAssertEqual(try SearchHistoryFile.load(moved).map(\.id), ["old"])
+        XCTAssertEqual(try SearchHistoryFile.load(moved, cipher: cipher).map(\.id), ["old"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path))
     }
 
     func testDefaultLocationIsItsOwnFolder() {
-        XCTAssertEqual(SearchHistoryFile.defaultURL.deletingLastPathComponent(), SearchHistoryFile.defaultDirectory)
+        XCTAssertEqual(SearchHistoryFile.plaintextURL.deletingLastPathComponent(), SearchHistoryFile.defaultDirectory)
         XCTAssertEqual(SearchHistoryFile.defaultDirectory.lastPathComponent, "History")
         XCTAssertEqual(SearchHistoryFile.legacyURL.deletingLastPathComponent().standardizedFileURL,
                        SearchHistoryFile.defaultDirectory.deletingLastPathComponent().standardizedFileURL)
@@ -130,10 +133,10 @@ final class SearchHistoryTests: XCTestCase {
         let weird = "a\u{2028}b\u{2029}c\u{0085}d\u{000B}e\u{000C}f"
         let e = entry("w", queries: [weird], suggested: ["/d/x\u{2028}y.pdf"])
         XCTAssertTrue(SearchHistoryFile.encodeLine(e).contains("\u{2028}"), "precondition: the encoder writes it raw")
-        try SearchHistoryFile.append(e, to: url)
-        try SearchHistoryFile.append(entry("next"), to: url)
-        try SearchHistoryFile.update(id: "w", in: url) { $0.evalCaseID = "case" }
-        let loaded = try SearchHistoryFile.load(url)
+        try SearchHistoryFile.append(e, to: url, cipher: cipher)
+        try SearchHistoryFile.append(entry("next"), to: url, cipher: cipher)
+        try SearchHistoryFile.update(id: "w", in: url, cipher: cipher) { $0.evalCaseID = "case" }
+        let loaded = try SearchHistoryFile.load(url, cipher: cipher)
         XCTAssertEqual(loaded.map(\.id), ["w", "next"])
         XCTAssertEqual(loaded[0].queries, [weird])
         XCTAssertEqual(loaded[0].suggested, ["/d/x\u{2028}y.pdf"])
@@ -153,6 +156,231 @@ final class SearchHistoryTests: XCTestCase {
         XCTAssertEqual(cases, [c])
         XCTAssertEqual(errors.map(\.line), [3], "line numbers count \\n only")
         XCTAssertEqual(EvalCaseFile.splitLines("a\r\nb\u{2028}c\nd"), ["a", "b\u{2028}c", "d"])
+    }
+
+    // MARK: Encryption
+
+    func testLinesAreEncryptedOnDisk() throws {
+        try SearchHistoryFile.append(entry("a", queries: ["my tax form"], suggested: ["/Users/me/K-1.pdf"]), to: url, cipher: cipher)
+        try SearchHistoryFile.append(entry("b"), to: url, cipher: cipher)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(text.contains("tax"))
+        XCTAssertFalse(text.contains("K-1"))
+        let lines = text.split(separator: "\n")
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertTrue(lines.allSatisfy { $0.hasPrefix(DataCipher.linePrefix) })
+        XCTAssertEqual(try SearchHistoryFile.load(url, cipher: DataCipher(store: InMemoryKeyStore())).count, 0,
+                       "another key reads nothing")
+    }
+
+    private var plainURL: URL { dir.appendingPathComponent("history.jsonl") }
+    private var encURL: URL { dir.appendingPathComponent("history.enc.jsonl") }
+
+    func testConvertsPlaintextHistoryIntoTheEncryptedFile() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let old = SearchHistoryFile.encodeLine(entry("old1", queries: ["lease"])) + "\n"
+            + "not json but kept\n"
+            + SearchHistoryFile.encodeLine(entry("old2")) + "\n"
+        try old.write(to: plainURL, atomically: true, encoding: .utf8)
+        try SearchHistoryFile.append(entry("enc0"), to: encURL, cipher: cipher)
+        XCTAssertEqual(try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher), 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plainURL.path), "nothing left in plaintext")
+        let text = try String(contentsOf: encURL, encoding: .utf8)
+        XCTAssertFalse(text.contains("lease"))
+        XCTAssertFalse(text.contains("kept"))
+        XCTAssertEqual(try SearchHistoryFile.load(encURL, cipher: cipher).map(\.id), ["enc0", "old1", "old2"])
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: encURL.path)[.posixPermissions] as? Int, 0o600)
+        // Only once.
+        let before = try Data(contentsOf: encURL)
+        XCTAssertEqual(try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher), 0)
+        XCTAssertEqual(try Data(contentsOf: encURL), before)
+        try SearchHistoryFile.append(entry("new"), to: encURL, cipher: cipher)
+        XCTAssertEqual(try SearchHistoryFile.load(encURL, cipher: cipher).map(\.id), ["enc0", "old1", "old2", "new"])
+    }
+
+    func testConversionThatStoppedHalfWayAddsNothingTwice() throws {
+        try SearchHistoryFile.append(entry("a"), to: plainURL, cipher: nil)
+        try SearchHistoryFile.append(entry("b"), to: plainURL, cipher: nil)
+        // As if the encrypted file was written but the plaintext one not yet removed.
+        try SearchHistoryFile.append(entry("a"), to: encURL, cipher: cipher)
+        try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher)
+        XCTAssertEqual(try SearchHistoryFile.load(encURL, cipher: cipher).map(\.id), ["a", "b"])
+    }
+
+    /// Lines sealed by an earlier test build (in history.jsonl) aren't converted or dropped.
+    func testConversionLeavesOtherEncryptedLinesInThePlaintextFile() throws {
+        let earlier = DataCipher(store: InMemoryKeyStore())
+        try SearchHistoryFile.append(entry("sealed-earlier"), to: plainURL, cipher: earlier)
+        try SearchHistoryFile.append(entry("plain"), to: plainURL, cipher: nil)
+        XCTAssertEqual(try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher), 1)
+        XCTAssertEqual(try SearchHistoryFile.load(encURL, cipher: cipher).map(\.id), ["plain"])
+        XCTAssertEqual(try SearchHistoryFile.load(plainURL, cipher: earlier).map(\.id), ["sealed-earlier"])
+        XCTAssertEqual(try SearchHistoryFile.read(plainURL, cipher: nil).unreadable, 1)
+    }
+
+    func testConversionWithoutAKeyLeavesBothFilesAlone() throws {
+        struct NoKeychain: Error {}
+        try SearchHistoryFile.append(entry("old"), to: plainURL, cipher: nil)
+        let before = try Data(contentsOf: plainURL)
+        let store = InMemoryKeyStore()
+        store.failure = NoKeychain()
+        let broken = DataCipher(store: store)
+        XCTAssertThrowsError(try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: broken))
+        XCTAssertThrowsError(try SearchHistoryFile.append(entry("x"), to: encURL, cipher: broken), "never written in plaintext")
+        XCTAssertEqual(try Data(contentsOf: plainURL), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: encURL.path))
+    }
+
+    /// Deduplicated by the line's exact text, not the entry id: two versions of an entry are both
+    /// kept, and repeated lines (decodable or not) are added once.
+    func testConversionDeduplicatesByLineHash() throws {
+        var marked = entry("a")
+        marked.evalCaseID = "case-1"
+        let plain = [SearchHistoryFile.encodeLine(entry("a")), SearchHistoryFile.encodeLine(marked), "garbage",
+                     "garbage", SearchHistoryFile.encodeLine(entry("b"))].joined(separator: "\n") + "\n"
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try plain.write(to: plainURL, atomically: true, encoding: .utf8)
+        try SearchHistoryFile.append(entry("b"), to: encURL, cipher: cipher)   // converted earlier
+        try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher)
+        let contents = try SearchHistoryFile.read(encURL, cipher: cipher)
+        XCTAssertEqual(contents.entries.map(\.id), ["b", "a", "a"])
+        XCTAssertEqual(contents.entries.map(\.evalCaseID), [nil, nil, "case-1"])
+        let lines = try String(contentsOf: encURL, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.count, 4, "b, a, a marked, one garbage line")
+    }
+
+    // MARK: Keychain error (a build that encrypts, but no key right now)
+
+    private func brokenCipher() -> (DataCipher, InMemoryKeyStore) {
+        struct KeychainLocked: Error {}
+        let store = InMemoryKeyStore()
+        store.failure = KeychainLocked()
+        return (DataCipher(store: store), store)
+    }
+
+    /// Nothing is written (encrypted or not) while the key can't be read; searches wait in memory and
+    /// are saved, in order and encrypted, by the first write that works.
+    func testSearchesWaitInMemoryWhileTheKeychainDoesntAnswer() throws {
+        let (broken, store) = brokenCipher()
+        let pending = PendingSearchHistory()
+        XCTAssertThrowsError(try pending.write(adding: entry("first", queries: ["my tax form"]), to: encURL, cipher: broken)) {
+            guard case .keyUnavailable = $0 as? DataCipher.CipherError else { return XCTFail("\($0)") }
+        }
+        XCTAssertThrowsError(try pending.write(adding: entry("second"), to: encURL, cipher: broken))
+        XCTAssertEqual(pending.entries.map(\.id), ["first", "second"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: encURL.path), "nothing written")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plainURL.path), "never in plaintext")
+
+        store.failure = nil   // the Keychain answers again
+        try pending.write(adding: entry("third"), to: encURL, cipher: broken)
+        XCTAssertTrue(pending.isEmpty)
+        XCTAssertEqual(try SearchHistoryFile.load(encURL, cipher: broken).map(\.id), ["first", "second", "third"])
+        XCTAssertFalse(try String(contentsOf: encURL, encoding: .utf8).contains("tax"), "encrypted")
+        // A flush with nothing waiting writes nothing.
+        let before = try Data(contentsOf: encURL)
+        try pending.write(to: encURL, cipher: broken)
+        XCTAssertEqual(try Data(contentsOf: encURL), before)
+    }
+
+    /// The encrypted file is reported honestly while the key can't be read: kept, not empty, not
+    /// "another build's".
+    func testEncryptedHistoryReadsAsUnavailableWhileTheKeychainDoesntAnswer() throws {
+        let store = InMemoryKeyStore()
+        let working = DataCipher(store: store)
+        try SearchHistoryFile.append(entry("a"), to: encURL, cipher: working)
+        let before = try Data(contentsOf: encURL)
+        let (broken, _) = brokenCipher()
+        let contents = try SearchHistoryFile.read(encURL, cipher: broken)
+        XCTAssertEqual(contents.entries.count, 0)
+        XCTAssertEqual(contents.unreadable, 1)
+        guard case .keyUnavailable? = contents.problem else { return XCTFail("\(String(describing: contents.problem))") }
+        XCTAssertNil(try SearchHistoryFile.update(id: "a", in: encURL, cipher: broken) { $0.evalCaseID = "x" })
+        XCTAssertEqual(try Data(contentsOf: encURL), before, "left as it is")
+    }
+
+    func testPendingSearchesAreCapped() throws {
+        let (broken, _) = brokenCipher()
+        let pending = PendingSearchHistory(capacity: 2)
+        for id in ["a", "b", "c"] { _ = try? pending.write(adding: entry(id), to: encURL, cipher: broken) }
+        XCTAssertEqual(pending.entries.map(\.id), ["b", "c"], "the oldest go first")
+        pending.removeAll()
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    func testNoPlaintextMeansNoConversionAndNoFiles() throws {
+        XCTAssertEqual(try SearchHistoryFile.convertPlaintext(from: plainURL, to: encURL, cipher: cipher), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: encURL.path))
+    }
+
+    // MARK: Without encryption
+
+    func testWithoutEncryptionHistoryIsPlainJSONLines() throws {
+        try SearchHistoryFile.append(entry("a", queries: ["my lease"]), to: plainURL, cipher: nil)
+        try SearchHistoryFile.update(id: "a", in: plainURL, cipher: nil) { $0.evalCaseID = "c" }
+        let text = try String(contentsOf: plainURL, encoding: .utf8)
+        XCTAssertTrue(text.contains("my lease"))
+        XCTAssertFalse(text.contains(DataCipher.linePrefix))
+        XCTAssertEqual(SearchHistoryFile.parse(text).map(\.evalCaseID), ["c"])
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: plainURL.path)[.posixPermissions] as? Int, 0o600)
+    }
+
+    /// A build without encryption can't read encrypted lines: reported, kept, never rewritten as plaintext.
+    func testWithoutEncryptionEncryptedLinesAreReportedAndKept() throws {
+        try SearchHistoryFile.append(entry("secret"), to: encURL, cipher: cipher)
+        let before = try Data(contentsOf: encURL)
+        let contents = try SearchHistoryFile.read(encURL, cipher: nil)
+        XCTAssertEqual(contents.entries, [])
+        XCTAssertEqual(contents.unreadable, 1)
+        XCTAssertEqual(contents.problem, .encryptionOff)
+        XCTAssertNil(try SearchHistoryFile.update(id: "secret", in: encURL, cipher: nil) { $0.evalCaseID = "x" })
+        XCTAssertEqual(try Data(contentsOf: encURL), before)
+    }
+
+    func testEncryptedAndPlaintextFilesAreSeparate() {
+        XCTAssertEqual(SearchHistoryFile.url(encrypted: true, in: dir).lastPathComponent, "history.enc.jsonl")
+        XCTAssertEqual(SearchHistoryFile.url(encrypted: false, in: dir).lastPathComponent, "history.jsonl")
+        XCTAssertEqual(SearchHistoryFile.encryptedURL.deletingLastPathComponent(), SearchHistoryFile.defaultDirectory)
+        XCTAssertEqual(SearchHistoryFile.plaintextURL.deletingLastPathComponent(), SearchHistoryFile.defaultDirectory)
+    }
+
+    /// Builds with different keys (e.g. signed by different teams): neither wipes the other's lines.
+    func testAnotherBuildsLinesAreKeptAndReported() throws {
+        let release = DataCipher(store: InMemoryKeyStore())
+        let dev = DataCipher(store: InMemoryKeyStore())
+        try SearchHistoryFile.append(entry("r1"), to: url, cipher: release)
+        try SearchHistoryFile.append(entry("r2"), to: url, cipher: release)
+
+        let seenByDev = try SearchHistoryFile.read(url, cipher: dev)
+        XCTAssertEqual(seenByDev.entries, [])
+        XCTAssertEqual(seenByDev.unreadable, 2)
+        XCTAssertEqual(seenByDev.problem, .otherKey)
+
+        try SearchHistoryFile.append(entry("d1"), to: url, cipher: dev)
+        XCTAssertNil(try SearchHistoryFile.update(id: "r1", in: url, cipher: dev) { $0.evalCaseID = "x" })
+        XCTAssertNotNil(try SearchHistoryFile.update(id: "d1", in: url, cipher: dev) { $0.evalCaseID = "x" })
+        XCTAssertEqual(try SearchHistoryFile.load(url, cipher: release).map(\.id), ["r1", "r2"])
+        XCTAssertEqual(try SearchHistoryFile.load(url, cipher: dev).map(\.id), ["d1"])
+        XCTAssertEqual(try SearchHistoryFile.read(url, cipher: release).unreadable, 1)
+    }
+
+    func testMissingKeyReadsAsUnreadableNotEmpty() throws {
+        try SearchHistoryFile.append(entry("a"), to: url, cipher: cipher)
+        let noKey = DataCipher(store: InMemoryKeyStore())
+        let contents = try SearchHistoryFile.read(url, cipher: noKey)
+        XCTAssertEqual(contents.unreadable, 1)
+        XCTAssertEqual(contents.problem, .otherKey)
+    }
+
+    func testDamagedLineIsSkippedAndKept() throws {
+        try SearchHistoryFile.append(entry("a"), to: url, cipher: cipher)
+        var text = try String(contentsOf: url, encoding: .utf8)
+        text += "lk1:00000000:AAAA\n"
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        try SearchHistoryFile.append(entry("b"), to: url, cipher: cipher)
+        let contents = try SearchHistoryFile.read(url, cipher: cipher)
+        XCTAssertEqual(contents.entries.map(\.id), ["a", "b"])
+        XCTAssertEqual(contents.unreadable, 1)
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("lk1:00000000:AAAA\n"))
     }
 
     func testSharedDateFormatter() {
