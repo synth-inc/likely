@@ -41,8 +41,8 @@
     <div class="draft-banner" role="note"><span data-copy-id="privacy.draft"><b>Draft, pending legal review.</b> This policy hasn’t been reviewed by a lawyer yet and may change before it takes effect.</span></div>
 
     <h1 data-copy-id="privacy.title">Privacy Policy</h1>
-    <p class="meta" data-copy-id="privacy.effective">Effective date: November 10, 2026</p>
-    <p class="lede" data-copy-id="privacy.lede">Likely is built so that very little leaves your Mac. The app doesn’t run an AI of its own and never uploads your files to us. The app does send us usage analytics, which you can turn off, but never your searches, file names or files. Our license server keeps records and analytics about the requests it receives, and Stripe sends us details of purchases. This policy explains what leaves your Mac, where it goes, what we keep, and how to delete it.</p>
+    <p class="meta" data-copy-id="privacy.effective">Effective date: November 12, 2026</p>
+    <p class="lede" data-copy-id="privacy.lede">Likely is built so that very little leaves your Mac. The app doesn’t run an AI of its own and never uploads your files to us. The app does send us usage analytics, which you can turn off, but never your searches, file names or files. Our license server keeps records and analytics about the requests it receives, Stripe sends us details of purchases, and our website uses advertising cookies to measure our ads. This policy explains what leaves your Mac, where it goes, what we keep, and how to delete it.</p>
 
     <ol class="toc" aria-label="Contents">
       <li><a href="#who" data-copy-id="privacy.toc.who">Who we are</a></li>
@@ -52,6 +52,7 @@
       <li><a href="#payment" data-copy-id="privacy.toc.payment">Payment</a></li>
       <li><a href="#providers" data-copy-id="privacy.toc.providers">Our service providers</a></li>
       <li><a href="#updates" data-copy-id="privacy.toc.updates">Updates</a></li>
+      <li><a href="#ads" data-copy-id="privacy.toc.ads">Our website and advertising</a></li>
       <li><a href="#local" data-copy-id="privacy.toc.local">Data on your Mac</a></li>
       <li><a href="#retention" data-copy-id="privacy.toc.retention">Retention</a></li>
       <li><a href="#rights" data-copy-id="privacy.toc.rights">Your rights</a></li>
@@ -77,6 +78,7 @@
       <li data-copy-id="privacy.collect.li3"><b>Network information.</b> Like any web server, ours (and GitHub, which hosts downloads and this site) sees your IP address when the app or your browser connects.</li>
       <li data-copy-id="privacy.collect.li4"><b>Server analytics.</b> Our license server sends a record of every request it handles, including license checks and update checks, to PostHog, our analytics provider. Each record includes the address requested, the response status and how long it took, your account number on our server (when the app is signed in), your IP address, and the user agent (the app’s name and version and, for license checks, version numbers of macOS components). Errors on our server are recorded the same way. When the app signs in, PostHog is also told your account number, so the records can be grouped by account. We use this to keep the server reliable, find problems, and understand how the service is used.</li>
       <li data-copy-id="privacy.collect.li4b"><b>App usage analytics.</b> Unless you turn off “Share usage analytics” in Settings, the app sends PostHog records of how it’s used, linked to your install ID. These include things like your app and macOS versions, setup, how searches perform (the agent and model, timing, results and which tool found them), tools’ names, IDs and commands and whether they help, settings, test results, and errors (including the app a problem happened in). They never include what you type in searches, window titles, file names, paths or file contents, or tools’ instructions. We use them to fix problems and improve Likely, including its default tools.</li>
+      <li data-copy-id="privacy.collect.li4c"><b>Website visits and ad measurement.</b> Our website uses advertising pixels from partners such as Reddit to measure which ads bring people to Likely, for example whether a visit from an ad led to a download. See <a href="#ads">Our website and advertising</a>.</li>
       <li data-copy-id="privacy.collect.li5"><b>What you send us.</b> If you email us or file a GitHub issue, we get what you send, which may include a log you attach. A detailed log (“Log details for troubleshooting”) can contain your searches, window titles and file paths. We use it only to answer you and fix the problem. GitHub issues are public, so please don’t attach a log with anything sensitive there. If you need to share one, email it to us instead. We keep support emails and attachments as long as we need them to help you, and delete them when you ask.</li>
     </ul>
     <p data-copy-id="privacy.collect.p2">We don’t collect:</p>
@@ -86,7 +88,7 @@
       <li data-copy-id="privacy.collect.no3">what your AI provider sends back;</li>
       <li data-copy-id="privacy.collect.no5">your full card number or security code, which go to Stripe and never reach us.</li>
     </ul>
-    <p data-copy-id="privacy.collect.p3">We don’t sell personal information or share it for cross-context behavioral advertising, and we don’t use it to train AI models.</p>
+    <p data-copy-id="privacy.collect.p3">We don’t sell personal information for money, and we don’t use it to train AI models. Our website does share browsing activity with advertising partners, which US state privacy laws may treat as “sharing” for cross-context behavioral advertising; you can opt out (see <a href="#ads">Our website and advertising</a>). The app itself shares nothing with advertising partners.</p>
 
     <h2 id="leaves" data-copy-id="privacy.leaves.title">3. What leaves your Mac</h2>
     <p data-copy-id="privacy.leaves.p1">This is what Likely itself sends off your Mac, who receives it, and when.</p>
@@ -168,7 +170,45 @@
     <h2 id="updates" data-copy-id="privacy.updates.title">7. Updates</h2>
     <p data-copy-id="privacy.updates.p1">Paid builds of Likely check for updates with Sparkle. The update feed is on our server and the download comes from GitHub releases, so both see your IP address and app version, and requests to the feed are recorded in our analytics. Sparkle’s optional system-profile reporting is off, so no other information about your Mac is sent with the check. Sparkle asks before installing an update unless you choose to install updates automatically, and you can turn off automatic checks in Settings. Builds you make yourself from source, free or dev, don’t check for updates.</p>
 
-    <h2 id="local" data-copy-id="privacy.local.title">8. Data on your Mac, and how to delete it</h2>
+    <h2 id="ads" data-copy-id="privacy.ads.title">8. Our website and advertising</h2>
+    <p data-copy-id="privacy.ads.p1">GitHub hosts this website and sees your IP address when you visit. To learn which of our ads work, the website also uses advertising pixels from partners such as Reddit. A pixel is a small script that tells the partner you visited a page or clicked Download. It sets cookies and sends the partner your IP address, browser and device details, the page and what you clicked, and the partner’s own cookie IDs, which it may link to your account with it. Each partner handles this under its own privacy policy (for Reddit, see <a href="https://www.reddit.com/policies/privacy-policy">Reddit’s Privacy Policy</a>), and may use it to show you ads elsewhere.</p>
+    <p data-copy-id="privacy.ads.p2"><b>Opting out.</b> If your browser sends a Global Privacy Control signal, or you turn them off below, we don’t load advertising pixels, and we treat that as a request to opt out of sale and sharing. Where the law requires your consent before these cookies are set, we ask for it first, and you can withdraw it below at any time. You can also block them in your browser or with a content blocker, or change ad settings in your account with the partner.</p>
+    <p data-copy-id="privacy.ads.p4"><b>Change your choice on this site.</b> <span id="ad-choice-status">Advertising cookies on this site: checking…</span> <button type="button" id="ad-choice-off" hidden>Turn off advertising cookies</button> <button type="button" id="ad-choice-reset" hidden>Ask me again</button></p>
+    <p data-copy-id="privacy.ads.p3">The Likely app contains no advertising pixels and sends nothing to advertising partners.</p>
+    <script>
+    (function () {
+      var KEY = 'likely-ads-consent';
+      var status = document.getElementById('ad-choice-status');
+      var off = document.getElementById('ad-choice-off');
+      var reset = document.getElementById('ad-choice-reset');
+      function get() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+      function set(v) { try { v === null ? localStorage.removeItem(KEY) : localStorage.setItem(KEY, v); return true; } catch (e) { return false; } }
+      function clearCookies() {
+        document.cookie.split(';').forEach(function (c) {
+          var name = c.split('=')[0].trim();
+          if (/^_rdt/.test(name)) document.cookie = name + '=; Max-Age=0; path=/';
+        });
+      }
+      function render() {
+        var gpc = navigator.globalPrivacyControl === true;
+        var choice = get();
+        if (gpc) status.textContent = 'Advertising cookies on this site: off (your browser sends Global Privacy Control).';
+        else if (choice === 'no') status.textContent = 'Advertising cookies on this site: off.';
+        else status.textContent = 'Advertising cookies on this site: on, or you’ll be asked.';
+        off.hidden = gpc || choice === 'no';
+        reset.hidden = gpc || choice === null;
+      }
+      off.addEventListener('click', function () {
+        if (!set('no')) status.textContent = 'Couldn’t save your choice: your browser is blocking site storage, which also blocks these cookies.';
+        clearCookies();
+        if (get() === 'no') render();
+      });
+      reset.addEventListener('click', function () { set(null); clearCookies(); render(); });
+      render();
+    })();
+    </script>
+
+    <h2 id="local" data-copy-id="privacy.local.title">9. Data on your Mac, and how to delete it</h2>
     <p data-copy-id="privacy.local.p1">Likely keeps its working data on your Mac, where we can’t see it:</p>
     <ul>
       <li data-copy-id="privacy.local.li1"><code>~/Likely</code> (or the folder you chose): copies of suggested files. Copies are cloned locally and cleared shortly after the picker closes; your originals are never changed.</li>
@@ -178,26 +218,27 @@
     </ul>
     <p data-copy-id="privacy.local.p2">To delete search history, use Settings → History. To delete all of Likely’s data on your Mac, quit Likely and delete <code>~/Library/Application Support/Likely</code>, <code>~/Library/Application Support/Likely.noindex</code>, <code>~/Library/Logs/Likely</code> and <code>~/Library/Logs/Likely.noindex</code> (the folders above are links to the <code>.noindex</code> ones), then run <code>defaults delete inc.synth.likely</code> in Terminal and remove the Keychain item in Keychain Access. Likely also keeps an encryption key for your search history in your Mac’s data-protection keychain, which Keychain Access doesn’t show; without the data, it protects nothing. Deleting Likely’s preferences also removes your license activation from this Mac; email us to restore it. Earlier versions of Likely could save screenshots; Likely deletes any they left when it starts. Your AI provider’s CLI may keep its own session logs; see its documentation.</p>
 
-    <h2 id="retention" data-copy-id="privacy.retention.title">9. Retention</h2>
+    <h2 id="retention" data-copy-id="privacy.retention.title">10. Retention</h2>
     <p data-copy-id="privacy.retention.p1">We keep each kind of record only as long as we need it:</p>
     <ul>
       <li data-copy-id="privacy.retention.accounts"><b>Account and license records</b> (install ID, plan, license status and Stripe’s purchase IDs): for buyers, while your license is active and then for 7 years for tax, accounting and disputes. If you never buy, your anonymous account is deleted 90 days after the app last contacted our server.</li>
       <li data-copy-id="privacy.retention.stripe"><b>Stripe notifications we store:</b> 7 years, for tax and accounting. Stripe keeps its own payment records under its own policy.</li>
       <li data-copy-id="privacy.retention.redis"><b>Stripe notifications in our job queue (Redis Cloud):</b> kept indefinitely.</li>
       <li data-copy-id="privacy.retention.posthog"><b>Analytics records in PostHog:</b> kept indefinitely.</li>
+      <li data-copy-id="privacy.retention.ads"><b>Website pixel data:</b> kept by each advertising partner under its own policy.</li>
       <li data-copy-id="privacy.retention.logs"><b>Server logs</b> (which include IP addresses, and the full Stripe notification when processing one fails): kept indefinitely.</li>
     </ul>
     <p data-copy-id="privacy.retention.p2">When you ask us to delete your information, we complete the request within 30 days. The only exception is purchase records we must keep by law, such as tax records, which we then keep only for that purpose and only for as long as the law requires.</p>
 
-    <h2 id="rights" data-copy-id="privacy.rights.title">10. Your rights</h2>
+    <h2 id="rights" data-copy-id="privacy.rights.title">11. Your rights</h2>
     <p data-copy-id="privacy.rights.p1">Depending on where you live, you may have the right to know what personal information we hold about you and to access, correct, delete or export it, or to object to or limit how we use it. To make a request, including asking us to delete your account, license and purchase records, email <a href="mailto:contact@cloudless.so">contact@cloudless.so</a> from the address you used at checkout, or include your receipt number. We use these to find your records and confirm the request is yours. If you never bought a license, your anonymous account holds only a random install ID, and our server records and analytics hold IP addresses linked to it. We delete them on the schedule in <a href="#retention">Retention</a>. If you want them deleted sooner, or want a copy, email us, and we’ll tell you how to find your install ID so we can find your records.</p>
     <p data-copy-id="privacy.rights.p3">We’ll respond within 30 days. If we decline any part of a request, we’ll tell you why; you can appeal by replying “appeal”, and we’ll review the decision and answer within 30 days. If you’re still unhappy, you can complain to your state attorney general or your local data protection authority.</p>
     <p data-copy-id="privacy.rights.p4">You can ask someone else (an authorized agent) to make a request for you. We may ask for proof that they’re allowed to, and ask you to confirm the request. We won’t treat you differently, for example by charging you more or giving you a lesser service, because you used any of these rights.</p>
-    <p data-copy-id="privacy.rights.p5"><b>Do Not Track.</b> We don’t track you across other websites or services, and this website has no analytics or advertising cookies, so we don’t change anything in response to Do Not Track signals.</p>
+    <p data-copy-id="privacy.rights.p5"><b>Opting out of sharing, and Global Privacy Control.</b> To opt out of the sharing described in <a href="#ads">Our website and advertising</a>, use “Turn off advertising cookies” in <a href="#ads">section 8</a>, or turn on Global Privacy Control in your browser; either way we don’t load advertising pixels. There’s no single standard for Do Not Track signals, so we don’t respond to them; we do honor Global Privacy Control.</p>
     <p data-copy-id="privacy.rights.p2">Data on your Mac is already under your control; you can delete it at any time as described above.</p>
 
-    <h2 id="categories" data-copy-id="privacy.categories.title">11. Categories and recipients</h2>
-    <p data-copy-id="privacy.categories.p1">For California and other US state privacy laws, these are the categories of personal information we’ve collected in the last 12 months, where they come from, and who receives them. We use them for the purposes in sections 2 and 5: licensing, payments, refunds and support, security, and keeping the server reliable. We disclose them only to the service providers in <a href="#providers">section 6</a>, and we don’t sell or share them for cross-context behavioral advertising.</p>
+    <h2 id="categories" data-copy-id="privacy.categories.title">12. Categories and recipients</h2>
+    <p data-copy-id="privacy.categories.p1">For California and other US state privacy laws, these are the categories of personal information we’ve collected in the last 12 months, where they come from, and who receives them. We use them for the purposes in sections 2, 5 and 8: licensing, payments, refunds and support, security, keeping the server reliable, improving the app, and measuring our ads. We disclose them to the service providers in <a href="#providers">section 6</a>. We don’t sell them for money. Identifiers and internet activity from our website are shared with advertising partners such as Reddit for ad measurement, which may count as “sharing” for cross-context behavioral advertising; to opt out, see <a href="#rights">Your rights</a>.</p>
     <div class="panel">
       <table class="data-table">
         <thead>
@@ -210,8 +251,8 @@
         <tbody>
           <tr>
             <th scope="row" data-copy-id="privacy.categories.ids.cat">Identifiers</th>
-            <td data-copy-id="privacy.categories.ids.what">Install ID and account number (from the app); IP address (from your connection); email address, name and Stripe’s IDs (from Stripe)</td>
-            <td data-copy-id="privacy.categories.ids.to">Heroku, Stripe, Redis Cloud (email address, name and Stripe’s IDs, in Stripe notifications), PostHog (account number and IP address only), GitHub (IP address only)</td>
+            <td data-copy-id="privacy.categories.ids.what">Install ID and account number (from the app); IP address (from your connection); email address, name and Stripe’s IDs (from Stripe); cookie IDs (from advertising pixels on our website)</td>
+            <td data-copy-id="privacy.categories.ids.to">Heroku, Stripe, Redis Cloud (email address, name and Stripe’s IDs, in Stripe notifications), PostHog (install ID, account number and IP address only), GitHub (IP address only), advertising partners such as Reddit (IP address and cookie IDs, from our website only)</td>
           </tr>
           <tr>
             <th scope="row" data-copy-id="privacy.categories.records.cat">Customer records</th>
@@ -225,41 +266,41 @@
           </tr>
           <tr>
             <th scope="row" data-copy-id="privacy.categories.activity.cat">Internet activity</th>
-            <td data-copy-id="privacy.categories.activity.what">Requests the app makes to our server, with times, status and user agent (from the app)</td>
-            <td data-copy-id="privacy.categories.activity.to">Heroku, PostHog</td>
+            <td data-copy-id="privacy.categories.activity.what">Requests the app makes to our server, with times, status and user agent, and app usage analytics (from the app); pages you visit and buttons you click on our website (from advertising pixels)</td>
+            <td data-copy-id="privacy.categories.activity.to">Heroku, PostHog; advertising partners such as Reddit (website activity only)</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <h2 id="gdpr" data-copy-id="privacy.gdpr.title">12. EEA, UK and Swiss users</h2>
+    <h2 id="gdpr" data-copy-id="privacy.gdpr.title">13. EEA, UK and Swiss users</h2>
     <p data-copy-id="privacy.gdpr.p1"><b>Controller.</b> Synthetic Exploration, Inc. is the controller of the personal information described here. Email: <a href="mailto:contact@cloudless.so">contact@cloudless.so</a>. Representative in the EU and UK: not appointed.</p>
     <p data-copy-id="privacy.gdpr.p2"><b>Legal bases.</b> We rely on:</p>
     <ul>
       <li data-copy-id="privacy.gdpr.contract"><b>Contract</b>, to create your account, check your license, deliver updates, take payment, and handle refunds and support;</li>
       <li data-copy-id="privacy.gdpr.legal">a <b>legal obligation</b>, to keep purchase records for tax and accounting;</li>
       <li data-copy-id="privacy.gdpr.interests">our <b>legitimate interests</b> in keeping the service reliable and secure, preventing fraud and abuse, and understanding how the service is used, for server analytics, app usage analytics and logs. You can object to this at any time, and turn off app usage analytics yourself with “Share usage analytics” in Settings;</li>
-      <li data-copy-id="privacy.gdpr.consent">your <b>consent</b>, before we use information we already hold in a materially new way.</li>
+      <li data-copy-id="privacy.gdpr.consent">your <b>consent</b>, for advertising cookies on our website, and before we use information we already hold in a materially new way.</li>
     </ul>
     <p data-copy-id="privacy.gdpr.p6">You can withdraw consent at any time, without affecting earlier processing. The install ID and license checks are needed to provide a Paid License; without them, the paid build can’t verify your license (you can build Likely from source without them). We don’t make decisions about you based solely on automated processing.</p>
-    <p data-copy-id="privacy.gdpr.p3"><b>Processors and transfers.</b> Our processors are listed in <a href="#providers">section 6</a>. We’re based in the US, and so are our servers and providers’ processing, so your information is transferred to the US. For transfers from the EEA, UK and Switzerland we rely on the Standard Contractual Clauses in our providers’ data processing agreements.</p>
+    <p data-copy-id="privacy.gdpr.p3"><b>Processors and transfers.</b> Our processors are listed in <a href="#providers">section 6</a>. Advertising partners such as Reddit aren’t our processors; they receive website data as independent controllers under their own terms (see <a href="#ads">section 8</a>). We’re based in the US, and so are our servers and providers’ processing, so your information is transferred to the US. For transfers from the EEA, UK and Switzerland we rely on the Standard Contractual Clauses in our providers’ data processing agreements.</p>
     <p data-copy-id="privacy.gdpr.p4"><b>Your AI provider.</b> Your AI provider isn’t our processor. Likely sends your searches to it from your Mac, under your own agreement with it, and you and your provider decide how they’re handled.</p>
     <p data-copy-id="privacy.gdpr.p5">You can also complain to the data protection authority where you live or work.</p>
 
-    <h2 id="security" data-copy-id="privacy.security.title">13. Security and breaches</h2>
+    <h2 id="security" data-copy-id="privacy.security.title">14. Security and breaches</h2>
     <p data-copy-id="privacy.security.p1">The app talks to our server only over HTTPS. If a breach affects your personal information, we’ll tell you without undue delay, by email if we have your address and on this website, and we’ll notify the authorities as the law requires.</p>
 
-    <h2 id="transfers" data-copy-id="privacy.transfers.title">14. If Likely changes hands</h2>
+    <h2 id="transfers" data-copy-id="privacy.transfers.title">15. If Likely changes hands</h2>
     <p data-copy-id="privacy.transfers.p1">If Synth or Likely is sold, merged or otherwise transferred, the new owner must honor this policy for information collected under it. We’ll tell you before your information is transferred, and you can ask us to delete it first.</p>
     <p data-copy-id="privacy.transfers.p2">Likely’s license server is shared with another Synth product, Onit. Likely’s records are used only for Likely, not for our other products.</p>
 
-    <h2 id="children" data-copy-id="privacy.children.title">15. Children</h2>
+    <h2 id="children" data-copy-id="privacy.children.title">16. Children</h2>
     <p data-copy-id="privacy.children.p1">Likely isn’t directed at children under 13, and we don’t knowingly collect personal information from them. If you’re 13 to 17, or otherwise under the age of majority where you live, you need a parent or guardian to agree to our <a href="terms.html#eligibility">Terms</a> for you and to make any purchase. If you believe a child under 13 has given us personal information, contact us and we’ll delete it.</p>
 
-    <h2 id="changes" data-copy-id="privacy.changes.title">16. Changes</h2>
+    <h2 id="changes" data-copy-id="privacy.changes.title">17. Changes</h2>
     <p data-copy-id="privacy.changes.p1">If we change this policy, we’ll post the new version here and update the effective date. If a change is material, for example if Likely starts sending a new kind of information off your Mac, we’ll tell you in the app, and by email if we have your address, at least 30 days before it takes effect. We won’t use information we already hold in a materially new way unless you first opt in.</p>
 
-    <h2 id="contact" data-copy-id="privacy.contact.title">17. Contact</h2>
+    <h2 id="contact" data-copy-id="privacy.contact.title">18. Contact</h2>
     <p data-copy-id="privacy.contact.p1">Synthetic Exploration, Inc.<br>Email: <a href="mailto:contact@cloudless.so">contact@cloudless.so</a></p>
   </main>
 
