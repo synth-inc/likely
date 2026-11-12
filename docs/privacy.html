@@ -172,8 +172,41 @@
 
     <h2 id="ads" data-copy-id="privacy.ads.title">8. Our website and advertising</h2>
     <p data-copy-id="privacy.ads.p1">GitHub hosts this website and sees your IP address when you visit. To learn which of our ads work, the website also uses advertising pixels from partners such as Reddit. A pixel is a small script that tells the partner you visited a page or clicked Download. It sets cookies and sends the partner your IP address, browser and device details, the page and what you clicked, and the partner’s own cookie IDs, which it may link to your account with it. Each partner handles this under its own privacy policy (for Reddit, see <a href="https://www.reddit.com/policies/privacy-policy">Reddit’s Privacy Policy</a>), and may use it to show you ads elsewhere.</p>
-    <p data-copy-id="privacy.ads.p2"><b>Opting out.</b> If your browser sends a Global Privacy Control signal, we don’t load advertising pixels, and we treat the signal as a request to opt out of sale and sharing. Where the law requires your consent before these cookies are set, we ask for it first. You can also block them in your browser or with a content blocker, or change ad settings in your account with the partner.</p>
+    <p data-copy-id="privacy.ads.p2"><b>Opting out.</b> If your browser sends a Global Privacy Control signal, or you turn them off below, we don’t load advertising pixels, and we treat that as a request to opt out of sale and sharing. Where the law requires your consent before these cookies are set, we ask for it first, and you can withdraw it below at any time. You can also block them in your browser or with a content blocker, or change ad settings in your account with the partner.</p>
+    <p data-copy-id="privacy.ads.p4"><b>Change your choice on this site.</b> <span id="ad-choice-status">Advertising cookies on this site: checking…</span> <button type="button" id="ad-choice-off" hidden>Turn off advertising cookies</button> <button type="button" id="ad-choice-reset" hidden>Ask me again</button></p>
     <p data-copy-id="privacy.ads.p3">The Likely app contains no advertising pixels and sends nothing to advertising partners.</p>
+    <script>
+    (function () {
+      var KEY = 'likely-ads-consent';
+      var status = document.getElementById('ad-choice-status');
+      var off = document.getElementById('ad-choice-off');
+      var reset = document.getElementById('ad-choice-reset');
+      function get() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+      function set(v) { try { v === null ? localStorage.removeItem(KEY) : localStorage.setItem(KEY, v); return true; } catch (e) { return false; } }
+      function clearCookies() {
+        document.cookie.split(';').forEach(function (c) {
+          var name = c.split('=')[0].trim();
+          if (/^_rdt/.test(name)) document.cookie = name + '=; Max-Age=0; path=/';
+        });
+      }
+      function render() {
+        var gpc = navigator.globalPrivacyControl === true;
+        var choice = get();
+        if (gpc) status.textContent = 'Advertising cookies on this site: off (your browser sends Global Privacy Control).';
+        else if (choice === 'no') status.textContent = 'Advertising cookies on this site: off.';
+        else status.textContent = 'Advertising cookies on this site: on, or you’ll be asked.';
+        off.hidden = gpc || choice === 'no';
+        reset.hidden = gpc || choice === null;
+      }
+      off.addEventListener('click', function () {
+        if (!set('no')) status.textContent = 'Couldn’t save your choice: your browser is blocking site storage, which also blocks these cookies.';
+        clearCookies();
+        if (get() === 'no') render();
+      });
+      reset.addEventListener('click', function () { set(null); clearCookies(); render(); });
+      render();
+    })();
+    </script>
 
     <h2 id="local" data-copy-id="privacy.local.title">9. Data on your Mac, and how to delete it</h2>
     <p data-copy-id="privacy.local.p1">Likely keeps its working data on your Mac, where we can’t see it:</p>
@@ -201,11 +234,11 @@
     <p data-copy-id="privacy.rights.p1">Depending on where you live, you may have the right to know what personal information we hold about you and to access, correct, delete or export it, or to object to or limit how we use it. To make a request, including asking us to delete your account, license and purchase records, email <a href="mailto:contact@cloudless.so">contact@cloudless.so</a> from the address you used at checkout, or include your receipt number. We use these to find your records and confirm the request is yours. If you never bought a license, your anonymous account holds only a random install ID, and our server records and analytics hold IP addresses linked to it. We delete them on the schedule in <a href="#retention">Retention</a>. If you want them deleted sooner, or want a copy, email us, and we’ll tell you how to find your install ID so we can find your records.</p>
     <p data-copy-id="privacy.rights.p3">We’ll respond within 30 days. If we decline any part of a request, we’ll tell you why; you can appeal by replying “appeal”, and we’ll review the decision and answer within 30 days. If you’re still unhappy, you can complain to your state attorney general or your local data protection authority.</p>
     <p data-copy-id="privacy.rights.p4">You can ask someone else (an authorized agent) to make a request for you. We may ask for proof that they’re allowed to, and ask you to confirm the request. We won’t treat you differently, for example by charging you more or giving you a lesser service, because you used any of these rights.</p>
-    <p data-copy-id="privacy.rights.p5"><b>Opting out of sharing, and Global Privacy Control.</b> To opt out of the sharing described in <a href="#ads">Our website and advertising</a>, turn on Global Privacy Control in your browser: we then don’t load advertising pixels. You can also email us. There’s no single standard for Do Not Track signals, so we don’t respond to them; we do honor Global Privacy Control.</p>
+    <p data-copy-id="privacy.rights.p5"><b>Opting out of sharing, and Global Privacy Control.</b> To opt out of the sharing described in <a href="#ads">Our website and advertising</a>, use “Turn off advertising cookies” in <a href="#ads">section 8</a>, or turn on Global Privacy Control in your browser; either way we don’t load advertising pixels. There’s no single standard for Do Not Track signals, so we don’t respond to them; we do honor Global Privacy Control.</p>
     <p data-copy-id="privacy.rights.p2">Data on your Mac is already under your control; you can delete it at any time as described above.</p>
 
     <h2 id="categories" data-copy-id="privacy.categories.title">12. Categories and recipients</h2>
-    <p data-copy-id="privacy.categories.p1">For California and other US state privacy laws, these are the categories of personal information we’ve collected in the last 12 months, where they come from, and who receives them. We use them for the purposes in sections 2 and 5: licensing, payments, refunds and support, security, and keeping the server reliable. We disclose them to the service providers in <a href="#providers">section 6</a>. We don’t sell them for money. Identifiers and internet activity from our website are shared with advertising partners such as Reddit for ad measurement, which may count as “sharing” for cross-context behavioral advertising; to opt out, see <a href="#rights">Your rights</a>.</p>
+    <p data-copy-id="privacy.categories.p1">For California and other US state privacy laws, these are the categories of personal information we’ve collected in the last 12 months, where they come from, and who receives them. We use them for the purposes in sections 2, 5 and 8: licensing, payments, refunds and support, security, keeping the server reliable, improving the app, and measuring our ads. We disclose them to the service providers in <a href="#providers">section 6</a>. We don’t sell them for money. Identifiers and internet activity from our website are shared with advertising partners such as Reddit for ad measurement, which may count as “sharing” for cross-context behavioral advertising; to opt out, see <a href="#rights">Your rights</a>.</p>
     <div class="panel">
       <table class="data-table">
         <thead>
@@ -250,7 +283,7 @@
       <li data-copy-id="privacy.gdpr.consent">your <b>consent</b>, for advertising cookies on our website, and before we use information we already hold in a materially new way.</li>
     </ul>
     <p data-copy-id="privacy.gdpr.p6">You can withdraw consent at any time, without affecting earlier processing. The install ID and license checks are needed to provide a Paid License; without them, the paid build can’t verify your license (you can build Likely from source without them). We don’t make decisions about you based solely on automated processing.</p>
-    <p data-copy-id="privacy.gdpr.p3"><b>Processors and transfers.</b> Our processors are listed in <a href="#providers">section 6</a>. We’re based in the US, and so are our servers and providers’ processing, so your information is transferred to the US. For transfers from the EEA, UK and Switzerland we rely on the Standard Contractual Clauses in our providers’ data processing agreements.</p>
+    <p data-copy-id="privacy.gdpr.p3"><b>Processors and transfers.</b> Our processors are listed in <a href="#providers">section 6</a>. Advertising partners such as Reddit aren’t our processors; they receive website data as independent controllers under their own terms (see <a href="#ads">section 8</a>). We’re based in the US, and so are our servers and providers’ processing, so your information is transferred to the US. For transfers from the EEA, UK and Switzerland we rely on the Standard Contractual Clauses in our providers’ data processing agreements.</p>
     <p data-copy-id="privacy.gdpr.p4"><b>Your AI provider.</b> Your AI provider isn’t our processor. Likely sends your searches to it from your Mac, under your own agreement with it, and you and your provider decide how they’re handled.</p>
     <p data-copy-id="privacy.gdpr.p5">You can also complain to the data protection authority where you live or work.</p>
 

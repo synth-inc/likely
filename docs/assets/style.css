@@ -323,4 +323,8 @@ h1 em { font-style: normal; color: var(--text-2); }
 .consent p { margin: 0 0 10px; }
 .consent a { color: var(--link); }
 .consent-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.consent .btn { height: 34px; padding: 0 14px; border: 0; cursor: pointer; }
+.consent .btn { height: 40px; padding: 0 16px; border: 0; cursor: pointer; }
+#ad-choice-off, #ad-choice-reset {
+  margin-left: 6px; padding: 4px 10px; border: 1px solid var(--divider); border-radius: 7px;
+  background: var(--fill); color: var(--text); font: inherit; cursor: pointer;
+}

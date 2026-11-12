@@ -3,11 +3,17 @@
 // Cloudless's site uses "AddToCart" on the same pixel, so Likely never fires that.
 //
 // - Global Privacy Control on: nothing loads, no prompt.
-// - Visitors in Europe (by time zone): nothing loads until they accept the cookie prompt.
+// - Visitors in Europe (by time zone, or with no usable time zone): nothing loads until they
+//   accept the cookie prompt.
+// - A stored "no" (the prompt, or the opt-out on privacy.html#ads) turns it off for everyone.
 // - Every call is guarded, so a blocked pixel never breaks the download link.
 (function () {
   var REDDIT_PIXEL_ID = 'a2_h1chsn71jptb';
   var CONSENT_KEY = 'likely-ads-consent'; // "yes" | "no"
+  var EXTRA_ZONES = ['Atlantic/Reykjavik', 'Atlantic/Canary', 'Atlantic/Madeira', 'Atlantic/Azores',
+    'Atlantic/Faroe', 'Africa/Ceuta', 'Asia/Nicosia', 'Asia/Famagusta', 'America/Cayenne',
+    'America/Guadeloupe', 'America/Martinique', 'America/Marigot', 'America/St_Barthelemy',
+    'Indian/Reunion', 'Indian/Mayotte', 'Arctic/Longyearbyen'];
 
   function store(get, value) {
     try {
@@ -21,7 +27,11 @@
   function needsConsent() {
     try {
       var zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-      return /^(Europe|Atlantic\/(Reykjavik|Canary|Madeira|Azores|Faroe))\//.test(zone);
+      // Unknown or hidden (privacy browsers report UTC): ask, to be safe.
+      if (!zone || zone === 'UTC' || /^Etc\//.test(zone)) return true;
+      // Europe/* covers the EU, EEA, UK and Switzerland; the rest are EU or EEA places outside it
+      // (Cyprus, Ceuta, the Atlantic islands, France's overseas regions).
+      return /^Europe\//.test(zone) || EXTRA_ZONES.indexOf(zone) !== -1;
     } catch (e) { return true; }
   }
 
@@ -33,6 +43,7 @@
   }
 
   var loaded = false;
+  var downloadTracked = false;
   function loadPixels() {
     if (loaded) return;
     loaded = true;
@@ -43,29 +54,33 @@
   }
 
   function trackDownload() {
-    if (!loaded || !isMac()) return;
+    if (!loaded || downloadTracked || !isMac()) return;
+    downloadTracked = true; // one conversion per page view, however many clicks
     try {
-      rdt('track', 'Lead');
+      rdt('track', 'Lead', { conversionId: 'likely-' + Date.now() + '-' + Math.random().toString(36).slice(2) });
       rdt('track', 'Custom', { customEventName: 'LikelyDownload' });
     } catch (e) { /* never block the download */ }
   }
 
-  document.addEventListener('click', function (event) {
+  function onLinkClick(event) {
     var link = event.target.closest && event.target.closest('a[href*="/releases/latest/download/"]');
     if (link) trackDownload();
-  }, true);
+  }
+  document.addEventListener('click', onLinkClick, true);
+  document.addEventListener('auxclick', onLinkClick, true); // middle-click
 
   function showPrompt() {
     var bar = document.createElement('div');
     bar.className = 'consent';
     bar.setAttribute('role', 'region');
     bar.setAttribute('aria-label', 'Cookie choice');
+    bar.setAttribute('aria-live', 'polite');
     bar.innerHTML =
       '<p>We’d like to use advertising cookies to see which of our ads work. ' +
       '<a href="privacy.html#ads">Details</a></p>' +
       '<div class="consent-actions">' +
       '<button type="button" class="btn btn-quiet" data-choice="no">No thanks</button>' +
-      '<button type="button" class="btn btn-primary" data-choice="yes">Allow</button>' +
+      '<button type="button" class="btn btn-quiet" data-choice="yes">Allow</button>' +
       '</div>';
     bar.addEventListener('click', function (event) {
       var choice = event.target.getAttribute && event.target.getAttribute('data-choice');
@@ -74,14 +89,15 @@
       bar.remove();
       if (choice === 'yes') loadPixels();
     });
-    document.body.appendChild(bar);
+    // Early in the DOM, so keyboard and screen-reader users reach it first.
+    document.body.insertBefore(bar, document.body.firstChild);
   }
 
   function start() {
-    if (!needsConsent()) return loadPixels();
     var choice = store(true);
-    if (choice === 'yes') return loadPixels();
-    if (choice !== 'no') showPrompt();
+    if (choice === 'no') return;
+    if (choice === 'yes' || !needsConsent()) return loadPixels();
+    showPrompt();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
