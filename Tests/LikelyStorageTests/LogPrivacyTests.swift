@@ -242,6 +242,8 @@ final class LogPrivacySourceTests: XCTestCase {
         "Likely/ClaudeRunner.swift: Log.write(\"claude\", \"started \\(path: claudePath) model=\\(meta: model) pid=\\(process.processIdentifier)\")": 1,
         "Likely/Coordinator.swift: : \"\\(meta: agentName) error kind=\\(AgentFailureKind.classify(outcome.summary)) – \\(sensitive: outcome.summary.prefix(60))\"": 1,
         "Likely/Coordinator.swift: Log.write(\"detect\", \"\\(meta: appName) \\(meta: notification) \\(AX.describe(window)) → \\(verdict.logLine)\")": 2,
+        // An AX notification name.
+        "Likely/Coordinator.swift: Log.write(\"detect\", \"Finder \\(meta: notification) \\(AX.describe(window)) → FINDER WINDOW\")": 1,
         "Likely/Coordinator.swift: Log.write(\"detect\", \"panel service window #\\(window.id) while \\(meta: picker.appName) is frontmost\")": 1,
         "Likely/Coordinator.swift: Log.write(\"evals\", \"picker closed without a confirmed pick (\\(meta: pick.how))\")": 1,
         "Likely/Coordinator.swift: Log.write(\"picker\", \"CLOSED in \\(meta: picker.appName) (\\(meta: reason))\")": 2,

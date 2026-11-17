@@ -54,7 +54,9 @@ final class PickerHUD {
         panel.contentView = NSHostingView(rootView: HUDView(model: model) { [weak self] in self?.returnFocusToPicker() })
     }
 
-    func show(attachedTo element: AXUIElement?, fallbackFrame: CGRect?) {
+    /// `focusField`: put the cursor in the bar once the picker has animated in. Off for Finder
+    /// windows, where keys must keep going to Finder until the user clicks the bar.
+    func show(attachedTo element: AXUIElement?, fallbackFrame: CGRect?, focusField: Bool = true) {
         pickerElement = element
         self.fallbackFrame = fallbackFrame
         sidebar = nil
@@ -70,7 +72,17 @@ final class PickerHUD {
         panel.orderFrontRegardless()
         trackTimer?.invalidate()
         trackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.reposition() }
-        focusFieldSoon(for: element)
+        if focusField { focusFieldSoon(for: element) }
+    }
+
+    /// Moves the bar to another window without resetting it (a Finder search keeps going when the
+    /// user switches Finder windows).
+    func retarget(to element: AXUIElement) {
+        pickerElement = element
+        fallbackFrame = AX.frame(element)
+        sidebar = nil
+        sidebarLookups = 0
+        reposition()
     }
 
     /// Puts the cursor in "Tell Likely what you're looking for…" once the picker has finished
