@@ -80,14 +80,23 @@ final class PickerHUD {
         if !finder { focusFieldSoon(for: element) }
     }
 
-    /// Moves the bar to another window without resetting it (a Finder search keeps going when the
-    /// user switches Finder windows).
-    func retarget(to element: AXUIElement) {
+    /// Hides the bar but keeps what it shows (a Finder session while Quick Look or Get Info is in front).
+    func suspend() {
+        trackTimer?.invalidate()
+        trackTimer = nil
+        panel.orderOut(nil)
+    }
+
+    /// Shows the bar again over `element` (the same or another Finder window) without resetting it.
+    func resume(attachedTo element: AXUIElement) {
         pickerElement = element
         fallbackFrame = AX.frame(element)
         sidebar = nil
         sidebarLookups = 0
-        reposition()
+        guard reposition() else { return }
+        panel.orderFrontRegardless()
+        trackTimer?.invalidate()
+        trackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.reposition() }
     }
 
     /// Puts the cursor in "Tell Likely what you're looking for…" once the picker has finished
@@ -133,7 +142,8 @@ final class PickerHUD {
         var y = flippedTop + Self.gap
         if y + height > visible.maxY {
             y = flippedBottom - Self.gap - height
-            if y < visible.minY { y = insideBottom ? flippedBottom + Self.gap : flippedTop - Self.gap - height }
+            // Inside the bottom edge, kept above the Dock and on screen.
+            if y < visible.minY { y = insideBottom ? max(flippedBottom, visible.minY) + Self.gap : flippedTop - Self.gap - height }
         }
         let x = min(max(left, visible.minX), visible.maxX - width)
         let frame = NSRect(x: x, y: y, width: width, height: height)

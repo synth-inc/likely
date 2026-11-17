@@ -85,6 +85,11 @@ final class LikelyFolder {
     /// How long copies stay after their picker closed.
     static let keepAfterClose: TimeInterval = 10 * 60
 
+    /// Suggestions are symlinks to the original files instead of copies (a search from a Finder
+    /// window: what the user opens there, and edits, must be the real file, not a copy that's later
+    /// removed). Folders are still copied. Set per search, on the main thread.
+    var linksInsteadOfCopies = false
+
     var count: Int { added.count }
 
     /// Heads the recent files. Its Date Added is set newer than theirs, so it's on top by Date Added.
@@ -271,7 +276,7 @@ final class LikelyFolder {
         pending.insert(source.path)
         let ticket = epoch
         let copier = Copier(likelyURL: likelyURL, home: home, supportPath: Self.supportPath,
-                            isCurrent: { [weak self] in self?.epoch == ticket })
+                            isCurrent: { [weak self] in self?.epoch == ticket }, link: linksInsteadOfCopies)
         copyQueue.async { [weak self] in
             let made = (copier.isCurrent() ? copier.copy(source) : nil).flatMap(Made.init)
             let kept = made.map { self?.stage($0, ticket: ticket, recent: false) == true } ?? false
@@ -492,6 +497,8 @@ extension LikelyFolder {
         let home: String
         let supportPath: String
         let isCurrent: () -> Bool
+        /// Link files and packages to their originals instead of cloning them (`linksInsteadOfCopies`).
+        var link = false
 
         private var fm: FileManager { .default }
 
@@ -512,6 +519,13 @@ extension LikelyFolder {
             guard item.isRegular || item.isDirectory else {
                 Log.write("likely", "skip non-regular file \(path: source)")
                 return nil
+            }
+            if link {
+                // To the checked real path of what was opened, never to the path as the agent wrote it.
+                guard let destination = makeLink(to: item.realPath, name: source.lastPathComponent) else { return nil }
+                Self.copyDateAdded(from: URL(fileURLWithPath: item.realPath), to: destination)
+                Log.write("likely", "linked \(path: source)")
+                return destination
             }
             guard let destination = clone(item, toFolder: likelyURL, name: source.lastPathComponent) else { return nil }
             Self.copyDateAdded(from: URL(fileURLWithPath: item.realPath), to: destination)
@@ -629,6 +643,19 @@ extension LikelyFolder {
                 if copyError != EEXIST, item.isDirectory { try? fm.removeItem(at: destination) }
                 return nil
             }
+        }
+
+        /// A symlink in the Likely folder to `target`, named like it ("Report 2.pdf" if taken).
+        private func makeLink(to target: String, name: String) -> URL? {
+            for attempt in 1..<1000 {
+                let destination = likelyURL.appendingPathComponent(Self.numbered(name, attempt))
+                if symlink(target, destination.path) == 0 { return Self.tag(destination) }
+                if errno != EEXIST {
+                    Log.write("likely", "couldn't link \(path: name): \(errno: errno)")
+                    return nil
+                }
+            }
+            return nil
         }
 
         private func makeUniqueFolder(named name: String) -> URL? {
