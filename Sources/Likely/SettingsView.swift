@@ -87,6 +87,7 @@ private struct DebugSettings: View {
 private struct GeneralSettings: View {
     let actions: SettingsActions
     @AppStorage("openToLikely") private var openToLikely = true
+    @AppStorage("showInFinder") private var showInFinder = true
     /// LogDetailsSwitch's expiry (seconds since 1970), 0 when off.
     @AppStorage(LogDetailsSwitch.defaultsKey) private var logDetailsUntil: Double = 0
     @AppStorage("showRecentFiles") private var showRecentFiles = true
@@ -156,6 +157,12 @@ private struct GeneralSettings: View {
                 Stepper("Recent files: \(recentFileCount)", value: $recentFileCount, in: Settings.recentFileCountRange)
                     .disabled(!showRecentFiles)
                 Text("Your newest downloads, screenshots and saved files, ready in the Likely folder under …Recent…. Likely searches with your agent when you type in the bar above the picker.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Finder windows") {
+                Toggle("Show the Likely bar above Finder windows", isOn: $showInFinder)
+                Text(showInFinder ? "Click the bar to search. The window jumps to the Likely folder only when you search."
+                     : "The bar only appears above file pickers.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if Updater.isEnabled { UpdatesSection() }

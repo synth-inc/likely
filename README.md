@@ -17,6 +17,11 @@ place of the recent files. Not it? Say so, and it keeps looking. The agent runs 
 A file named `…<what the agent is doing>…` sits at the top of the folder as a live progress report.
 The copies stay until the next picker opens (or 10 minutes after you close one), so apps that read the file later still find it.
 
+**Finder windows.** The bar also sits above the Finder window in front (Settings → General → Finder windows).
+Click it to search; the window switches to the Likely folder only when you do, and nothing is copied or
+cleared before that. Results found from Finder are aliases to the originals (with their thumbnails) rather than copies, so a file you
+open and edit there is the real one. A search keeps running if you switch to another app, and its results are there when you come back. With no room above or below a window (snapped to full height), the bar sits inside its bottom edge.
+
 **Recent files.** Often the file you want is the one you just downloaded, saved or screenshotted, so the
 moment a picker opens Likely clones the 3 files with the newest Date Added in your search folders into the
 folder, under a ` …Recent…` header (the leading space puts it on top by name; it's also newest by Date
@@ -65,6 +70,8 @@ scripts/release.sh             # same, then tag vX.Y.Z, GitHub Release with Like
   `AXIdentifier` `open-panel` (Chrome: `AXSheetCreated`; TextEdit: `AXFocusedWindowChanged` /
   `AXWindowCreated`) and the sandboxed system dialog is `OpenPanel`. Button/browser heuristics are the fallback.
 - **Close**: `AXUIElementDestroyed` on the panel, plus a poll for the panel's frame disappearing.
+- **Finder windows**: Finder's focused window with `AXIdentifier` `FinderWindow` while Finder is frontmost. Searching
+  performs `AXOpen` on the sidebar's Likely row (selecting the row, which is how pickers get there, doesn't navigate in Finder).
 - **Context**: the app's name, the title of the window behind the picker and the picker's button title,
   all read through Accessibility. Likely takes no screenshots and doesn't need Screen Recording.
 - **Recent files** (`RecentFiles`, `LikelyFolder.showRecent`): a synchronous `MDQuery` sorted by

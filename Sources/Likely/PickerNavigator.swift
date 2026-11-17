@@ -1,16 +1,18 @@
 import ApplicationServices
 import Foundation
 
-/// Points an open picker at ~/Likely by selecting the "Likely" row in its sidebar, which only exists
-/// if the user pinned the folder (onboarding step 3).
+/// Points an open picker (or a Finder window) at ~/Likely through the "Likely" row in its sidebar,
+/// which only exists if the user pinned the folder (onboarding step 3). Pickers go there when the row
+/// is selected; Finder only selects it, so Finder windows get the row's AXOpen action instead.
 enum PickerNavigator {
     /// Retries for a couple of seconds: the sidebar is often populated after the window appears.
     /// `onResult` gets a one-line outcome, e.g. for the Debug View, and whether it gave up because the
     /// picker had no sidebar yet (worth trying again later, unlike a sidebar without the Likely row).
-    static func selectLikelyInSidebar(of window: AXUIElement, attempt: Int = 0, isCurrent: @escaping () -> Bool,
+    static func selectLikelyInSidebar(of window: AXUIElement, finder: Bool = false, attempt: Int = 0,
+                                      isCurrent: @escaping () -> Bool,
                                       onResult: ((_ outcome: String, _ noSidebar: Bool) -> Void)? = nil) {
         guard isCurrent(), AX.isAlive(window) else { return }
-        switch trySelect(in: window) {
+        switch trySelect(in: window, finder: finder) {
         case .selected:
             Log.write("navigate", "selected \(path: folderName) in sidebar")
             onResult?("selected \"\(folderName)\"", false)
@@ -24,7 +26,7 @@ enum PickerNavigator {
                 return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                selectLikelyInSidebar(of: window, attempt: attempt + 1, isCurrent: isCurrent, onResult: onResult)
+                selectLikelyInSidebar(of: window, finder: finder, attempt: attempt + 1, isCurrent: isCurrent, onResult: onResult)
             }
         }
     }
@@ -33,13 +35,19 @@ enum PickerNavigator {
 
     private static var folderName: String { LikelyFolder.url.lastPathComponent }
 
-    private static func trySelect(in window: AXUIElement) -> Outcome {
+    private static func trySelect(in window: AXUIElement, finder: Bool) -> Outcome {
         guard let sidebar = findSidebar(in: window) else { return .notFound("no sidebar", noSidebar: true) }
         let rows = AX.elements(sidebar, kAXRowsAttribute)
         guard let row = rows.first(where: { rowTitle($0) == folderName }) else {
             return .notFound("no Likely folder row among \(rows.count)")
         }
+        // Finder's sidebar selection follows the window's location: selected means already there.
         if (AX.value(row, kAXSelectedAttribute) as? Bool) == true { return .alreadySelected }
+        if finder {
+            guard let cell = AX.elements(row, kAXChildrenAttribute).first else { return .notFound("no cell in the Likely row") }
+            let err = AXUIElementPerformAction(cell, "AXOpen" as CFString)
+            return err == .success ? .selected : .notFound("open failed (\(err.rawValue))")
+        }
         let err = AXUIElementSetAttributeValue(row, kAXSelectedAttribute as CFString, kCFBooleanTrue)
         return err == .success ? .selected : .notFound("select failed (\(err.rawValue))")
     }

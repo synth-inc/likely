@@ -16,7 +16,13 @@ final class Coordinator {
         var buttonTitle: String?
         let source: String
         /// Title of the window behind the picker, read via Accessibility (no Screen Recording needed).
+        /// For a Finder window, its own title (the folder it shows).
         var windowTitle: String?
+        var kind = Kind.picker
+
+        /// A file picker, or a Finder window (Settings → "Show the bar in Finder windows").
+        enum Kind { case picker, finder }
+        var isFinder: Bool { kind == .finder }
     }
 
     /// Whether the user has started a search for this picker (nothing searches before they type).
@@ -55,6 +61,10 @@ final class Coordinator {
     private var cleanupTimer: Timer?
     private var seenOnScreen = false
     private var missedPolls = 0
+    /// Polls in a row that found Finder not frontmost (a Finder session; see `pollForClose`).
+    private var finderBackgroundPolls = 0
+    /// A Finder session whose bar is hidden while Quick Look, Get Info or a dialog has the focus.
+    private var finderSuspended = false
     private var foundCount = 0
     private var generation = 0
     private var debugRun: DebugRun?
@@ -159,9 +169,10 @@ final class Coordinator {
 
     private func handleAXEvent(pid: pid_t, notification: String, element: AXUIElement) {
         if notification == kAXUIElementDestroyedNotification, let picker = active?.element, CFEqual(picker, element) {
-            pickerClosed(reason: "AXUIElementDestroyed")
+            sessionWindowGone(reason: "AXUIElementDestroyed")
             return
         }
+        if Self.isFinder(pid), handleFinderEvent(pid: pid, notification: notification, element: element) { return }
         guard Self.windowEvents.contains(notification) else { return }
 
         var window = element
@@ -199,6 +210,111 @@ final class Coordinator {
         }
     }
 
+    // MARK: Finder windows
+
+    static let finderBundleID = "com.apple.finder"
+
+    static func isFinder(_ pid: pid_t) -> Bool {
+        NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == finderBundleID
+    }
+
+    /// A Finder browser window (not the desktop, Get Info or a progress window).
+    static func isFinderBrowser(_ window: AXUIElement) -> Bool {
+        guard AX.string(window, kAXRoleAttribute) == kAXWindowRole else { return false }
+        if AX.string(window, kAXIdentifierAttribute) == "FinderWindow" { return true }
+        return AX.string(window, kAXSubroleAttribute) == kAXStandardWindowSubrole
+            && AX.elements(window, kAXChildrenAttribute).contains { AX.string($0, kAXRoleAttribute) == kAXToolbarRole }
+    }
+
+    /// The bar follows Finder's focused browser window while Finder is in front, and goes when Finder
+    /// does. Returns true if the event was Finder business (false: picker detection gets a look).
+    private func handleFinderEvent(pid: pid_t, notification: String, element: AXUIElement) -> Bool {
+        guard Settings.showInFinder else { return false }
+        if notification == kAXApplicationDeactivatedNotification {
+            if active?.isFinder == true { finderWentToBackground() }
+            return true
+        }
+        let activated = notification == kAXApplicationActivatedNotification
+        guard Self.windowEvents.contains(notification) || activated else { return false }
+        // Finder windows that open in the background (a copy, an AirDrop) aren't for the bar.
+        // Activation can arrive before NSWorkspace knows Finder is in front, so it counts as in front.
+        guard activated || NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+        // Only the focused window counts: windows can be created behind others.
+        guard let focused = AX.element(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute) else {
+            suspendFinderSession()
+            return activated
+        }
+        if Self.isFinderBrowser(focused) {
+            finderWindowFocused(focused, pid: pid, via: notification)
+            return true
+        }
+        // The desktop, Quick Look, Get Info, a dialog or sheet: the bar steps aside, and the session
+        // (with any search and what was typed) waits for a Finder window to come back. A sheet still
+        // gets picker detection below.
+        suspendFinderSession()
+        return activated
+    }
+
+    /// Finder left the front. A session that searched waits, hidden, so its search keeps going and
+    /// its results are still there when the user comes back; one that didn't just ends.
+    private func finderWentToBackground() {
+        if searchStarted {
+            suspendFinderSession()
+        } else {
+            pickerClosed(reason: "Finder in the background")
+        }
+    }
+
+    private func suspendFinderSession() {
+        guard active?.isFinder == true, !finderSuspended else { return }
+        finderSuspended = true
+        hud.suspend()
+        Log.write("picker", "Finder bar hidden (no Finder window in front)")
+    }
+
+    private func finderWindowFocused(_ window: AXUIElement, pid: pid_t, via notification: String) {
+        if let active, active.isFinder {
+            let wasSuspended = finderSuspended
+            finderSuspended = false
+            if let current = active.element, CFEqual(current, window) {
+                if wasSuspended { hud.resume(attachedTo: window) }
+                return
+            }
+            // Another Finder window: the bar (and any search) moves with the user.
+            retargetFinderSession(to: window)
+            return
+        }
+        // A picker that's still open (the user went to Finder to look for something) keeps its bar.
+        if let active, let element = active.element, AX.isAlive(element) { return }
+        Log.write("detect", "Finder \(meta: notification) \(AX.describe(window)) → FINDER WINDOW")
+        let picker = Picker(pid: pid, appName: "Finder", element: window, cgWindowID: nil, frame: AX.frame(window),
+                            buttonTitle: nil, source: "finder:\(notification)",
+                            windowTitle: AX.string(window, kAXTitleAttribute), kind: .finder)
+        pickerOpened(picker)
+        axWatcher.watchDestruction(of: window)
+    }
+
+    private func retargetFinderSession(to window: AXUIElement) {
+        active?.element = window
+        active?.frame = AX.frame(window)
+        seenOnScreen = false
+        missedPolls = 0
+        if !finderSuspended { hud.resume(attachedTo: window) }
+        axWatcher.watchDestruction(of: window)
+        Log.write("picker", "Finder bar moved to \(AX.describe(window))")
+    }
+
+    /// The session's window closed or left the screen. A Finder session moves to Finder's next window
+    /// (Cmd-W can report the old window gone before focus moves), so its search keeps going.
+    private func sessionWindowGone(reason: String) {
+        if let picker = active, picker.isFinder,
+           let focused = AX.element(AXUIElementCreateApplication(picker.pid), kAXFocusedWindowAttribute),
+           Self.isFinderBrowser(focused), !(picker.element.map { CFEqual($0, focused) } ?? false) {
+            return retargetFinderSession(to: focused)
+        }
+        pickerClosed(reason: reason)
+    }
+
     private func handlePanelServiceWindow(_ window: WindowInfo) {
         guard window.bounds.width > 300, window.bounds.height > 200,
               let app = NSWorkspace.shared.frontmostApplication,
@@ -224,6 +340,8 @@ final class Coordinator {
         foundCount = 0
         seenOnScreen = false
         missedPolls = 0
+        finderBackgroundPolls = 0
+        finderSuspended = false
         lastPrompt = nil
         pendingFeedback = []
         typedQueries = []
@@ -232,17 +350,21 @@ final class Coordinator {
         navigated = false
         Log.write("picker", "OPENED in \(meta: picker.appName) via \(meta: picker.source) frame=\(picker.frame) title=\(sensitive: picker.windowTitle)")
 
-        // The previous picker's copies were kept for its app; a new picker replaces them.
-        cleanupTimer?.invalidate()
-        cleanupTimer = nil
-        folder.clear()
+        // The previous picker's copies were kept for its app; a new picker replaces them. A Finder
+        // window leaves the folder alone until the user searches (it may be showing the folder).
+        if !picker.isFinder {
+            cleanupTimer?.invalidate()
+            cleanupTimer = nil
+            folder.clear()
+            folder.aliasesInsteadOfCopies = false
+        }
         closeTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.pollForClose() }
 
         guard isLicensed() else {
             // Unpaid: the bar explains and offers the license page; nothing is searched or copied.
             Log.write("picker", "license inactive, showing the unpaid bar")
             debugRun = nil
-            hud.show(attachedTo: picker.element, fallbackFrame: picker.frame)
+            hud.show(attachedTo: picker.element, fallbackFrame: picker.frame, finder: picker.isFinder)
             hud.model.mode = .unpaid
             onStateChange?(.idle, "Inactive · Get Likely")
             return
@@ -255,10 +377,15 @@ final class Coordinator {
         debugRun.log("Picker opened, window title: \(picker.windowTitle ?? "-")")
         // Read the pick (Accessibility, the picker's selection) only for automatic tests or search
         // history; with both off, PickTracker never starts.
-        if EvalCapture.isEnabled || SearchHistoryStore.isEnabled { pickTracker.begin(window: picker.element, pid: picker.pid) }
-        showRecentFiles(debugRun: debugRun)
-        if Settings.openToLikely { navigateToLikely(reason: "picker opened") }
-        hud.show(attachedTo: picker.element, fallbackFrame: picker.frame)
+        // Finder windows: no pick to read, no recent files, and no jump until the user searches
+        // ("Jump to the Likely folder when a picker opens" is for pickers).
+        if !picker.isFinder {
+            if EvalCapture.isEnabled || SearchHistoryStore.isEnabled { pickTracker.begin(window: picker.element, pid: picker.pid) }
+            showRecentFiles(debugRun: debugRun)
+            if Settings.openToLikely { navigateToLikely(reason: "picker opened") }
+        }
+        // In Finder, keys stay with Finder until the user clicks the bar.
+        hud.show(attachedTo: picker.element, fallbackFrame: picker.frame, finder: picker.isFinder)
         if SearchHistoryStore.shared.takeHUDNotice() { hud.model.notice = SearchHistoryStore.notice }
         // Nothing runs until the user describes the file in the bar; the empty field and its placeholder say it.
         hud.model.status = ""
@@ -288,10 +415,22 @@ final class Coordinator {
         navigated = true
         let generation = generation
         let debugRun = debugRun
+        let finder = active?.isFinder == true
         debugRun?.log("Jumping to the Likely folder (\(reason))")
-        PickerNavigator.selectLikelyInSidebar(of: window, isCurrent: { [weak self] in self?.generation == generation && self?.active != nil },
+        PickerNavigator.selectLikelyInSidebar(of: window, finder: finder,
+                                              isCurrent: { [weak self] in
+            // Same picker, and (a Finder session can move between windows) still on this window.
+            guard let self, self.generation == generation, let current = self.active?.element else { return false }
+            return CFEqual(current, window)
+        },
                                               onResult: { [weak self] outcome, noSidebar in
             debugRun?.log("Sidebar: \(outcome)")
+            // Finder without the Likely row (not pinned, sidebar hidden): open the folder instead.
+            // Its window takes focus and the bar moves to it.
+            if finder, outcome.hasPrefix("gave up") {
+                NSWorkspace.shared.open(LikelyFolder.url)
+                return
+            }
             // The sidebar wasn't there (yet): try again when the user submits a search.
             if noSidebar, let self, self.generation == generation { self.navigated = false }
         })
@@ -309,8 +448,9 @@ final class Coordinator {
         recordHistory(picker, picked: pick.picked, how: pick.how)
         // Keep the copies: the app that opened the picker often reads the file after it closes
         // (browsers upload it, Mail attaches it). They go when the next picker opens or after a while.
-        folder.release()
-        if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) }
+        // A Finder session that never searched didn't touch the folder: its keep time runs on.
+        if !picker.isFinder || searchStarted { folder.release() }
+        if let remaining = folder.remainingKeepTime { scheduleCleanup(after: remaining) } else { folder.clearIfExpired() }
         debugRun?.closedReason = reason
         Log.write("picker", "CLOSED in \(meta: picker.appName) (\(meta: reason))")
         onStateChange?(.idle, isLicensed() ? "Watching for file pickers" : "Inactive · Get Likely")
@@ -320,9 +460,20 @@ final class Coordinator {
     /// so also poll: the picker is closed once its frame no longer matches any on-screen window.
     private func pollForClose() {
         guard let picker = active else { return }
+        if picker.isFinder {
+            if !Settings.showInFinder { return pickerClosed(reason: "Finder windows turned off") }
+            // Two polls in a row: activation can reach Likely before NSWorkspace knows Finder is in front.
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Self.finderBundleID {
+                finderBackgroundPolls += 1
+                if finderBackgroundPolls == 2 { finderWentToBackground() }
+                if active == nil { return }
+            } else {
+                finderBackgroundPolls = 0
+            }
+        }
         pickTracker.poll()
         if let element = picker.element, !AX.isAlive(element) {
-            pickerClosed(reason: "element gone")
+            sessionWindowGone(reason: "element gone")
             return
         }
         let frame = picker.element.flatMap(AX.frame) ?? picker.frame
@@ -340,7 +491,7 @@ final class Coordinator {
             missedPolls = 0
         } else if seenOnScreen {
             missedPolls += 1
-            if missedPolls >= 2 { pickerClosed(reason: "no longer on screen") }
+            if missedPolls >= 2 { sessionWindowGone(reason: "no longer on screen") }
         }
     }
 
@@ -518,14 +669,28 @@ final class Coordinator {
             debugRun?.queries.append(text)
             debugRun?.log("You: \(text)")
             Log.write("feedback", "request: \(text.count) chars \(sensitive: text)")
-            // The results replace the recent files rather than mixing with them.
-            folder.clearRecent()
+            if picker.isFinder {
+                // Nothing was cleared when the Finder window came up: the last picker's copies go now.
+                cleanupTimer?.invalidate()
+                cleanupTimer = nil
+                folder.clear()
+                // Results here get opened and edited in place: aliases to the originals, not copies.
+                folder.aliasesInsteadOfCopies = true
+            } else {
+                // The results replace the recent files rather than mixing with them.
+                folder.clearRecent()
+            }
             folder.setStatus("Looking for \(text)")
             navigateToLikely(reason: "search submitted")
             hud.model.status = "Looking for \"\(text)\""
             hud.model.working = true
             onStateChange?(.searching, "Searching")
-            launchAgent(picker: picker)
+            if picker.isFinder, let window = picker.element {
+                // The folder on show now, not when the bar came up.
+                active?.windowTitle = AX.string(window, kAXTitleAttribute)
+                debugRun?.windowTitle = active?.windowTitle
+            }
+            launchAgent(picker: active ?? picker)
             return
         }
         let rejected = folder.suggestedSources
@@ -566,7 +731,7 @@ final class Coordinator {
 
     static func prompt(picker: Picker, agentID: String) -> String {
         PromptBuilder.initial(PromptBuilder.Context(appName: picker.appName, windowTitle: picker.windowTitle,
-                                                    buttonTitle: picker.buttonTitle,
+                                                    buttonTitle: picker.buttonTitle, inFinder: picker.isFinder,
                                                     userName: Settings.includeUserName ? NSFullUserName() : nil,
                                                     agentID: agentID))
     }
@@ -579,6 +744,8 @@ enum PromptBuilder {
         var appName: String
         var windowTitle: String?
         var buttonTitle: String?
+        /// Searching from a Finder window rather than a file picker.
+        var inFinder = false
         /// Filled into `{{userName}}`. The app passes NSFullUserName() (if allowed in Settings); evals
         /// pass the case's persona or nil, never the real user's name.
         var userName: String?
@@ -592,8 +759,14 @@ enum PromptBuilder {
 
     /// The first message: the prompt template filled in for this picker.
     static func initial(_ c: Context, template: String = Settings.promptTemplate) -> String {
-        var context = "The user just opened a file picker (Open dialog) in \(c.appName)."
-        if let title = c.windowTitle, !title.isEmpty { context += " The window behind it is titled \"\(title)\"." }
+        var context: String
+        if c.inFinder {
+            context = "The user is looking for a file from a Finder window (not a file picker)."
+            if let title = c.windowTitle, !title.isEmpty { context += " The window is showing \"\(title)\"." }
+        } else {
+            context = "The user just opened a file picker (Open dialog) in \(c.appName)."
+            if let title = c.windowTitle, !title.isEmpty { context += " The window behind it is titled \"\(title)\"." }
+        }
         if let button = c.buttonTitle { context += " The picker's confirm button says \"\(button)\"." }
         let name = c.userName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // The tools section goes where {{tools}} is, or at the end of templates that don't have it.
@@ -722,6 +895,11 @@ enum Settings {
     static var openToLikely: Bool {
         get { UserDefaults.standard.object(forKey: "openToLikely") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "openToLikely") }
+    }
+    /// Show the bar above Finder windows too, not just file pickers.
+    static var showInFinder: Bool {
+        get { UserDefaults.standard.object(forKey: "showInFinder") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showInFinder") }
     }
     static var onboarded: Bool {
         // New key for the OnboardingKit flow, so people who saw the old setup window see it once.
