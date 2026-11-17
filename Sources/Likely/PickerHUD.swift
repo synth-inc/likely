@@ -33,6 +33,9 @@ final class PickerHUD {
     private var trackTimer: Timer?
     private var pickerElement: AXUIElement?
     private var fallbackFrame: CGRect?
+    /// With no room above or below the window, sit inside its bottom edge instead of its top (Finder
+    /// windows: the top is the toolbar; the bottom only covers files you can scroll past).
+    private var insideBottom = false
     private var sidebar: AXUIElement?
     private var sidebarLookups = 0
     private static let height: CGFloat = 44
@@ -54,11 +57,13 @@ final class PickerHUD {
         panel.contentView = NSHostingView(rootView: HUDView(model: model) { [weak self] in self?.returnFocusToPicker() })
     }
 
-    /// `focusField`: put the cursor in the bar once the picker has animated in. Off for Finder
-    /// windows, where keys must keep going to Finder until the user clicks the bar.
-    func show(attachedTo element: AXUIElement?, fallbackFrame: CGRect?, focusField: Bool = true) {
+    /// `finder`: a Finder window rather than a picker. The cursor stays with Finder until the user
+    /// clicks the bar (a picker's bar takes it once the picker has animated in), and a window with no
+    /// room above or below (snapped, full height) gets the bar inside its bottom edge.
+    func show(attachedTo element: AXUIElement?, fallbackFrame: CGRect?, finder: Bool = false) {
         pickerElement = element
         self.fallbackFrame = fallbackFrame
+        insideBottom = finder
         sidebar = nil
         sidebarLookups = 0
         model.mode = .normal
@@ -72,7 +77,7 @@ final class PickerHUD {
         panel.orderFrontRegardless()
         trackTimer?.invalidate()
         trackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.reposition() }
-        if focusField { focusFieldSoon(for: element) }
+        if !finder { focusFieldSoon(for: element) }
     }
 
     /// Moves the bar to another window without resetting it (a Finder search keeps going when the
@@ -122,12 +127,13 @@ final class PickerHUD {
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: picker.midX, y: flippedBottom + picker.height / 2)) } ?? primary
         let visible = screen.visibleFrame
 
-        // Prefer just above the picker; if that runs off-screen, go below it; failing both, overlap its top edge.
+        // Prefer just above the picker; if that runs off-screen, go below it; failing both, overlap its
+        // top edge (a Finder window: its bottom edge).
         let height = currentHeight
         var y = flippedTop + Self.gap
         if y + height > visible.maxY {
             y = flippedBottom - Self.gap - height
-            if y < visible.minY { y = flippedTop - Self.gap - height }
+            if y < visible.minY { y = insideBottom ? flippedBottom + Self.gap : flippedTop - Self.gap - height }
         }
         let x = min(max(left, visible.minX), visible.maxX - width)
         let frame = NSRect(x: x, y: y, width: width, height: height)

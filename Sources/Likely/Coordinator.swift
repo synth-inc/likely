@@ -316,7 +316,7 @@ final class Coordinator {
             // Unpaid: the bar explains and offers the license page; nothing is searched or copied.
             Log.write("picker", "license inactive, showing the unpaid bar")
             debugRun = nil
-            hud.show(attachedTo: picker.element, fallbackFrame: picker.frame, focusField: !picker.isFinder)
+            hud.show(attachedTo: picker.element, fallbackFrame: picker.frame, finder: picker.isFinder)
             hud.model.mode = .unpaid
             onStateChange?(.idle, "Inactive · Get Likely")
             return
@@ -337,7 +337,7 @@ final class Coordinator {
             if Settings.openToLikely { navigateToLikely(reason: "picker opened") }
         }
         // In Finder, keys stay with Finder until the user clicks the bar.
-        hud.show(attachedTo: picker.element, fallbackFrame: picker.frame, focusField: !picker.isFinder)
+        hud.show(attachedTo: picker.element, fallbackFrame: picker.frame, finder: picker.isFinder)
         if SearchHistoryStore.shared.takeHUDNotice() { hud.model.notice = SearchHistoryStore.notice }
         // Nothing runs until the user describes the file in the bar; the empty field and its placeholder say it.
         hud.model.status = ""
