@@ -231,7 +231,7 @@ final class Coordinator {
     private func handleFinderEvent(pid: pid_t, notification: String, element: AXUIElement) -> Bool {
         guard Settings.showInFinder else { return false }
         if notification == kAXApplicationDeactivatedNotification {
-            if active?.isFinder == true { pickerClosed(reason: "Finder in the background") }
+            if active?.isFinder == true { finderWentToBackground() }
             return true
         }
         let activated = notification == kAXApplicationActivatedNotification
@@ -253,6 +253,16 @@ final class Coordinator {
         // gets picker detection below.
         suspendFinderSession()
         return activated
+    }
+
+    /// Finder left the front. A session that searched waits, hidden, so its search keeps going and
+    /// its results are still there when the user comes back; one that didn't just ends.
+    private func finderWentToBackground() {
+        if searchStarted {
+            suspendFinderSession()
+        } else {
+            pickerClosed(reason: "Finder in the background")
+        }
     }
 
     private func suspendFinderSession() {
@@ -289,7 +299,7 @@ final class Coordinator {
         active?.frame = AX.frame(window)
         seenOnScreen = false
         missedPolls = 0
-        hud.resume(attachedTo: window)
+        if !finderSuspended { hud.resume(attachedTo: window) }
         axWatcher.watchDestruction(of: window)
         Log.write("picker", "Finder bar moved to \(AX.describe(window))")
     }
@@ -300,7 +310,6 @@ final class Coordinator {
         if let picker = active, picker.isFinder,
            let focused = AX.element(AXUIElementCreateApplication(picker.pid), kAXFocusedWindowAttribute),
            Self.isFinderBrowser(focused), !(picker.element.map { CFEqual($0, focused) } ?? false) {
-            finderSuspended = false
             return retargetFinderSession(to: focused)
         }
         pickerClosed(reason: reason)
@@ -347,7 +356,7 @@ final class Coordinator {
             cleanupTimer?.invalidate()
             cleanupTimer = nil
             folder.clear()
-            folder.linksInsteadOfCopies = false
+            folder.aliasesInsteadOfCopies = false
         }
         closeTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.pollForClose() }
 
@@ -456,7 +465,8 @@ final class Coordinator {
             // Two polls in a row: activation can reach Likely before NSWorkspace knows Finder is in front.
             if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Self.finderBundleID {
                 finderBackgroundPolls += 1
-                if finderBackgroundPolls >= 2 { return pickerClosed(reason: "Finder in the background") }
+                if finderBackgroundPolls == 2 { finderWentToBackground() }
+                if active == nil { return }
             } else {
                 finderBackgroundPolls = 0
             }
@@ -664,8 +674,8 @@ final class Coordinator {
                 cleanupTimer?.invalidate()
                 cleanupTimer = nil
                 folder.clear()
-                // Results here get opened and edited in place: links to the originals, not copies.
-                folder.linksInsteadOfCopies = true
+                // Results here get opened and edited in place: aliases to the originals, not copies.
+                folder.aliasesInsteadOfCopies = true
             } else {
                 // The results replace the recent files rather than mixing with them.
                 folder.clearRecent()

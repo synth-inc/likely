@@ -19,8 +19,8 @@ The copies stay until the next picker opens (or 10 minutes after you close one),
 
 **Finder windows.** The bar also sits above the Finder window in front (Settings → General → Finder windows).
 Click it to search; the window switches to the Likely folder only when you do, and nothing is copied or
-cleared before that. Results found from Finder are links to the originals rather than copies, so a file you
-open and edit there is the real one. With no room above or below a window (snapped to full height), the bar sits inside its bottom edge.
+cleared before that. Results found from Finder are aliases to the originals (with their thumbnails) rather than copies, so a file you
+open and edit there is the real one. A search keeps running if you switch to another app, and its results are there when you come back. With no room above or below a window (snapped to full height), the bar sits inside its bottom edge.
 
 **Recent files.** Often the file you want is the one you just downloaded, saved or screenshotted, so the
 moment a picker opens Likely clones the 3 files with the newest Date Added in your search folders into the

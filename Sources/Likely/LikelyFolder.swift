@@ -1,4 +1,5 @@
 import AppKit
+import QuickLookThumbnailing
 import LikelyStorage
 import LikelyTools
 
@@ -85,10 +86,11 @@ final class LikelyFolder {
     /// How long copies stay after their picker closed.
     static let keepAfterClose: TimeInterval = 10 * 60
 
-    /// Suggestions are symlinks to the original files instead of copies (a search from a Finder
+    /// Suggestions are Finder aliases to the original files instead of copies (a search from a Finder
     /// window: what the user opens there, and edits, must be the real file, not a copy that's later
-    /// removed). Folders are still copied. Set per search, on the main thread.
-    var linksInsteadOfCopies = false
+    /// removed). Aliases, not symlinks: Finder shows no preview for a symlink, and an alias can carry
+    /// the original's thumbnail as its own icon. Folders are still copied. Set per search, on the main thread.
+    var aliasesInsteadOfCopies = false
 
     var count: Int { added.count }
 
@@ -276,7 +278,7 @@ final class LikelyFolder {
         pending.insert(source.path)
         let ticket = epoch
         let copier = Copier(likelyURL: likelyURL, home: home, supportPath: Self.supportPath,
-                            isCurrent: { [weak self] in self?.epoch == ticket }, link: linksInsteadOfCopies)
+                            isCurrent: { [weak self] in self?.epoch == ticket }, alias: aliasesInsteadOfCopies)
         copyQueue.async { [weak self] in
             let made = (copier.isCurrent() ? copier.copy(source) : nil).flatMap(Made.init)
             let kept = made.map { self?.stage($0, ticket: ticket, recent: false) == true } ?? false
@@ -497,8 +499,8 @@ extension LikelyFolder {
         let home: String
         let supportPath: String
         let isCurrent: () -> Bool
-        /// Link files and packages to their originals instead of cloning them (`linksInsteadOfCopies`).
-        var link = false
+        /// Alias files and packages to their originals instead of cloning them (`aliasesInsteadOfCopies`).
+        var alias = false
 
         private var fm: FileManager { .default }
 
@@ -520,11 +522,11 @@ extension LikelyFolder {
                 Log.write("likely", "skip non-regular file \(path: source)")
                 return nil
             }
-            if link {
+            if alias {
                 // To the checked real path of what was opened, never to the path as the agent wrote it.
-                guard let destination = makeLink(to: item.realPath, name: source.lastPathComponent) else { return nil }
+                guard let destination = makeAlias(to: item.realPath, name: source.lastPathComponent) else { return nil }
                 Self.copyDateAdded(from: URL(fileURLWithPath: item.realPath), to: destination)
-                Log.write("likely", "linked \(path: source)")
+                Log.write("likely", "aliased \(path: source)")
                 return destination
             }
             guard let destination = clone(item, toFolder: likelyURL, name: source.lastPathComponent) else { return nil }
@@ -645,17 +647,57 @@ extension LikelyFolder {
             }
         }
 
-        /// A symlink in the Likely folder to `target`, named like it ("Report 2.pdf" if taken).
-        private func makeLink(to target: String, name: String) -> URL? {
+        /// A Finder alias in the Likely folder to `target`, named like it ("Report 2.pdf" if taken),
+        /// with the target's thumbnail as its icon.
+        private func makeAlias(to target: String, name: String) -> URL? {
+            let targetURL = URL(fileURLWithPath: target)
+            let bookmark: Data
+            do {
+                bookmark = try targetURL.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil)
+            } catch {
+                Log.write("likely", "couldn't make an alias to \(path: target): \(error: error)")
+                return nil
+            }
             for attempt in 1..<1000 {
                 let destination = likelyURL.appendingPathComponent(Self.numbered(name, attempt))
-                if symlink(target, destination.path) == 0 { return Self.tag(destination) }
-                if errno != EEXIST {
-                    Log.write("likely", "couldn't link \(path: name): \(errno: errno)")
+                // Claim the name first (O_EXCL, never through a symlink), then write the alias into it.
+                let fd = open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
+                if fd < 0 {
+                    if errno == EEXIST { continue }
+                    Log.write("likely", "couldn't create \(path: name): \(errno: errno)")
                     return nil
                 }
+                close(fd)
+                do {
+                    try URL.writeBookmarkData(bookmark, to: destination)
+                } catch {
+                    unlink(destination.path)
+                    Log.write("likely", "couldn't write the alias \(path: name): \(error: error)")
+                    return nil
+                }
+                Self.setThumbnailIcon(of: targetURL, on: destination)
+                return Self.tag(destination)
             }
             return nil
+        }
+
+        /// The original's Quick Look thumbnail as the alias's custom icon (Finder otherwise shows a
+        /// generic icon). Only ever on the alias file Likely just made, which is a regular file: a
+        /// custom icon set through a symlink would land on the original.
+        private static func setThumbnailIcon(of target: URL, on alias: URL) {
+            var info = stat()
+            guard lstat(alias.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return }
+            let request = QLThumbnailGenerator.Request(fileAt: target, size: CGSize(width: 256, height: 256), scale: 2,
+                                                       representationTypes: .thumbnail)
+            let done = DispatchSemaphore(value: 0)
+            var image: NSImage?
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, _ in
+                image = representation?.nsImage
+                done.signal()
+            }
+            // On the copy queue; a slow thumbnail just means the generic icon.
+            guard done.wait(timeout: .now() + 3) == .success, let image else { return }
+            NSWorkspace.shared.setIcon(image, forFile: alias.path, options: [])
         }
 
         private func makeUniqueFolder(named name: String) -> URL? {
