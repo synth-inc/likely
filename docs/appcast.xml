@@ -6,6 +6,16 @@
         <description>Likely updates</description>
         <language>en</language>
         <item>
+            <title>Version 0.3.0</title>
+            <pubDate>Tue, 17 Nov 2026 21:13:02 GMT</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <link>https://github.com/synth-inc/likely/releases/tag/v0.3.0</link>
+            <description><![CDATA[<p>Likely 0.3.0</p><p>Likely in Finder windows</p><p>- The Likely bar now also appears above the Finder window in front. Click it to search; the window moves to the Likely folder only when you do.</p><p>- Results found from Finder are aliases to the originals, with their previews, so what you open and edit is the real file.</p><p>- A search keeps running if you switch to another app; the results are waiting when you come back to Finder.</p><p>- When a window fills the screen&#x27;s height, the bar sits inside its bottom edge instead of over the toolbar.</p><p>- Turn it off in Settings → General → Finder windows.</p>]]></description>
+            <enclosure url="https://github.com/synth-inc/likely/releases/download/v0.3.0/Likely.dmg" type="application/octet-stream" sparkle:edSignature="9NDBhCNx38KMnsuM/sLRwWWamcYg7YiN9cV1Ijuakq59y3WpV00OrLEh4Xqa7sJ1e9RZeXGbQluMElIM8/7MDQ==" length="4290036"/>
+        </item>
+        <item>
             <title>Version 0.2.1</title>
             <pubDate>Tue, 10 Nov 2026 05:59:21 GMT</pubDate>
             <sparkle:version>3</sparkle:version>
